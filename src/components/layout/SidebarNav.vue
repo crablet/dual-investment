@@ -4,7 +4,6 @@ import {
   Bitcoin,
   ClipboardList,
   Home,
-  PieChart,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -31,11 +30,6 @@ const navItems = [
 
 <template>
   <aside class="sidebar">
-    <div class="traffic-lights">
-      <span class="red" />
-      <span class="yellow" />
-      <span class="green" />
-    </div>
     <nav class="nav-list">
       <button
         v-for="item in navItems"
@@ -49,13 +43,5 @@ const navItems = [
         <span>{{ item.label }}</span>
       </button>
     </nav>
-
-    <div class="mode-card">
-      <NIcon :component="PieChart" />
-      <div>
-        <strong>{{ store.settings?.mode === 'live' ? '实盘模式' : '模拟模式' }}</strong>
-        <span>数据仅供参考</span>
-      </div>
-    </div>
   </aside>
 </template>

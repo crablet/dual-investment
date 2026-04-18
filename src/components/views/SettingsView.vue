@@ -76,21 +76,21 @@ async function exportLogs() {
 
     <Panel title="安全与日志" class="span-4">
       <div class="security-list">
-        <button type="button">
+        <div class="security-action">
           <NIcon :component="Download" />
           <span>导出日志</span>
-          <NButton size="small" secondary @click.stop="exportLogs">导出</NButton>
-        </button>
-        <button type="button">
+          <NButton class="security-action-button" size="small" secondary @click="exportLogs">导出</NButton>
+        </div>
+        <div class="security-action">
           <NIcon :component="Trash2" />
           <span>清除缓存</span>
-          <NButton size="small" secondary>清除</NButton>
-        </button>
-        <button type="button">
+          <NButton class="security-action-button" size="small" secondary>清除</NButton>
+        </div>
+        <div class="security-action">
           <NIcon :component="RefreshCw" />
           <span>检查更新</span>
-          <NButton size="small" secondary>检查</NButton>
-        </button>
+          <NButton class="security-action-button" size="small" secondary>检查</NButton>
+        </div>
       </div>
     </Panel>
   </div>

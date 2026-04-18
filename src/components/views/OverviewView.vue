@@ -14,6 +14,23 @@ const { money } = useFormat()
 
 const activeStrategies = computed(() => store.orders.slice(0, 4))
 const pnlCenter = computed(() => Number(store.pnl?.cumulative ?? 0).toLocaleString('zh-CN'))
+const autoStatusItems = computed(() => [
+  {
+    label: '自动扫描',
+    value: store.autoRule?.enabled ? '已启用' : '已暂停',
+    tone: store.autoRule?.enabled ? 'active' : 'paused',
+  },
+  {
+    label: '快速成交',
+    value: store.settings?.quickExecution ? '已启用' : '未启用',
+    tone: store.settings?.quickExecution ? 'active' : 'paused',
+  },
+  {
+    label: '到期补齐',
+    value: '自动执行',
+    tone: 'neutral',
+  },
+])
 
 function placeCandidate(candidate: StrategyCandidate) {
   void store.placeStrategy({
@@ -74,15 +91,16 @@ function placeCandidate(candidate: StrategyCandidate) {
 
     <Panel title="自动定投状态" class="span-6">
       <div class="auto-state">
-        <div>
+        <div class="auto-scan-card">
           <span>下次扫描时间</span>
           <strong>01:23:45</strong>
           <em>预计 11:30 自动扫描市场</em>
         </div>
-        <div class="switch-summary">
-          <p>自动扫描 <strong>{{ store.autoRule?.enabled ? '已启用' : '已暂停' }}</strong></p>
-          <p>快速成交 <strong>{{ store.settings?.quickExecution ? '已启用' : '未启用' }}</strong></p>
-          <p>到期补齐 <strong>自动执行</strong></p>
+        <div class="auto-status-list">
+          <p v-for="item in autoStatusItems" :key="item.label" class="auto-status-item">
+            <span>{{ item.label }}</span>
+            <strong :class="['auto-status-value', `tone-${item.tone}`]">{{ item.value }}</strong>
+          </p>
         </div>
       </div>
     </Panel>

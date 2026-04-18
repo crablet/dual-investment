@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { darkTheme, NConfigProvider, NDialogProvider, NMessageProvider } from 'naive-ui'
+import type { GlobalThemeOverrides } from 'naive-ui'
 import { computed, defineAsyncComponent, onMounted } from 'vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import { useAppStore } from '@/stores/app'
@@ -22,11 +23,17 @@ const views = {
 
 const currentView = computed(() => views[store.activeView as keyof typeof views] ?? OverviewView)
 
-const themeOverrides = {
+const accentColor = '#f5b625'
+const accentColorHover = '#ffcf55'
+const accentColorPressed = '#c58e14'
+const accentFocusShadow = '0 0 0 2px rgba(245, 182, 37, 0.24)'
+
+const themeOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: '#f5b625',
-    primaryColorHover: '#ffcf55',
-    primaryColorPressed: '#c58e14',
+    primaryColor: accentColor,
+    primaryColorHover: accentColorHover,
+    primaryColorPressed: accentColorPressed,
+    primaryColorSuppl: accentColor,
     bodyColor: '#071017',
     cardColor: '#101922',
     modalColor: '#101922',
@@ -35,6 +42,29 @@ const themeOverrides = {
     textColor1: '#f4f7fb',
     textColor2: '#c5ced9',
     textColor3: '#8d98a6',
+  },
+  Switch: {
+    railColorActive: accentColor,
+    loadingColor: accentColor,
+    boxShadowFocus: accentFocusShadow,
+  },
+  Slider: {
+    fillColor: accentColor,
+    fillColorHover: accentColorHover,
+    dotBorderActive: `2px solid ${accentColor}`,
+    handleBoxShadowFocus: accentFocusShadow,
+  },
+  Checkbox: {
+    colorChecked: accentColor,
+    borderChecked: `1px solid ${accentColor}`,
+    borderFocus: `1px solid ${accentColor}`,
+    checkMarkColor: '#071017',
+    boxShadowFocus: accentFocusShadow,
+  },
+  Progress: {
+    fillColor: accentColor,
+    fillColorInfo: accentColor,
+    fillColorWarning: accentColorHover,
   },
 }
 
