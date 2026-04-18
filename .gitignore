@@ -1,0 +1,29 @@
+node_modules/
+dist/
+coverage/
+.vite/
+
+# Tauri / Rust generated state
+src-tauri/target/
+src-tauri/gen/
+src-tauri/data/
+data/
+
+# Local secrets and machine-specific config
+.env
+.env.*
+
+# Agent/browser debug artifacts
+.playwright-mcp/
+.agents/
+.codex/
+
+# Logs and OS/editor noise
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+.idea/
+.vscode/
