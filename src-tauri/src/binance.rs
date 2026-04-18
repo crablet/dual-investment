@@ -1,5 +1,5 @@
 use chrono::Utc;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use reqwest::{Client, StatusCode};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -151,7 +151,7 @@ impl BinanceClient {
         ));
         params.push(("recvWindow".to_string(), "5000".to_string()));
         let query = encode_query(&params);
-        let mut mac = HmacSha256::new_from_slice(self.api_secret.as_bytes())
+        let mut mac = <HmacSha256 as KeyInit>::new_from_slice(self.api_secret.as_bytes())
             .map_err(|error| AppError::Config(error.to_string()))?;
         mac.update(query.as_bytes());
         let signature = hex::encode(mac.finalize().into_bytes());

@@ -11,27 +11,27 @@ name = "dual_investment_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.6.1", features = [] }
 
 [dependencies]
-anyhow = "1"
-chrono = { version = "0.4", features = ["clock", "serde"] }
-hex = "0.4"
-hmac = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
-rust_decimal = { version = "1", features = ["serde-with-str"] }
-rust_decimal_macros = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-notification = "2"
-tauri-plugin-opener = "2"
-thiserror = "2"
-tokio = { version = "1", features = ["sync", "time"] }
-urlencoding = "2"
-uuid = { version = "1", features = ["v4", "serde"] }
+anyhow = "1.0.102"
+chrono = { version = "0.4.44", features = ["clock", "serde"] }
+hex = "0.4.3"
+hmac = "0.13.0"
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls", "query"] }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+rust_decimal = { version = "1.42.0", features = ["serde-with-str"] }
+rust_decimal_macros = "1.40.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sha2 = "0.11.0"
+tauri = { version = "2.11.1", features = ["tray-icon"] }
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-opener = "2.5.4"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["sync", "time"] }
+urlencoding = "2.1.3"
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
 
 [lints.rust]
 unsafe_code = "warn"

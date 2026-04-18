@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .vite/
+*.tsbuildinfo
 
 # Tauri / Rust generated state
 src-tauri/target/
