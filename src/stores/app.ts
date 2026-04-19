@@ -56,16 +56,25 @@ export const useAppStore = defineStore('app', () => {
   async function connect(request: ConnectBinanceRequest) {
     const next = await run(() => api.connectBinance(request))
     patchSettings(next)
+    if (next?.connected) {
+      await syncLiveState()
+    }
   }
 
   async function connectSaved() {
     const next = await run(() => api.connectSavedBinance())
     patchSettings(next)
+    if (next?.connected) {
+      await syncLiveState()
+    }
   }
 
   async function forgetCredentials() {
     const next = await run(() => api.forgetBinanceCredentials())
     patchSettings(next)
+    if (next) {
+      await refresh()
+    }
   }
 
   async function scan() {
@@ -94,6 +103,14 @@ export const useAppStore = defineStore('app', () => {
     const order = await run(() => api.runAutoOnce())
     if (order && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: [order, ...snapshot.value.orders] }
+      await refresh()
+    }
+  }
+
+  async function recoverAttempt(attemptId: string) {
+    const order = await run(() => api.recoverOrderAttempt(attemptId))
+    if (order && snapshot.value) {
+      snapshot.value = { ...snapshot.value, orders: mergeOrders([order], snapshot.value.orders) }
       await refresh()
     }
   }
@@ -161,6 +178,7 @@ export const useAppStore = defineStore('app', () => {
     syncLiveState,
     runSettlementScan,
     runAutoOnce,
+    recoverAttempt,
     placeStrategy,
     saveRule,
     toggleAuto,

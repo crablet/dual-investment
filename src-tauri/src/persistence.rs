@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 
 use crate::domain::{
-    AppError, AppResult, AuditEvent, OrderAttempt, OrderAttemptStatus, StrategyDirection,
-    StrategyOrder,
+    AppError, AppResult, AuditEvent, AutoInvestmentRule, OrderAttempt, OrderAttemptStatus,
+    StrategyDirection, StrategyOrder,
 };
 
 pub struct Persistence {
@@ -54,6 +54,12 @@ impl Persistence {
                     exchange_order_id TEXT,
                     message TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS auto_rule (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    payload TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
 
@@ -129,6 +135,40 @@ impl Persistence {
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
         Ok(())
+    }
+
+    pub fn save_auto_rule(&self, rule: &AutoInvestmentRule) -> AppResult<()> {
+        let payload =
+            serde_json::to_string(rule).map_err(|error| AppError::Storage(error.to_string()))?;
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO auto_rule (id, payload, updated_at) VALUES (1, ?1, ?2)",
+                params![payload, Utc::now().to_rfc3339()],
+            )
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn load_auto_rule(&self) -> AppResult<Option<AutoInvestmentRule>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT payload FROM auto_rule WHERE id = 1")
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        let mut rows = statement
+            .query([])
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        let Some(row) = rows
+            .next()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let payload = row
+            .get::<_, String>(0)
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        serde_json::from_str::<AutoInvestmentRule>(&payload)
+            .map(Some)
+            .map_err(|error| AppError::Storage(error.to_string()))
     }
 
     pub fn list_orders(&self) -> AppResult<Vec<StrategyOrder>> {
@@ -263,6 +303,10 @@ fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
         "exchange_ack" => Ok(OrderAttemptStatus::ExchangeAck),
         "persisted" => Ok(OrderAttemptStatus::Persisted),
         "persist_failed" => Ok(OrderAttemptStatus::PersistFailed),
+        "spot_attempted" => Ok(OrderAttemptStatus::SpotAttempted),
+        "spot_exchange_ack" => Ok(OrderAttemptStatus::SpotExchangeAck),
+        "spot_persisted" => Ok(OrderAttemptStatus::SpotPersisted),
+        "spot_persist_failed" => Ok(OrderAttemptStatus::SpotPersistFailed),
         _ => Err(AppError::Storage(format!("未知订单尝试状态：{value}"))),
     }
 }

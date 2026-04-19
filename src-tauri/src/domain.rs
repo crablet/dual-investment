@@ -182,6 +182,12 @@ pub struct StrategyOrder {
     pub spot_order_status: String,
     #[serde(default)]
     pub rebalance_message: String,
+    #[serde(default, with = "rust_decimal::serde::str")]
+    pub spot_filled_quantity: Decimal,
+    #[serde(default, with = "rust_decimal::serde::str")]
+    pub spot_avg_price: Decimal,
+    #[serde(default, with = "rust_decimal::serde::str")]
+    pub spot_fee: Decimal,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -293,6 +299,10 @@ pub enum OrderAttemptStatus {
     ExchangeAck,
     Persisted,
     PersistFailed,
+    SpotAttempted,
+    SpotExchangeAck,
+    SpotPersisted,
+    SpotPersistFailed,
 }
 
 impl OrderAttemptStatus {
@@ -302,6 +312,10 @@ impl OrderAttemptStatus {
             Self::ExchangeAck => "exchange_ack",
             Self::Persisted => "persisted",
             Self::PersistFailed => "persist_failed",
+            Self::SpotAttempted => "spot_attempted",
+            Self::SpotExchangeAck => "spot_exchange_ack",
+            Self::SpotPersisted => "spot_persisted",
+            Self::SpotPersistFailed => "spot_persist_failed",
         }
     }
 }

@@ -41,6 +41,8 @@ export const api = {
     call<AppSettings>('toggle_auto_strategy', { request }),
   listOrders: () => call<StrategyOrder[]>('list_orders'),
   listOrderAttempts: () => call<OrderAttemptView[]>('list_order_attempts'),
+  recoverOrderAttempt: (attemptId: string) =>
+    call<StrategyOrder>('recover_order_attempt', { attemptId }),
   syncLiveState: () => call<AppSnapshot>('sync_live_state'),
   runSettlementScan: () => call<StrategyOrder[]>('run_settlement_scan'),
   runAutoOnce: () => call<StrategyOrder | null>('run_auto_once'),

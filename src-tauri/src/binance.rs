@@ -207,8 +207,13 @@ impl BinanceClient {
             .query(&signed)
             .send()
             .await
-            .map_err(|error| AppError::Binance(error.to_string()))?;
-        Self::decode_response(response.status(), response.text().await)
+            .map_err(|error| request_error("GET", path, &error))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| request_error("GET", path, &error))?;
+        Self::decode_response(status, &body)
     }
 
     async fn public_get(&self, base: &str, path: &str) -> AppResult<Value> {
@@ -217,8 +222,13 @@ impl BinanceClient {
             .get(format!("{base}{path}"))
             .send()
             .await
-            .map_err(|error| AppError::Binance(error.to_string()))?;
-        Self::decode_response(response.status(), response.text().await)
+            .map_err(|error| request_error("GET", path, &error))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| request_error("GET", path, &error))?;
+        Self::decode_response(status, &body)
     }
 
     async fn signed_post(
@@ -235,8 +245,13 @@ impl BinanceClient {
             .query(&signed)
             .send()
             .await
-            .map_err(|error| AppError::Binance(error.to_string()))?;
-        let response_json = Self::decode_response(response.status(), response.text().await)?;
+            .map_err(|error| request_error("POST", path, &error))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| request_error("POST", path, &error))?;
+        let response_json = Self::decode_response(status, &body)?;
         parse_order_ack(&response_json)
     }
 
@@ -255,13 +270,9 @@ impl BinanceClient {
         Ok(params)
     }
 
-    fn decode_response(
-        status: StatusCode,
-        body_result: Result<String, reqwest::Error>,
-    ) -> AppResult<Value> {
-        let body = body_result.map_err(|error| AppError::Binance(error.to_string()))?;
+    fn decode_response(status: StatusCode, body: &str) -> AppResult<Value> {
         if !status.is_success() {
-            if let Ok(value) = serde_json::from_str::<Value>(&body) {
+            if let Ok(value) = serde_json::from_str::<Value>(body) {
                 let code = value
                     .get("code")
                     .map_or_else(|| status.as_u16().to_string(), value_to_string);
@@ -277,8 +288,25 @@ impl BinanceClient {
                 "Binance 请求失败（HTTP {status}）"
             )));
         }
-        serde_json::from_str::<Value>(&body).map_err(|error| AppError::Binance(error.to_string()))
+        serde_json::from_str::<Value>(body).map_err(|error| AppError::Binance(error.to_string()))
     }
+}
+
+fn request_error(method: &str, path: &str, error: &reqwest::Error) -> AppError {
+    let reason = if error.is_timeout() {
+        "请求超时"
+    } else if error.is_connect() {
+        "连接失败"
+    } else if error.is_decode() {
+        "响应解码失败"
+    } else if error.is_body() {
+        "响应体读取失败"
+    } else if error.is_request() {
+        "请求构造失败"
+    } else {
+        "网络请求失败"
+    };
+    AppError::Binance(format!("Binance {method} {path} {reason}"))
 }
 
 fn parse_account_snapshot(value: &Value) -> AppResult<OptionAccountSnapshot> {

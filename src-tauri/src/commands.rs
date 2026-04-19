@@ -94,6 +94,17 @@ pub fn list_order_attempts(state: State<'_, AppState>) -> Result<Vec<OrderAttemp
 }
 
 #[tauri::command]
+pub async fn recover_order_attempt(
+    state: State<'_, AppState>,
+    attempt_id: String,
+) -> Result<StrategyOrder, String> {
+    state
+        .recover_order_attempt(attempt_id)
+        .await
+        .map_err(to_command_error)
+}
+
+#[tauri::command]
 pub async fn sync_live_state(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
     state.sync_live_state().await.map_err(to_command_error)
 }

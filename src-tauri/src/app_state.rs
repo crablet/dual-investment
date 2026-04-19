@@ -87,10 +87,14 @@ impl AppState {
             .into_iter()
             .filter(|order| order.exchange_order_id.is_some())
             .collect();
+        let mut auto_rule = persistence
+            .load_auto_rule()?
+            .unwrap_or_else(|| strategy::default_auto_rule(false));
+        auto_rule.enabled = false;
 
         let state = Self {
             runtime: Arc::new(RwLock::new(RuntimeConfig::default())),
-            auto_rule: Arc::new(RwLock::new(strategy::default_auto_rule(false))),
+            auto_rule: Arc::new(RwLock::new(auto_rule)),
             orders: Arc::new(RwLock::new(orders)),
             persistence: Arc::new(Mutex::new(persistence)),
             worker_started: Arc::new(AtomicBool::new(false)),
@@ -119,16 +123,22 @@ impl AppState {
                     .collect::<Vec<_>>(),
             )
         };
-        let option_account = accounts.as_ref().map(|(option, _spot)| option);
+        let option_account = accounts.as_ref().map(|(option, _spot, _price)| option);
         let balances = accounts
             .as_ref()
-            .map_or_else(Vec::new, |(option, spot)| combined_balances(option, spot));
+            .map_or_else(Vec::new, |(option, spot, price)| {
+                combined_balances(option, spot, *price)
+            });
+        let spot_price = accounts
+            .as_ref()
+            .map(|(_option, _spot, price)| *price)
+            .filter(|price| *price > Decimal::ZERO);
 
         Ok(AppSnapshot {
             metrics: strategy::build_metrics(&settings, option_account, &orders),
             balances,
             candidates: Vec::new(),
-            pnl: strategy::pnl_report_from_orders(&orders),
+            pnl: strategy::pnl_report_from_orders_with_spot(&orders, spot_price),
             risk: option_account.map_or_else(
                 strategy::empty_risk_snapshot,
                 strategy::risk_snapshot_from_account,
@@ -259,11 +269,17 @@ impl AppState {
     }
 
     pub async fn save_auto_rule(&self, rule: AutoInvestmentRule) -> AppResult<AutoInvestmentRule> {
+        let mut rule = rule;
         validate_auto_rule(&rule)?;
+        rule.enabled = self.runtime.read().await.auto_enabled;
         {
             let mut stored = self.auto_rule.write().await;
             *stored = rule.clone();
         }
+        self.persistence
+            .lock()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+            .save_auto_rule(&rule)?;
         self.record_audit("strategy.rule.saved", "自动定投规则已保存")?;
         Ok(rule)
     }
@@ -285,6 +301,10 @@ impl AppState {
         {
             let mut rule = self.auto_rule.write().await;
             rule.enabled = request.enabled;
+            self.persistence
+                .lock()
+                .map_err(|error| AppError::Storage(error.to_string()))?
+                .save_auto_rule(&rule)?;
         }
         if request.enabled {
             self.ensure_background_worker();
@@ -315,11 +335,29 @@ impl AppState {
             .collect())
     }
 
+    pub async fn recover_order_attempt(&self, attempt_id: String) -> AppResult<StrategyOrder> {
+        let attempt = self
+            .persistence
+            .lock()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+            .list_order_attempts(500)?
+            .into_iter()
+            .find(|attempt| attempt.id == attempt_id)
+            .ok_or_else(|| AppError::Storage("未找到指定恢复记录".to_string()))?;
+
+        if is_spot_attempt(attempt.status) {
+            self.recover_spot_attempt(attempt).await
+        } else {
+            self.recover_option_attempt(attempt).await
+        }
+    }
+
     pub async fn balances(&self) -> AppResult<Vec<BalanceRow>> {
         let client = self.live_client().await?;
         let option = client.option_account().await?;
         let spot = client.spot_account().await?;
-        Ok(combined_balances(&option, &spot))
+        let spot_price = client.spot_price("BTCUSDT").await?;
+        Ok(combined_balances(&option, &spot, spot_price))
     }
 
     pub fn pnl_report(&self) -> PnlReport {
@@ -450,6 +488,69 @@ impl AppState {
         Ok(order)
     }
 
+    async fn recover_option_attempt(&self, mut attempt: OrderAttempt) -> AppResult<StrategyOrder> {
+        let client = self.live_client().await?;
+        let ack = client
+            .query_option_order(
+                &attempt.option_symbol,
+                attempt.exchange_order_id.as_deref(),
+                Some(&attempt.client_order_id),
+            )
+            .await?;
+        let request = request_from_option_attempt(&attempt, &ack)?;
+        let order = strategy::order_from_request(&request, &ack);
+        self.save_order(&order).await?;
+        attempt.status = OrderAttemptStatus::Persisted;
+        attempt.exchange_order_id = Some(ack.order_id.clone());
+        attempt.message = "已从 Binance 查询订单并恢复到本地订单表".to_string();
+        attempt.updated_at = Utc::now();
+        self.save_order_attempt(&attempt)?;
+        self.record_audit(
+            "strategy.order.recovered",
+            &format!("{} 已从恢复记录重建本地订单", attempt.option_symbol),
+        )?;
+        Ok(order)
+    }
+
+    async fn recover_spot_attempt(&self, mut attempt: OrderAttempt) -> AppResult<StrategyOrder> {
+        let client = self.live_client().await?;
+        let ack = client
+            .query_spot_order(
+                &attempt.symbol,
+                attempt.exchange_order_id.as_deref(),
+                Some(&attempt.client_order_id),
+            )
+            .await?;
+        let mut order = {
+            let orders = self.orders.read().await;
+            orders
+                .iter()
+                .find(|order| {
+                    order.spot_client_order_id == attempt.client_order_id
+                        || order.option_symbol == attempt.option_symbol
+                })
+                .cloned()
+        }
+        .ok_or_else(|| {
+            AppError::Storage("未找到现货补齐对应的本地期权订单，无法自动恢复".to_string())
+        })?;
+
+        order.spot_order_id = Some(ack.order_id.clone());
+        order.spot_client_order_id = attempt.client_order_id.clone();
+        apply_spot_ack(&mut order, &ack);
+        self.save_order(&order).await?;
+        attempt.status = OrderAttemptStatus::SpotPersisted;
+        attempt.exchange_order_id = Some(ack.order_id.clone());
+        attempt.message = "已从 Binance 查询现货订单并恢复本地补齐状态".to_string();
+        attempt.updated_at = Utc::now();
+        self.save_order_attempt(&attempt)?;
+        self.record_audit(
+            "strategy.rebalance.recovered",
+            &format!("{} 已从恢复记录重建现货补齐状态", attempt.option_symbol),
+        )?;
+        Ok(order)
+    }
+
     async fn sync_live_orders(&self) -> AppResult<Vec<StrategyOrder>> {
         let client = self.live_client().await?;
         let orders = self.orders.read().await.clone();
@@ -575,9 +676,33 @@ impl AppState {
         }
 
         let spot_account = client.spot_account().await?;
-        validate_spot_rebalance(&order, &spot_account)?;
+        if let Err(error) = validate_spot_rebalance(&order, &spot_account) {
+            order.status = StrategyStatus::RebalanceFailed;
+            order.updated_at = Utc::now();
+            order.rebalance_message = format!("现货补齐风控失败：{error}");
+            self.save_order(&order).await?;
+            self.record_audit(
+                "strategy.rebalance.failed",
+                &format!("{} {}", order.option_symbol, order.rebalance_message),
+            )?;
+            return Ok(order);
+        }
         let side = crate::binance::spot_rebalance_side(order.direction);
         let client_order_id = make_spot_client_order_id(order.direction);
+        let now = Utc::now();
+        let mut attempt = OrderAttempt {
+            id: Uuid::new_v4().to_string(),
+            client_order_id: client_order_id.clone(),
+            symbol: "BTCUSDT".to_string(),
+            option_symbol: order.option_symbol.clone(),
+            direction: order.direction,
+            status: OrderAttemptStatus::SpotAttempted,
+            exchange_order_id: None,
+            message: format!("到期 ITM，准备发送现货 {side} 补齐订单"),
+            created_at: now,
+            updated_at: now,
+        };
+        self.save_order_attempt(&attempt)?;
         let ack = match client
             .place_spot_market_order("BTCUSDT", side, order.filled_quantity, &client_order_id)
             .await
@@ -595,22 +720,31 @@ impl AppState {
                 return Ok(order);
             }
         };
+        attempt.status = OrderAttemptStatus::SpotExchangeAck;
+        attempt.exchange_order_id = Some(ack.order_id.clone());
+        attempt.message = format!("Binance 已返回现货订单号，状态 {}", ack.status);
+        attempt.updated_at = Utc::now();
+        self.save_order_attempt(&attempt)?;
 
-        order.status = if ack.executed_qty > Decimal::ZERO {
-            StrategyStatus::Settled
-        } else {
-            StrategyStatus::RebalanceFailed
-        };
-        order.settled_at = Some(Utc::now());
-        order.updated_at = Utc::now();
-        order.spot_order_id = Some(ack.order_id);
+        order.spot_order_id = Some(ack.order_id.clone());
         order.spot_client_order_id = client_order_id;
-        order.spot_order_status.clone_from(&ack.status);
-        order.rebalance_message = format!(
-            "到期 ITM，已发送现货 {} {} BTC，现货状态 {}",
-            side, order.filled_quantity, ack.status
-        );
-        self.save_order(&order).await?;
+        apply_spot_ack(&mut order, &ack);
+        if let Err(error) = self.save_order(&order).await {
+            attempt.status = OrderAttemptStatus::SpotPersistFailed;
+            attempt.message = "交易所现货订单已创建，但本地补齐状态保存失败".to_string();
+            attempt.updated_at = Utc::now();
+            self.save_order_attempt(&attempt)?;
+            return Err(AppError::Storage(format!(
+                "交易所现货订单已创建但本地保存失败，spotOrderId={}，clientOrderId={}。请先用 Binance 后台核对后再继续操作。原始错误：{}",
+                order.spot_order_id.as_deref().unwrap_or(""),
+                order.spot_client_order_id,
+                error
+            )));
+        }
+        attempt.status = OrderAttemptStatus::SpotPersisted;
+        attempt.message = "交易所现货订单和本地补齐状态均已记录".to_string();
+        attempt.updated_at = Utc::now();
+        self.save_order_attempt(&attempt)?;
         self.record_audit(
             "strategy.rebalance.created",
             &format!("{} {}", order.option_symbol, order.rebalance_message),
@@ -630,19 +764,7 @@ impl AppState {
                 Some(&order.spot_client_order_id),
             )
             .await?;
-        order.spot_order_status.clone_from(&ack.status);
-        order.updated_at = Utc::now();
-        if ack.executed_qty > Decimal::ZERO && ack.status == "FILLED" {
-            order.status = StrategyStatus::Settled;
-            order.settled_at = Some(Utc::now());
-            order.rebalance_message = format!("现货补齐已成交，状态 {}", ack.status);
-        } else if matches!(
-            ack.status.as_str(),
-            "REJECTED" | "EXPIRED" | "CANCELED" | "CANCELLED"
-        ) {
-            order.status = StrategyStatus::RebalanceFailed;
-            order.rebalance_message = format!("现货补齐未完成，状态 {}", ack.status);
-        }
+        apply_spot_ack(order, &ack);
         Ok(())
     }
 
@@ -769,7 +891,7 @@ impl AppState {
 
     async fn live_accounts_if_connected(
         &self,
-    ) -> AppResult<Option<(OptionAccountSnapshot, SpotAccountSnapshot)>> {
+    ) -> AppResult<Option<(OptionAccountSnapshot, SpotAccountSnapshot, Decimal)>> {
         let runtime = self.runtime.read().await.clone();
         if !runtime.connected {
             return Ok(None);
@@ -778,6 +900,7 @@ impl AppState {
         Ok(Some((
             client.option_account().await?,
             client.spot_account().await?,
+            client.spot_price("BTCUSDT").await?,
         )))
     }
 }
@@ -827,6 +950,54 @@ fn client_from_runtime(runtime: &RuntimeConfig) -> AppResult<BinanceClient> {
         .clone()
         .ok_or_else(|| AppError::Config("缺少 Binance API Secret".to_string()))?;
     BinanceClient::new(api_key, api_secret)
+}
+
+fn request_from_option_attempt(
+    attempt: &OrderAttempt,
+    ack: &ExchangeOrderAck,
+) -> AppResult<StrategyRequest> {
+    let (expiry, strike, direction) = parse_option_symbol(&attempt.option_symbol)?;
+    let quantity = if ack.quantity > Decimal::ZERO {
+        ack.quantity
+    } else {
+        ack.executed_qty
+    };
+    let limit_price = if ack.price > Decimal::ZERO {
+        ack.price
+    } else {
+        ack.avg_price
+    };
+    Ok(StrategyRequest {
+        candidate_id: None,
+        symbol: attempt.symbol.clone(),
+        option_symbol: Some(attempt.option_symbol.clone()),
+        direction,
+        expiry,
+        strike,
+        quantity,
+        limit_price,
+        confirm_live: true,
+    })
+}
+
+fn parse_option_symbol(value: &str) -> AppResult<(NaiveDate, Decimal, StrategyDirection)> {
+    let parts = value.split('-').collect::<Vec<_>>();
+    if parts.len() != 4 {
+        return Err(AppError::Storage(format!("无法解析期权合约代码：{value}")));
+    }
+    let expiry = NaiveDate::parse_from_str(parts[1], "%y%m%d")
+        .map_err(|error| AppError::Storage(format!("期权合约到期日无法解析：{error}")))?;
+    let strike = parts[2]
+        .parse::<Decimal>()
+        .map_err(|error| AppError::Storage(format!("期权合约执行价无法解析：{error}")))?;
+    let direction = match parts[3] {
+        "P" | "PUT" => StrategyDirection::SellPut,
+        "C" | "CALL" => StrategyDirection::SellCall,
+        side => {
+            return Err(AppError::Storage(format!("期权合约方向无法解析：{side}")));
+        }
+    };
+    Ok((expiry, strike, direction))
 }
 
 fn resolve_contract<'a>(
@@ -1066,6 +1237,48 @@ fn apply_option_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) {
     order.updated_at = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
 }
 
+fn apply_spot_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) {
+    order.spot_order_status.clone_from(&ack.status);
+    order.spot_filled_quantity = ack.executed_qty;
+    order.spot_avg_price = ack.avg_price;
+    order.spot_fee = ack.fee;
+    order.updated_at = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
+    let expected = order.filled_quantity;
+    if ack.status == "FILLED" && ack.executed_qty >= expected {
+        order.status = StrategyStatus::Settled;
+        order.settled_at = Some(Utc::now());
+        order.rebalance_message = format!(
+            "现货补齐已足额成交，数量 {}，均价 {}，状态 {}",
+            ack.executed_qty, ack.avg_price, ack.status
+        );
+    } else if matches!(
+        ack.status.as_str(),
+        "REJECTED" | "EXPIRED" | "CANCELED" | "CANCELLED"
+    ) {
+        order.status = StrategyStatus::RebalanceFailed;
+        order.rebalance_message = format!(
+            "现货补齐未完成，成交 {} / {}，状态 {}",
+            ack.executed_qty, expected, ack.status
+        );
+    } else {
+        order.status = StrategyStatus::RebalanceFailed;
+        order.rebalance_message = format!(
+            "现货补齐尚未足额成交，成交 {} / {}，状态 {}",
+            ack.executed_qty, expected, ack.status
+        );
+    }
+}
+
+fn is_spot_attempt(status: OrderAttemptStatus) -> bool {
+    matches!(
+        status,
+        OrderAttemptStatus::SpotAttempted
+            | OrderAttemptStatus::SpotExchangeAck
+            | OrderAttemptStatus::SpotPersisted
+            | OrderAttemptStatus::SpotPersistFailed
+    )
+}
+
 fn should_sync_option_order(order: &StrategyOrder) -> bool {
     order.exchange_order_id.is_some()
         && !matches!(
@@ -1096,9 +1309,10 @@ fn is_in_the_money(order: &StrategyOrder, settlement_price: Decimal) -> bool {
 fn combined_balances(
     option: &OptionAccountSnapshot,
     spot: &SpotAccountSnapshot,
+    spot_price: Decimal,
 ) -> Vec<BalanceRow> {
     let mut balances = strategy::build_balances(option);
-    balances.extend(strategy::build_spot_balances(spot));
+    balances.extend(strategy::build_spot_balances(spot, spot_price));
     balances
 }
 
@@ -1216,6 +1430,47 @@ mod tests {
     }
 
     #[test]
+    fn spot_ack_partial_fill_does_not_settle_order() {
+        let mut order = strategy_order(StrategyDirection::SellPut);
+        order.filled_quantity = dec!(0.01);
+        let ack = ExchangeOrderAck {
+            order_id: "8751755144427365001".to_string(),
+            client_order_id: "di-spot-put-1".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            status: "PARTIALLY_FILLED".to_string(),
+            executed_qty: dec!(0.005),
+            avg_price: dec!(70000),
+            price: Decimal::ZERO,
+            quantity: dec!(0.01),
+            fee: dec!(0.1),
+            create_time: None,
+            update_time: Some(Utc::now()),
+        };
+
+        apply_spot_ack(&mut order, &ack);
+
+        assert_eq!(order.status, StrategyStatus::RebalanceFailed);
+        assert_eq!(order.spot_filled_quantity, dec!(0.005));
+        assert_eq!(order.spot_avg_price, dec!(70000));
+        assert_eq!(order.spot_fee, dec!(0.1));
+        assert!(order.settled_at.is_none());
+        assert!(order.rebalance_message.contains("尚未足额成交"));
+    }
+
+    #[test]
+    fn parse_option_symbol_recovers_expiry_strike_and_direction() {
+        let (expiry, strike, direction) =
+            parse_option_symbol("BTC-260626-72000-P").expect("valid option symbol");
+
+        assert_eq!(
+            expiry,
+            NaiveDate::from_ymd_opt(2026, 6, 26).expect("valid test date"),
+        );
+        assert_eq!(strike, dec!(72000));
+        assert_eq!(direction, StrategyDirection::SellPut);
+    }
+
+    #[test]
     fn schedule_parser_uses_configured_time_or_default() {
         assert_eq!(
             parse_schedule_time("每天 11:30"),
@@ -1270,6 +1525,9 @@ mod tests {
             spot_client_order_id: String::new(),
             spot_order_status: String::new(),
             rebalance_message: String::new(),
+            spot_filled_quantity: Decimal::ZERO,
+            spot_avg_price: Decimal::ZERO,
+            spot_fee: Decimal::ZERO,
         }
     }
 

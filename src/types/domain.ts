@@ -86,6 +86,9 @@ export interface StrategyOrder {
   spotClientOrderId: string
   spotOrderStatus: string
   rebalanceMessage: string
+  spotFilledQuantity: DecimalString
+  spotAvgPrice: DecimalString
+  spotFee: DecimalString
 }
 
 export interface AutoInvestmentRule {

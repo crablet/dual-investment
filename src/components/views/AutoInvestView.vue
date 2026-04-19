@@ -121,7 +121,7 @@ function runAutoNow() {
           <NSlider v-model:value="form.maxDeltaAbs" :min="0.05" :max="0.8" :step="0.01" />
         </label>
         <label>
-          IV Rank ≤ {{ percent(form.maxIvRank, 0) }}
+          Mark IV 代理 ≤ {{ percent(form.maxIvRank, 0) }}
           <NSlider v-model:value="form.maxIvRank" :min="10" :max="100" :step="1" />
         </label>
         <div class="range-row">

@@ -105,6 +105,9 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
         <p><span>结算参考价</span><strong>{{ money(selected.settlementPrice) }}</strong></p>
         <p><span>现货订单号</span><strong>{{ selected.spotOrderId ?? '--' }}</strong></p>
         <p><span>现货状态</span><strong>{{ selected.spotOrderStatus || '--' }}</strong></p>
+        <p><span>现货成交数量</span><strong>{{ selected.spotFilledQuantity }} BTC</strong></p>
+        <p><span>现货成交均价</span><strong>{{ money(selected.spotAvgPrice) }}</strong></p>
+        <p><span>现货手续费</span><strong>{{ selected.spotFee }}</strong></p>
         <p><span>到期补齐</span><strong>{{ selected.settlementAction }}</strong></p>
         <p><span>补齐结果</span><strong>{{ selected.rebalanceMessage || '--' }}</strong></p>
         <div class="button-row compact">
@@ -126,6 +129,7 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
               <th>交易所订单号</th>
               <th>状态</th>
               <th>说明</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -136,6 +140,16 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
               <td>{{ attempt.exchangeOrderId ?? '--' }}</td>
               <td>{{ attempt.status }}</td>
               <td>{{ attempt.message }}</td>
+              <td>
+                <NButton
+                  size="small"
+                  secondary
+                  :disabled="attempt.status === 'persisted' || attempt.status === 'spot_persisted'"
+                  @click="store.recoverAttempt(attempt.id)"
+                >
+                  恢复
+                </NButton>
+              </td>
             </tr>
           </tbody>
         </table>

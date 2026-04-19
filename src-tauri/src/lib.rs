@@ -11,8 +11,8 @@ use app_state::AppState;
 use commands::{
     connect_binance, connect_saved_binance, export_audit_logs, forget_binance_credentials,
     get_app_snapshot, get_pnl_report, get_positions, get_risk_snapshot, list_order_attempts,
-    list_orders, place_manual_strategy, preview_strategy, run_auto_once, run_settlement_scan,
-    save_auto_rule, scan_candidates, sync_live_state, toggle_auto_strategy,
+    list_orders, place_manual_strategy, preview_strategy, recover_order_attempt, run_auto_once,
+    run_settlement_scan, save_auto_rule, scan_candidates, sync_live_state, toggle_auto_strategy,
 };
 use tauri::Manager;
 
@@ -39,6 +39,7 @@ pub fn run() {
             toggle_auto_strategy,
             list_orders,
             list_order_attempts,
+            recover_order_attempt,
             sync_live_state,
             run_settlement_scan,
             run_auto_once,

@@ -39,8 +39,12 @@ pnpm tauri:dev
 ```bash
 pnpm typecheck
 pnpm build
-cd src-tauri && cargo test
+cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+pnpm tauri:build
 ```
+
+默认 Linux 打包目标是 `deb` 和 `rpm`，产物位于 `src-tauri/target/release/bundle/`。AppImage 当前不作为默认目标：Tauri bundler 使用的 `linuxdeploy` 在部分较新的 Linux 系统上会因为旧版 `strip` 无法识别 `.relr.dyn` ELF section 而失败。
 
 ## 当前实现状态
 
@@ -50,10 +54,10 @@ cd src-tauri && cargo test
 - Rust 后端有 Binance EAPI/Spot 签名请求封装，连接时会真实校验期权账户和现货交易权限，下单前会读取 exchangeInfo、mark price、账户保证金并执行合约过滤器和风控规则校验。
 - 候选扫描已接入 Binance exchangeInfo + option mark price，按 `BTCUSDT`、合约状态、到期天数、数量范围、delta、年化和可用保证金生成候选。
 - 真实期权下单使用单位限价 + IOC 的快速成交路径，订单入库使用 Binance 返回的 `orderId`、`clientOrderId`、成交数量、均价和交易所状态；零成交、部分成交、拒绝、过期会分别落到不同本地状态。
-- SQLite 会记录订单尝试阶段，前端订单页会展示恢复记录，用于处理“交易所已创建订单但本地保存失败”的恢复提示。
+- SQLite 会记录订单尝试阶段，前端订单页会展示恢复记录，并可从 Binance 查询真实订单来恢复“交易所已创建订单但本地保存失败”的本地状态。
 - 后台调度器会周期性同步订单状态、扫描到期订单；到期 ITM 后会按方向发送 Binance Spot 市价补齐订单，失败时进入 `rebalanceFailed` 并写审计事件。
 - 实盘自动策略开启需要二次确认；手动实盘下单也需要显式确认。
-- 自动策略开启后会按规则每日触发一次扫描；也可以在自动定投页手动执行一次自动扫描。
+- 自动策略规则会持久化；应用重启后规则仍保留，但自动执行默认关闭，必须重新二次确认开启。开启后会按规则每日触发一次扫描，也可以在自动定投页手动执行一次自动扫描。
 - Binance API Key/Secret 通过 `keyring-core` + 平台 store 保存和读取；Linux 使用 DBus Secret Service，macOS 使用登录钥匙串，Windows 使用 Credential Manager。保存失败时不会建立实盘连接。
 
 ## 项目结构

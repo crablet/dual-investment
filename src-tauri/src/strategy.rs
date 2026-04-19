@@ -139,7 +139,10 @@ pub fn build_balances(account: &OptionAccountSnapshot) -> Vec<BalanceRow> {
         .collect()
 }
 
-pub fn build_spot_balances(account: &SpotAccountSnapshot) -> Vec<BalanceRow> {
+pub fn build_spot_balances(
+    account: &SpotAccountSnapshot,
+    btc_usdt_price: Decimal,
+) -> Vec<BalanceRow> {
     account
         .balances
         .iter()
@@ -151,6 +154,8 @@ pub fn build_spot_balances(account: &SpotAccountSnapshot) -> Vec<BalanceRow> {
             locked: asset.locked,
             usdt_value: if asset.asset == "USDT" {
                 asset.free + asset.locked
+            } else if asset.asset == "BTC" {
+                (asset.free + asset.locked) * btc_usdt_price
             } else {
                 Decimal::ZERO
             },
@@ -159,6 +164,13 @@ pub fn build_spot_balances(account: &SpotAccountSnapshot) -> Vec<BalanceRow> {
 }
 
 pub fn pnl_report_from_orders(orders: &[StrategyOrder]) -> PnlReport {
+    pnl_report_from_orders_with_spot(orders, None)
+}
+
+pub fn pnl_report_from_orders_with_spot(
+    orders: &[StrategyOrder],
+    spot_price: Option<Decimal>,
+) -> PnlReport {
     if orders.is_empty() {
         return empty_pnl_report();
     }
@@ -166,13 +178,25 @@ pub fn pnl_report_from_orders(orders: &[StrategyOrder]) -> PnlReport {
     let option_premium: Decimal = orders.iter().map(|order| order.premium).sum();
     let fees: Decimal = orders.iter().map(|order| order.fee).sum();
     let today = today_option_premium(orders);
-    let cumulative = option_premium - fees;
+    let floating_spot = spot_price.map_or(Decimal::ZERO, |price| {
+        orders
+            .iter()
+            .filter(|order| {
+                order.direction == StrategyDirection::SellPut
+                    && order.spot_filled_quantity > Decimal::ZERO
+                    && order.spot_avg_price > Decimal::ZERO
+            })
+            .map(|order| (price - order.spot_avg_price) * order.spot_filled_quantity)
+            .sum::<Decimal>()
+            .round_dp(2)
+    });
+    let cumulative = option_premium + floating_spot - fees;
     PnlReport {
         cumulative,
         today,
         option_premium,
         realized_spot: Decimal::ZERO,
-        floating_spot: Decimal::ZERO,
+        floating_spot,
         fees,
         points: Vec::<ChartPoint>::new(),
         breakdown: if cumulative == Decimal::ZERO && option_premium == Decimal::ZERO {
@@ -188,6 +212,15 @@ pub fn pnl_report_from_orders(orders: &[StrategyOrder]) -> PnlReport {
                     label: "手续费".to_string(),
                     value: -fees,
                     color: "#cc4b37".to_string(),
+                },
+                PnlBreakdown {
+                    label: "现货补齐浮动盈亏".to_string(),
+                    value: floating_spot,
+                    color: if floating_spot >= Decimal::ZERO {
+                        "#2fa66a".to_string()
+                    } else {
+                        "#cc4b37".to_string()
+                    },
                 },
             ]
         },
@@ -320,7 +353,7 @@ pub fn build_candidates(
             }
 
             let delta_abs = abs_decimal(mark.delta);
-            let iv_rank = Decimal::ZERO;
+            let iv_rank = (mark.mark_iv * dec!(100)).round_dp(2);
             let quantity = rule.quantity;
             let limit_price = mark.mark_price.round_dp(contract.price_scale);
             let premium = (limit_price * quantity).round_dp(contract.price_scale);
@@ -351,17 +384,11 @@ pub fn build_candidates(
                 RecommendationLevel::Reject
             };
             let reason = if passes_rule {
-                format!(
-                    "来自 Binance 实盘合约和 mark price，满足当前自动规则，mark IV {}",
-                    mark.mark_iv.round_dp(4)
-                )
+                format!("来自 Binance 实盘合约和 mark price，满足当前自动规则，mark IV 代理值 {iv_rank}%")
             } else if available_margin < required_margin {
                 "可用保证金不足，暂不建议下单".to_string()
             } else {
-                format!(
-                    "来自 Binance 实盘合约和 mark price，未完全满足当前自动规则，mark IV {}",
-                    mark.mark_iv.round_dp(4)
-                )
+                format!("来自 Binance 实盘合约和 mark price，未完全满足当前自动规则，mark IV 代理值 {iv_rank}%")
             };
 
             Some(StrategyCandidate {
@@ -502,6 +529,9 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         spot_client_order_id: String::new(),
         spot_order_status: String::new(),
         rebalance_message: String::new(),
+        spot_filled_quantity: Decimal::ZERO,
+        spot_avg_price: Decimal::ZERO,
+        spot_fee: Decimal::ZERO,
     }
 }
 

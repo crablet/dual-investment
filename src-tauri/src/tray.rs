@@ -1,8 +1,11 @@
 use tauri::{
-    AppHandle, Emitter, Manager,
+    AppHandle, Manager,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
+
+use crate::app_state::AppState;
+use crate::domain::ToggleAutoRequest;
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "打开主界面", true, None::<&str>)?;
@@ -19,7 +22,15 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             "show" => show_main_window(app),
             "quit" => app.exit(0),
             "pause" => {
-                let _ = app.emit("background-status-changed", "pause-requested");
+                let state = app.state::<AppState>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = state
+                        .toggle_auto_strategy(ToggleAutoRequest {
+                            enabled: false,
+                            confirm_live: true,
+                        })
+                        .await;
+                });
             }
             _ => {}
         })
