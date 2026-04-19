@@ -22,6 +22,7 @@ const { directionText, directionTone, money, percent } = useFormat()
           <th>方向</th>
           <th>到期日</th>
           <th>执行价</th>
+          <th>单位限价</th>
           <th>权利金</th>
           <th>年化</th>
           <th>被行权概率</th>
@@ -38,6 +39,7 @@ const { directionText, directionTone, money, percent } = useFormat()
           </td>
           <td>{{ candidate.expiry }}</td>
           <td>{{ money(candidate.strike) }}</td>
+          <td>{{ money(candidate.limitPrice) }}</td>
           <td>{{ money(candidate.premium) }}</td>
           <td class="positive">{{ percent(candidate.annualized) }}</td>
           <td class="warning">{{ percent(candidate.exerciseProbability) }}</td>

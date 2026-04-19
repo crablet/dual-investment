@@ -51,8 +51,8 @@ const autoStatusItems = computed(() => [
   },
   {
     label: '到期补齐',
-    value: '自动执行',
-    tone: 'neutral',
+    value: store.settings?.connected ? '后台监控' : '等待连接',
+    tone: store.settings?.connected ? 'active' : 'neutral',
   },
 ])
 
@@ -68,7 +68,7 @@ function placeCandidate(candidate: StrategyCandidate) {
     expiry: candidate.expiry,
     strike: candidate.strike,
     quantity: candidate.quantity,
-    limitPrice: candidate.premium,
+    limitPrice: candidate.limitPrice,
     confirmLive: true,
   })
 }

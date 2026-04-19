@@ -30,6 +30,17 @@ async function connect() {
   await store.connect(request)
 }
 
+async function connectSaved() {
+  await store.connectSaved()
+}
+
+async function forgetCredentials() {
+  if (!window.confirm('确认从系统 keyring 删除 Binance API 凭据？这会断开当前实盘连接。')) {
+    return
+  }
+  await store.forgetCredentials()
+}
+
 async function exportLogs() {
   const payload = await api.exportAuditLogs()
   const blob = new Blob([payload], { type: 'application/json;charset=utf-8' })
@@ -53,6 +64,15 @@ async function exportLogs() {
           <NButton type="primary" :disabled="!canConnect" :loading="store.loading" @click="connect">
             <template #icon><NIcon :component="KeyRound" /></template>
             连接实盘账户
+          </NButton>
+          <NButton
+            secondary
+            :disabled="!store.settings?.savedCredentials"
+            :loading="store.loading"
+            @click="connectSaved"
+          >
+            <template #icon><NIcon :component="KeyRound" /></template>
+            使用已保存凭据连接
           </NButton>
         </div>
 
@@ -81,7 +101,13 @@ async function exportLogs() {
         </div>
         <div>
           <dt>存储</dt>
-          <dd>本地 SQLite</dd>
+          <dd>SQLite + 系统 keyring</dd>
+        </div>
+        <div>
+          <dt>凭据</dt>
+          <dd :class="store.settings?.savedCredentials ? 'positive' : 'warning'">
+            {{ store.settings?.savedCredentials ? '已保存到 keyring' : '未保存' }}
+          </dd>
         </div>
         <div>
           <dt>版本</dt>
@@ -96,6 +122,12 @@ async function exportLogs() {
         <span>审计日志</span>
         <strong>{{ auditCountLabel }}</strong>
         <NButton size="small" secondary @click="exportLogs">导出</NButton>
+      </div>
+      <div class="settings-operation-row">
+        <NIcon :component="KeyRound" />
+        <span>系统 keyring 凭据</span>
+        <strong>{{ store.settings?.savedCredentials ? '已保存' : '无' }}</strong>
+        <NButton size="small" secondary :disabled="!store.settings?.savedCredentials" @click="forgetCredentials">删除</NButton>
       </div>
     </Panel>
   </div>
@@ -220,7 +252,7 @@ async function exportLogs() {
   white-space: nowrap;
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 1200px) {
   .settings-page,
   .settings-connection {
     grid-template-columns: 1fr;

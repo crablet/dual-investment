@@ -5,6 +5,7 @@ import type {
   AutoInvestmentRule,
   BalanceRow,
   ConnectBinanceRequest,
+  OrderAttemptView,
   PnlReport,
   RiskSnapshot,
   StrategyCandidate,
@@ -28,6 +29,8 @@ export const api = {
   getAppSnapshot: () => call<AppSnapshot>('get_app_snapshot'),
   connectBinance: (request: ConnectBinanceRequest) =>
     call<AppSettings>('connect_binance', { request }),
+  connectSavedBinance: () => call<AppSettings>('connect_saved_binance'),
+  forgetBinanceCredentials: () => call<AppSettings>('forget_binance_credentials'),
   scanCandidates: () => call<StrategyCandidate[]>('scan_candidates'),
   previewStrategy: (request: StrategyRequest) =>
     call<StrategyPreview>('preview_strategy', { request }),
@@ -37,6 +40,10 @@ export const api = {
   toggleAutoStrategy: (request: ToggleAutoRequest) =>
     call<AppSettings>('toggle_auto_strategy', { request }),
   listOrders: () => call<StrategyOrder[]>('list_orders'),
+  listOrderAttempts: () => call<OrderAttemptView[]>('list_order_attempts'),
+  syncLiveState: () => call<AppSnapshot>('sync_live_state'),
+  runSettlementScan: () => call<StrategyOrder[]>('run_settlement_scan'),
+  runAutoOnce: () => call<StrategyOrder | null>('run_auto_once'),
   getPositions: () => call<BalanceRow[]>('get_positions'),
   getPnlReport: () => call<PnlReport>('get_pnl_report'),
   getRiskSnapshot: () => call<RiskSnapshot>('get_risk_snapshot'),

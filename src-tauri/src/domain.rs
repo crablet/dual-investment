@@ -46,6 +46,9 @@ pub enum StrategyStatus {
     Running,
     Settled,
     Cancelled,
+    Rejected,
+    Expired,
+    PartiallyFilled,
     RebalanceFailed,
 }
 
@@ -66,10 +69,13 @@ pub enum RiskSeverity {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[allow(clippy::struct_excessive_bools)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub connected: bool,
     pub api_key_masked: Option<String>,
+    #[serde(default)]
+    pub saved_credentials: bool,
     pub auto_enabled: bool,
     pub quick_execution: bool,
     pub default_symbol: String,
@@ -91,6 +97,8 @@ pub struct MetricCard {
 #[serde(rename_all = "camelCase")]
 pub struct BalanceRow {
     pub asset: String,
+    #[serde(default)]
+    pub source: String,
     #[serde(with = "rust_decimal::serde::str")]
     pub free: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
@@ -112,6 +120,8 @@ pub struct StrategyCandidate {
     #[serde(with = "rust_decimal::serde::str")]
     pub quantity: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
+    pub limit_price: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
     pub premium: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub annualized: Decimal,
@@ -132,6 +142,8 @@ pub struct StrategyCandidate {
 pub struct StrategyOrder {
     pub id: String,
     pub exchange_order_id: Option<String>,
+    #[serde(default)]
+    pub client_order_id: String,
     pub symbol: String,
     pub option_symbol: String,
     pub direction: StrategyDirection,
@@ -141,15 +153,35 @@ pub struct StrategyOrder {
     pub strike: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub quantity: Decimal,
+    #[serde(default, with = "rust_decimal::serde::str")]
+    pub filled_quantity: Decimal,
+    #[serde(default, with = "rust_decimal::serde::str")]
+    pub avg_price: Decimal,
+    #[serde(default, with = "rust_decimal::serde::str")]
+    pub fee: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub premium: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub estimated_pnl: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub breakeven: Decimal,
+    #[serde(default)]
+    pub exchange_status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub settlement_action: String,
+    #[serde(default, with = "rust_decimal::serde::str")]
+    pub settlement_price: Decimal,
+    #[serde(default)]
+    pub settled_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub spot_order_id: Option<String>,
+    #[serde(default)]
+    pub spot_client_order_id: String,
+    #[serde(default)]
+    pub spot_order_status: String,
+    #[serde(default)]
+    pub rebalance_message: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -255,6 +287,166 @@ pub struct AuditEvent {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OrderAttemptStatus {
+    Attempted,
+    ExchangeAck,
+    Persisted,
+    PersistFailed,
+}
+
+impl OrderAttemptStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Attempted => "attempted",
+            Self::ExchangeAck => "exchange_ack",
+            Self::Persisted => "persisted",
+            Self::PersistFailed => "persist_failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct OrderAttempt {
+    pub id: String,
+    pub client_order_id: String,
+    pub symbol: String,
+    pub option_symbol: String,
+    pub direction: StrategyDirection,
+    pub status: OrderAttemptStatus,
+    pub exchange_order_id: Option<String>,
+    pub message: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderAttemptView {
+    pub id: String,
+    pub client_order_id: String,
+    pub symbol: String,
+    pub option_symbol: String,
+    pub direction: StrategyDirection,
+    pub status: String,
+    pub exchange_order_id: Option<String>,
+    pub message: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<OrderAttempt> for OrderAttemptView {
+    fn from(attempt: OrderAttempt) -> Self {
+        Self {
+            id: attempt.id,
+            client_order_id: attempt.client_order_id,
+            symbol: attempt.symbol,
+            option_symbol: attempt.option_symbol,
+            direction: attempt.direction,
+            status: attempt.status.as_str().to_string(),
+            exchange_order_id: attempt.exchange_order_id,
+            message: attempt.message,
+            created_at: attempt.created_at,
+            updated_at: attempt.updated_at,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct OptionAccountSnapshot {
+    pub assets: Vec<OptionAssetBalance>,
+    pub can_trade: bool,
+    pub time: Option<DateTime<Utc>>,
+}
+
+impl OptionAccountSnapshot {
+    pub fn asset(&self, asset: &str) -> Option<&OptionAssetBalance> {
+        self.assets.iter().find(|row| row.asset == asset)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SpotAccountSnapshot {
+    pub balances: Vec<SpotAssetBalance>,
+    pub can_trade: bool,
+}
+
+impl SpotAccountSnapshot {
+    pub fn asset(&self, asset: &str) -> Option<&SpotAssetBalance> {
+        self.balances.iter().find(|row| row.asset == asset)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SpotAssetBalance {
+    pub asset: String,
+    pub free: Decimal,
+    pub locked: Decimal,
+}
+
+#[derive(Clone, Debug)]
+pub struct OptionAssetBalance {
+    pub asset: String,
+    pub margin_balance: Decimal,
+    pub equity: Decimal,
+    pub available: Decimal,
+    pub initial_margin: Decimal,
+    pub maint_margin: Decimal,
+    pub unrealized_pnl: Decimal,
+    pub adjusted_equity: Decimal,
+}
+
+#[derive(Clone, Debug)]
+pub struct OptionContract {
+    pub symbol: String,
+    pub side: String,
+    pub strike_price: Decimal,
+    pub underlying: String,
+    pub unit: Decimal,
+    pub min_qty: Decimal,
+    pub max_qty: Decimal,
+    pub initial_margin: Decimal,
+    pub maintenance_margin: Decimal,
+    pub min_initial_margin: Decimal,
+    pub min_maintenance_margin: Decimal,
+    pub price_scale: u32,
+    pub quantity_scale: u32,
+    pub quote_asset: String,
+    pub status: String,
+    pub expiry: NaiveDate,
+}
+
+#[derive(Clone, Debug)]
+pub struct OptionMarkPrice {
+    pub symbol: String,
+    pub mark_price: Decimal,
+    pub mark_iv: Decimal,
+    pub delta: Decimal,
+    pub high_price_limit: Decimal,
+    pub low_price_limit: Decimal,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExchangeOrderAck {
+    pub order_id: String,
+    pub client_order_id: String,
+    pub symbol: String,
+    pub status: String,
+    pub executed_qty: Decimal,
+    pub avg_price: Decimal,
+    pub price: Decimal,
+    pub quantity: Decimal,
+    pub fee: Decimal,
+    pub create_time: Option<DateTime<Utc>>,
+    pub update_time: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExerciseRecord {
+    pub symbol: String,
+    pub settlement_price: Decimal,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyPreview {
@@ -280,6 +472,7 @@ pub struct AppSnapshot {
     pub risk: RiskSnapshot,
     pub auto_rule: AutoInvestmentRule,
     pub audit_recent: Vec<AuditEvent>,
+    pub order_attempts: Vec<OrderAttemptView>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

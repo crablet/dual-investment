@@ -6,6 +6,7 @@ import type {
   AppSnapshot,
   AutoInvestmentRule,
   ConnectBinanceRequest,
+  StrategyOrder,
   StrategyRequest,
   ToggleAutoRequest,
 } from '@/types/domain'
@@ -25,7 +26,10 @@ export const useAppStore = defineStore('app', () => {
   const risk = computed(() => snapshot.value?.risk)
   const autoRule = computed(() => snapshot.value?.autoRule)
   const auditRecent = computed(() => snapshot.value?.auditRecent ?? [])
-  const runningOrders = computed(() => orders.value.filter(order => order.status === 'running'))
+  const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
+  const runningOrders = computed(() =>
+    orders.value.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
+  )
 
   async function run<T>(task: () => Promise<T>): Promise<T | undefined> {
     loading.value = true
@@ -54,10 +58,43 @@ export const useAppStore = defineStore('app', () => {
     patchSettings(next)
   }
 
+  async function connectSaved() {
+    const next = await run(() => api.connectSavedBinance())
+    patchSettings(next)
+  }
+
+  async function forgetCredentials() {
+    const next = await run(() => api.forgetBinanceCredentials())
+    patchSettings(next)
+  }
+
   async function scan() {
     const next = await run(() => api.scanCandidates())
     if (next && snapshot.value) {
       snapshot.value = { ...snapshot.value, candidates: next }
+    }
+  }
+
+  async function syncLiveState() {
+    const next = await run(() => api.syncLiveState())
+    if (next) {
+      snapshot.value = next
+    }
+  }
+
+  async function runSettlementScan() {
+    const next = await run(() => api.runSettlementScan())
+    if (next && snapshot.value) {
+      snapshot.value = { ...snapshot.value, orders: mergeOrders(next, snapshot.value.orders) }
+      await refresh()
+    }
+  }
+
+  async function runAutoOnce() {
+    const order = await run(() => api.runAutoOnce())
+    if (order && snapshot.value) {
+      snapshot.value = { ...snapshot.value, orders: [order, ...snapshot.value.orders] }
+      await refresh()
     }
   }
 
@@ -92,6 +129,14 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  function mergeOrders(next: StrategyOrder[], current: StrategyOrder[]) {
+    const byId = new Map(current.map(order => [order.id, order]))
+    for (const order of next) {
+      byId.set(order.id, order)
+    }
+    return [...byId.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+  }
+
   return {
     snapshot,
     loading,
@@ -106,10 +151,16 @@ export const useAppStore = defineStore('app', () => {
     risk,
     autoRule,
     auditRecent,
+    orderAttempts,
     runningOrders,
     refresh,
     connect,
+    connectSaved,
+    forgetCredentials,
     scan,
+    syncLiveState,
+    runSettlementScan,
+    runAutoOnce,
     placeStrategy,
     saveRule,
     toggleAuto,

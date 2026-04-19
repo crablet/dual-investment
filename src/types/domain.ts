@@ -1,13 +1,22 @@
 export type DecimalString = string
 
 export type StrategyDirection = 'sellPut' | 'sellCall'
-export type StrategyStatus = 'pending' | 'running' | 'settled' | 'cancelled' | 'rebalanceFailed'
+export type StrategyStatus =
+  | 'pending'
+  | 'running'
+  | 'settled'
+  | 'cancelled'
+  | 'rejected'
+  | 'expired'
+  | 'partiallyFilled'
+  | 'rebalanceFailed'
 export type RecommendationLevel = 'recommended' | 'watch' | 'reject'
 export type RiskSeverity = 'low' | 'medium' | 'high'
 
 export interface AppSettings {
   connected: boolean
   apiKeyMasked?: string
+  savedCredentials: boolean
   autoEnabled: boolean
   quickExecution: boolean
   defaultSymbol: string
@@ -25,6 +34,7 @@ export interface MetricCard {
 
 export interface BalanceRow {
   asset: string
+  source: string
   free: DecimalString
   locked: DecimalString
   usdtValue: DecimalString
@@ -38,6 +48,7 @@ export interface StrategyCandidate {
   expiry: string
   strike: DecimalString
   quantity: DecimalString
+  limitPrice: DecimalString
   premium: DecimalString
   annualized: DecimalString
   deltaAbs: DecimalString
@@ -51,6 +62,7 @@ export interface StrategyCandidate {
 export interface StrategyOrder {
   id: string
   exchangeOrderId?: string
+  clientOrderId: string
   symbol: string
   optionSymbol: string
   direction: StrategyDirection
@@ -58,12 +70,22 @@ export interface StrategyOrder {
   expiry: string
   strike: DecimalString
   quantity: DecimalString
+  filledQuantity: DecimalString
+  avgPrice: DecimalString
+  fee: DecimalString
   premium: DecimalString
   estimatedPnl: DecimalString
   breakeven: DecimalString
+  exchangeStatus: string
   createdAt: string
   updatedAt: string
   settlementAction: string
+  settlementPrice: DecimalString
+  settledAt?: string
+  spotOrderId?: string
+  spotClientOrderId: string
+  spotOrderStatus: string
+  rebalanceMessage: string
 }
 
 export interface AutoInvestmentRule {
@@ -134,6 +156,19 @@ export interface AuditEvent {
   createdAt: string
 }
 
+export interface OrderAttemptView {
+  id: string
+  clientOrderId: string
+  symbol: string
+  optionSymbol: string
+  direction: StrategyDirection
+  status: string
+  exchangeOrderId?: string
+  message: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface StrategyPreview {
   candidate: StrategyCandidate
   maxProfit: DecimalString
@@ -152,6 +187,7 @@ export interface AppSnapshot {
   risk: RiskSnapshot
   autoRule: AutoInvestmentRule
   auditRecent: AuditEvent[]
+  orderAttempts: OrderAttemptView[]
 }
 
 export interface ConnectBinanceRequest {

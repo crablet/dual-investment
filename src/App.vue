@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { darkTheme, NConfigProvider, NDialogProvider, NMessageProvider } from 'naive-ui'
 import type { GlobalThemeOverrides } from 'naive-ui'
-import { computed, defineAsyncComponent, onMounted } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import { useAppStore } from '@/stores/app'
 
@@ -21,6 +21,7 @@ const views = {
 }
 
 const currentView = computed(() => views[store.activeView as keyof typeof views] ?? OverviewView)
+let syncTimer: number | undefined
 
 const accentColor = '#f5b625'
 const accentColorHover = '#ffcf55'
@@ -69,6 +70,17 @@ const themeOverrides: GlobalThemeOverrides = {
 
 onMounted(() => {
   void store.refresh()
+  syncTimer = window.setInterval(() => {
+    if (store.settings?.connected) {
+      void store.syncLiveState()
+    }
+  }, 60_000)
+})
+
+onBeforeUnmount(() => {
+  if (syncTimer !== undefined) {
+    window.clearInterval(syncTimer)
+  }
 })
 </script>
 

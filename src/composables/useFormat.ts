@@ -19,6 +19,9 @@ export function useFormat() {
       running: '进行中',
       settled: '已结算',
       cancelled: '已取消',
+      rejected: '已拒绝',
+      expired: '已过期',
+      partiallyFilled: '部分成交',
       rebalanceFailed: '补齐失败',
     }
     return map[status]
@@ -30,6 +33,9 @@ export function useFormat() {
       running: 'success',
       settled: 'info',
       cancelled: 'default',
+      rejected: 'error',
+      expired: 'default',
+      partiallyFilled: 'warning',
       rebalanceFailed: 'error',
     }
     return map[status]

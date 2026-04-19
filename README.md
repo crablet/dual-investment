@@ -2,6 +2,8 @@
 
 一个 Tauri 桌面客户端，用 Binance 期权 + 现货执行类似“双币赢”的实盘策略，目标是减少交易所打包产品对权利金收益的抽水。
 
+Rust 后端要求 Rust 1.95 或更新版本。
+
 ## 功能范围
 
 - 桌面端：Tauri 2 + Vue 3 + Naive UI + Rust。
@@ -11,7 +13,7 @@
   - 卖 Call 止盈：卖出 BTC 看涨期权，到期价高于执行价时自动卖出 BTC。
 - 自动定投：默认每天 `11:30` 扫描，单次 `0.01` 张，使用稳健筛选 preset。
 - 后台常驻：系统托盘提供主界面入口。
-- 数据持久化：本地 SQLite 保存策略订单和审计日志。
+- 数据持久化：Tauri 应用数据目录中的 SQLite 保存策略订单、订单尝试和审计日志；API 凭据通过 `keyring-core` 保存在系统 keyring。
 
 ## 重要风险
 
@@ -44,10 +46,15 @@ cd src-tauri && cargo test
 
 - `get_app_snapshot` 等 Tauri commands 已连接前后端。
 - 浏览器开发环境不再提供前端数据 fallback，需要通过 Tauri 客户端调用后端命令。
-- 启动快照在实盘数据同步前返回空持仓、空候选、空收益和空风控状态。
-- Rust 后端有 Binance EAPI/Spot 签名请求封装，真实期权下单使用受保护限价 + IOC 的快速成交路径。
+- 启动快照在未连接 API 前返回空持仓、空候选、空收益和空风控状态；连接后会从 Binance 期权保证金账户和现货账户同步余额、保证金和风控快照。
+- Rust 后端有 Binance EAPI/Spot 签名请求封装，连接时会真实校验期权账户和现货交易权限，下单前会读取 exchangeInfo、mark price、账户保证金并执行合约过滤器和风控规则校验。
+- 候选扫描已接入 Binance exchangeInfo + option mark price，按 `BTCUSDT`、合约状态、到期天数、数量范围、delta、年化和可用保证金生成候选。
+- 真实期权下单使用单位限价 + IOC 的快速成交路径，订单入库使用 Binance 返回的 `orderId`、`clientOrderId`、成交数量、均价和交易所状态；零成交、部分成交、拒绝、过期会分别落到不同本地状态。
+- SQLite 会记录订单尝试阶段，前端订单页会展示恢复记录，用于处理“交易所已创建订单但本地保存失败”的恢复提示。
+- 后台调度器会周期性同步订单状态、扫描到期订单；到期 ITM 后会按方向发送 Binance Spot 市价补齐订单，失败时进入 `rebalanceFailed` 并写审计事件。
 - 实盘自动策略开启需要二次确认；手动实盘下单也需要显式确认。
-- 候选扫描、账户/保证金同步、到期结算扫描与自动现货补齐需要继续接 Binance 行情、账户和用户数据流。
+- 自动策略开启后会按规则每日触发一次扫描；也可以在自动定投页手动执行一次自动扫描。
+- Binance API Key/Secret 通过 `keyring-core` + 平台 store 保存和读取；Linux 使用 DBus Secret Service，macOS 使用登录钥匙串，Windows 使用 Credential Manager。保存失败时不会建立实盘连接。
 
 ## 项目结构
 
@@ -62,13 +69,13 @@ src-tauri/
   src/app_state.rs   应用状态、订单与规则编排
   src/binance.rs     Binance 签名请求和订单接口
   src/domain.rs      金融领域模型
-  src/persistence.rs SQLite 审计和订单存储
+  src/persistence.rs SQLite 审计、订单和订单尝试存储
+  src/secrets.rs     系统 keyring 凭据读写
   src/strategy.rs    策略预览和实盘规则默认值
 ```
 
-## 下一步
+## 后续增强
 
-- 接入 Binance exchangeInfo 过滤器，按真实合约 tick/step size 校验下单。
-- 接入 user data stream，实时同步成交、保证金和订单状态。
-- 增加后台调度器，执行到期判定、现货补齐和失败重试。
-- 将 API Secret 从内存迁移到系统 keychain 或 Tauri Stronghold。
+- 接入 user data stream，将当前 60 秒轮询同步升级为更实时的订单和保证金推送。
+- 使用真实历史波动率窗口计算 IV Rank，目前候选筛选仍以 Binance mark IV 和 delta 为主。
+- 补充更完整的成交、结算、现货补齐端到端联调记录。

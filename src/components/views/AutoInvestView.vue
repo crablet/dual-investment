@@ -69,6 +69,13 @@ function toggle(value: boolean) {
     confirmLive: true,
   })
 }
+
+function runAutoNow() {
+  if (!window.confirm('确认立即执行一次自动扫描？若存在推荐候选，将直接发送实盘订单。')) {
+    return
+  }
+  void store.runAutoOnce()
+}
 </script>
 
 <template>
@@ -95,6 +102,7 @@ function toggle(value: boolean) {
             <span>{{ candidate.recommendation === 'recommended' ? '推荐' : candidate.recommendation === 'watch' ? '观察' : '放弃' }}</span>
           </header>
           <p>执行价 <b>{{ money(candidate.strike) }}</b></p>
+          <p>单位限价 <b>{{ money(candidate.limitPrice) }}</b></p>
           <p>到期 <b>{{ candidate.expiry }}</b></p>
           <p>预计年化 <b :class="{ positive: candidate.recommendation !== 'reject', negative: candidate.recommendation === 'reject' }">{{ percent(candidate.annualized) }}</b></p>
           <em>{{ candidate.reason }}</em>
@@ -150,6 +158,10 @@ function toggle(value: boolean) {
         <NButton secondary size="large" @click="store.scan">
           <template #icon><NIcon :component="Search" /></template>
           立即扫描
+        </NButton>
+        <NButton secondary size="large" :disabled="!store.settings?.autoEnabled" @click="runAutoNow">
+          <template #icon><NIcon :component="Search" /></template>
+          执行一次自动单
         </NButton>
       </div>
     </Panel>

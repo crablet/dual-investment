@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ArrowDownCircle, ArrowUpCircle, PlusCircle, Zap } from 'lucide-vue-next'
-import { NButton, NIcon, NInputNumber } from 'naive-ui'
-import { computed, reactive } from 'vue'
+import { NButton, NIcon, NInput, NInputNumber } from 'naive-ui'
+import { computed, reactive, watch } from 'vue'
 import CandidateTable from '@/components/common/CandidateTable.vue'
 import MiniLineChart from '@/components/common/MiniLineChart.vue'
 import Panel from '@/components/common/Panel.vue'
@@ -18,18 +18,42 @@ const form = reactive({
   quantity: 0.01,
   limitPrice: 0,
   expiry: store.candidates[0]?.expiry ?? new Date(Date.now() + 14 * 86400_000).toISOString().slice(0, 10),
+  optionSymbol: '',
 })
 
+const matchingCandidate = computed(() =>
+  store.candidates.find(candidate =>
+    candidate.direction === form.direction
+    && candidate.expiry === form.expiry
+    && Number(candidate.strike) === form.strike,
+  ),
+)
 const selectedCandidate = computed(() =>
-  store.candidates.find(candidate => candidate.direction === form.direction) ?? store.candidates[0],
+  store.candidates.find(candidate => candidate.optionSymbol === form.optionSymbol)
+  ?? matchingCandidate.value,
+)
+const canSubmit = computed(() =>
+  Boolean(store.settings?.connected)
+  && form.strike > 0
+  && form.quantity >= 0.01
+  && form.limitPrice > 0,
+)
+
+watch(
+  () => [form.direction, form.expiry, form.strike] as const,
+  () => {
+    form.optionSymbol = matchingCandidate.value?.optionSymbol ?? ''
+  },
+  { immediate: true },
 )
 
 function applyCandidate(candidate: StrategyCandidate) {
   form.direction = candidate.direction
   form.strike = Number(candidate.strike)
   form.quantity = Number(candidate.quantity)
-  form.limitPrice = Number(candidate.premium)
+  form.limitPrice = Number(candidate.limitPrice)
   form.expiry = candidate.expiry
+  form.optionSymbol = candidate.optionSymbol
 }
 
 function submit() {
@@ -39,7 +63,7 @@ function submit() {
   void store.placeStrategy({
     candidateId: selectedCandidate.value?.id,
     symbol: 'BTCUSDT',
-    optionSymbol: selectedCandidate.value?.optionSymbol,
+    optionSymbol: form.optionSymbol.trim() || selectedCandidate.value?.optionSymbol,
     direction: form.direction,
     expiry: form.expiry,
     strike: String(form.strike),
@@ -52,7 +76,7 @@ function submit() {
 
 <template>
   <div class="view-grid">
-    <Panel title="新建策略" subtitle="快速成交，成交后到期 ITM 自动现货补齐" class="span-5">
+    <Panel title="新建策略" subtitle="快速成交，后台同步到期状态并执行 ITM 现货补齐" class="span-5">
       <div class="strategy-form">
         <div class="segmented">
           <button :class="{ active: form.direction === 'sellPut' }" type="button" @click="form.direction = 'sellPut'">
@@ -80,8 +104,12 @@ function submit() {
           到期日
           <input v-model="form.expiry" class="native-input" type="date">
         </label>
+        <label>
+          Binance 期权合约
+          <NInput v-model:value="form.optionSymbol" placeholder="BTC-260626-72000-P" />
+        </label>
         <div class="button-row">
-          <NButton type="primary" size="large" @click="submit">
+          <NButton type="primary" size="large" :disabled="!canSubmit" @click="submit">
             <template #icon><NIcon :component="Zap" /></template>
             发送实盘订单
           </NButton>
@@ -100,6 +128,10 @@ function submit() {
           <article>
             <span>最大收益</span>
             <strong>{{ money(selectedCandidate.premium) }}</strong>
+          </article>
+          <article>
+            <span>单位限价</span>
+            <strong>{{ money(selectedCandidate.limitPrice) }}</strong>
           </article>
           <article>
             <span>保本价</span>
@@ -121,7 +153,7 @@ function submit() {
       <ul class="summary-list">
         <li>卖出看跌期权，若 BTC 低于执行价到期，则自动用预留 USDT 买入 BTC。</li>
         <li>卖出看涨期权，若 BTC 高于执行价到期，则自动卖出预留 BTC 完成止盈。</li>
-        <li>快速成交使用受保护限价，成交价低于策略阈值时放弃下单。</li>
+        <li>快速成交使用单位限价 IOC，未成交、部分成交和拒绝状态都会写入本地订单。</li>
       </ul>
     </Panel>
 

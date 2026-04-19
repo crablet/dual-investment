@@ -639,7 +639,7 @@ input {
 }
 
 .payoff-stats {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .payoff-stats span {
@@ -821,6 +821,17 @@ input {
 
   .view-grid > .metric-card {
     grid-column: span 3;
+  }
+
+  .settings-connection {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-permissions {
+    padding-left: 0;
+    padding-top: 16px;
+    border-left: 0;
+    border-top: 1px solid var(--line);
   }
 }
 

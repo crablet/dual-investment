@@ -4,6 +4,7 @@
 
 - 默认使用中文沟通。
 - 不要把真实 API Secret、签名 query、订单响应原文写入日志或前端状态。
+- API Key/Secret 只允许通过 `src-tauri/src/secrets.rs` 写入系统 keyring；不要保存到 SQLite、审计日志、前端 store 或导出文件。
 - 本项目只保留实盘路径；不要恢复模式切换、离线占位数据或浏览器数据 fallback。
 - 任何下单功能都按真实下单处理，必须有显式确认门禁和审计事件。
 - 不要用 `f64` 表示金额、价格、数量、权利金、手续费或收益率；Rust 侧使用 `rust_decimal::Decimal`，前端以字符串承接。
@@ -14,12 +15,13 @@
 - 普通浏览器运行仅用于检查布局；缺少 Tauri runtime 时应暴露明确错误，不要补前端数据 fallback。
 - 实盘行情、账户、保证金、候选扫描未接入前，应返回空状态或明确错误。
 - 历史订单只展示带交易所订单号的记录；不要展示旧的本地占位订单。
+- 交易所已接单但本地订单保存失败时，必须保留 `order_attempts` 恢复记录和明确错误提示；不要吞掉交易所订单号。
 
 ## 技术栈
 
 - 前端：Vue 3、`<script setup lang="ts">`、Pinia、Naive UI、Vite。
 - 桌面：Tauri 2。
-- 后端：Rust 2024 edition、SQLite、reqwest、rust_decimal。
+- 后端：Rust 2024 edition、SQLite、reqwest、rust_decimal、keyring-core + 平台 keyring store。
 - 包管理：pnpm。
 
 ## Vue 约定
@@ -34,6 +36,7 @@
 
 - 金融领域类型集中在 `src-tauri/src/domain.rs`。
 - Binance 接口只放在 `binance.rs`，不要让前端或策略层拼签名。
+- 系统凭据读写只放在 `secrets.rs`，通过 `keyring-core` 显式配置平台 store；调用方只接收连接状态或脱敏 API Key。
 - 策略计算放在 `strategy.rs`，状态编排放在 `app_state.rs`。
 - 所有 command 返回 `Result<T, String>`，内部用 `AppError` 表达错误。
 - 订单、审计、资金变更应写不可变事件；不要覆盖历史事实。

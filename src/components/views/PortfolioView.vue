@@ -8,13 +8,16 @@ import { useAppStore } from '@/stores/app'
 const store = useAppStore()
 const { money } = useFormat()
 
+const obligationOrders = computed(() =>
+  store.orders.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
+)
 const sellPutMargin = computed(() =>
-  store.orders
+  obligationOrders.value
     .filter(order => order.direction === 'sellPut')
     .reduce((sum, order) => sum + Number(order.strike) * Number(order.quantity), 0),
 )
 const sellCallQuantity = computed(() =>
-  store.orders
+  obligationOrders.value
     .filter(order => order.direction === 'sellCall')
     .reduce((sum, order) => sum + Number(order.quantity), 0),
 )
@@ -35,6 +38,7 @@ const balanceBreakdown = computed(() =>
         <div v-for="balance in store.balances" :key="balance.asset" class="account-row">
           <span>{{ balance.asset }}</span>
           <strong>{{ balance.free }}</strong>
+          <small>{{ balance.source }}</small>
           <em>{{ money(balance.usdtValue) }}</em>
         </div>
       </div>
@@ -44,12 +48,12 @@ const balanceBreakdown = computed(() =>
       <div class="obligation-list">
         <article>
           <strong>卖出看跌义务仓</strong>
-          <span>{{ store.orders.filter(order => order.direction === 'sellPut').length }} 个</span>
+          <span>{{ obligationOrders.filter(order => order.direction === 'sellPut').length }} 个</span>
           <em>保证金占用 {{ money(String(sellPutMargin)) }}</em>
         </article>
         <article>
           <strong>卖出看涨义务仓</strong>
-          <span>{{ store.orders.filter(order => order.direction === 'sellCall').length }} 个</span>
+          <span>{{ obligationOrders.filter(order => order.direction === 'sellCall').length }} 个</span>
           <em>BTC 占用 {{ sellCallQuantity.toFixed(4) }}</em>
         </article>
       </div>
@@ -77,14 +81,14 @@ const balanceBreakdown = computed(() =>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="order in store.orders" :key="order.id">
+            <tr v-for="order in obligationOrders" :key="order.id">
               <td>BTC</td>
               <td>{{ order.direction === 'sellPut' ? '卖出看跌（义务）' : '卖出看涨（义务）' }}</td>
               <td>{{ order.quantity }} BTC</td>
               <td>{{ money(order.strike) }}</td>
               <td>{{ order.expiry }}</td>
               <td class="positive">{{ money(order.estimatedPnl) }}</td>
-              <td>正常运行</td>
+              <td>{{ order.status === 'partiallyFilled' ? '部分成交' : '运行中' }}</td>
             </tr>
             <tr v-for="balance in store.balances" :key="balance.asset">
               <td>{{ balance.asset }}</td>
