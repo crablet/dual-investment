@@ -1,13 +1,11 @@
 export type DecimalString = string
 
-export type TradingMode = 'simulation' | 'live'
 export type StrategyDirection = 'sellPut' | 'sellCall'
 export type StrategyStatus = 'pending' | 'running' | 'settled' | 'cancelled' | 'rebalanceFailed'
 export type RecommendationLevel = 'recommended' | 'watch' | 'reject'
 export type RiskSeverity = 'low' | 'medium' | 'high'
 
 export interface AppSettings {
-  mode: TradingMode
   connected: boolean
   apiKeyMasked?: string
   autoEnabled: boolean
@@ -159,7 +157,6 @@ export interface AppSnapshot {
 export interface ConnectBinanceRequest {
   apiKey: string
   apiSecret: string
-  live: boolean
 }
 
 export interface StrategyRequest {
@@ -170,7 +167,7 @@ export interface StrategyRequest {
   expiry: string
   strike: DecimalString
   quantity: DecimalString
-  live: boolean
+  limitPrice: DecimalString
   confirmLive: boolean
 }
 

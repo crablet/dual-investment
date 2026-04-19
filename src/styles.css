@@ -278,6 +278,16 @@ input {
   border-bottom: 1px solid var(--line);
 }
 
+.mini-chart-empty {
+  display: grid;
+  place-items: center;
+  height: 186px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.018);
+}
+
 .chart-axis {
   display: flex;
   justify-content: space-between;
@@ -387,6 +397,15 @@ input {
 .negative { color: var(--red); }
 .warning { color: var(--gold); }
 
+.empty-state {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.018);
+}
+
 .task-row button {
   border: 1px solid rgba(245, 182, 37, 0.3);
   border-radius: 6px;
@@ -415,11 +434,22 @@ input {
 .task-index.warning { background: #ff9c1a; }
 .task-index.blue { background: var(--blue); color: white; }
 
+.auto-status-panel {
+  container-type: inline-size;
+}
+
 .auto-state {
   display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1.1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   align-items: stretch;
+  min-width: 0;
+}
+
+@container (min-width: 860px) {
+  .auto-state {
+    grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.1fr);
+  }
 }
 
 .auto-scan-card {
@@ -457,19 +487,26 @@ input {
   justify-content: space-between;
   gap: 12px;
   margin: 0;
+  min-width: 0;
   min-height: 44px;
   padding: 8px 10px 8px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
 }
 
 .auto-status-item span {
   color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .auto-status-value {
   display: inline-flex;
+  flex: 0 0 auto;
   justify-content: center;
   align-items: center;
   min-width: 74px;
@@ -507,8 +544,7 @@ input {
 .summary-cards article,
 .scan-list article,
 .payoff-stats article,
-.security-list .security-action,
-.tray-benefits article {
+.security-list .security-action {
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -743,87 +779,6 @@ input {
 .security-action-button .n-button__content {
   justify-content: center;
   width: 100%;
-}
-
-.tray-page {
-  display: grid;
-  grid-template-columns: 460px minmax(360px, 1fr);
-  gap: 30px;
-  align-items: start;
-  max-width: 1120px;
-  margin: 0 auto;
-}
-
-.tray-card {
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.3);
-}
-
-.tray-card header {
-  display: grid;
-  grid-template-columns: 48px 1fr auto;
-  gap: 12px;
-  align-items: center;
-}
-
-.tray-card header strong {
-  font-size: 24px;
-  color: var(--gold);
-}
-
-.tray-status {
-  display: grid;
-  gap: 10px;
-  margin: 18px 0;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
-.tray-status p {
-  display: flex;
-  justify-content: space-between;
-  margin: 0;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.tray-status p:last-child {
-  border-bottom: 0;
-}
-
-.tray-actions {
-  display: grid;
-  gap: 10px;
-}
-
-.tray-benefits {
-  display: grid;
-  gap: 18px;
-}
-
-.tray-benefits article {
-  display: grid;
-  grid-template-columns: 58px 1fr;
-  gap: 16px;
-  align-items: center;
-}
-
-.tray-benefits .n-icon {
-  width: 58px;
-  height: 58px;
-  padding: 14px;
-  border-radius: 50%;
-  color: var(--gold);
-  background: var(--surface-3);
-}
-
-.tray-benefits span {
-  display: block;
-  color: var(--muted);
 }
 
 .pill-row {

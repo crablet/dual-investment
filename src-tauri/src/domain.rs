@@ -18,19 +18,6 @@ pub type AppResult<T> = Result<T, AppError>;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum TradingMode {
-    Simulation,
-    Live,
-}
-
-impl Default for TradingMode {
-    fn default() -> Self {
-        Self::Simulation
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub enum StrategyDirection {
     SellPut,
     SellCall,
@@ -81,7 +68,6 @@ pub enum RiskSeverity {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
-    pub mode: TradingMode,
     pub connected: bool,
     pub api_key_masked: Option<String>,
     pub auto_enabled: bool,
@@ -301,7 +287,6 @@ pub struct AppSnapshot {
 pub struct ConnectBinanceRequest {
     pub api_key: String,
     pub api_secret: String,
-    pub live: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -316,7 +301,8 @@ pub struct StrategyRequest {
     pub strike: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub quantity: Decimal,
-    pub live: bool,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub limit_price: Decimal,
     pub confirm_live: bool,
 }
 

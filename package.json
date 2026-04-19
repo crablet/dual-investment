@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Tauri desktop app that simulates Binance Dual Investment using options and spot execution.",
+  "description": "Tauri desktop app that runs Binance dual-investment-style live option and spot strategies.",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "vue-tsc --noEmit && vite build",
@@ -27,6 +27,5 @@
     "typescript": "^6.0.3",
     "vite": "^8.0.12",
     "vue-tsc": "^3.2.8"
-  },
-  "packageManager": "pnpm@10.0.0"
+  }
 }

@@ -16,16 +16,23 @@ watchEffect(() => {
 })
 
 const selected = computed(() => store.orders.find(order => order.id === selectedId.value) ?? store.orders[0])
+const totalPremium = computed(() =>
+  store.orders.reduce((sum, order) => sum + Number(order.premium), 0),
+)
+const todayExpiryCount = computed(() => {
+  const today = new Date().toISOString().slice(0, 10)
+  return store.orders.filter(order => order.expiry === today).length
+})
 </script>
 
 <template>
   <div class="view-grid">
     <Panel title="订单统计" class="span-12">
       <div class="summary-cards">
-        <article><span>总订单数</span><strong>{{ store.orders.length }}</strong><em>较昨日 +12.28%</em></article>
-        <article><span>进行中订单</span><strong>{{ store.runningOrders.length }}</strong><em>占比 28.13%</em></article>
-        <article><span>今日到期</span><strong>8</strong><em>预计权利金 ¥2,186.72</em></article>
-        <article><span>累计收取权利金</span><strong>¥ 48,862.37</strong><em>较昨日 +1.28%</em></article>
+        <article><span>总订单数</span><strong>{{ store.orders.length }}</strong><em>本地实盘订单</em></article>
+        <article><span>进行中订单</span><strong>{{ store.runningOrders.length }}</strong><em>当前未结算</em></article>
+        <article><span>今日到期</span><strong>{{ todayExpiryCount }}</strong><em>按本地订单统计</em></article>
+        <article><span>累计权利金</span><strong>{{ money(String(totalPremium)) }}</strong><em>已记录订单</em></article>
       </div>
     </Panel>
 
@@ -62,6 +69,7 @@ const selected = computed(() => store.orders.find(order => order.id === selected
             </tr>
           </tbody>
         </table>
+        <p v-if="store.orders.length === 0" class="empty-state">暂无实盘订单</p>
       </div>
     </Panel>
 
@@ -82,6 +90,7 @@ const selected = computed(() => store.orders.find(order => order.id === selected
           <NButton secondary @click="store.activeView = 'dual'">复制策略</NButton>
         </div>
       </div>
+      <p v-else class="empty-state">暂无订单详情</p>
     </Panel>
   </div>
 </template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowDownCircle, ArrowUpCircle, PlusCircle, Zap } from 'lucide-vue-next'
-import { NButton, NIcon, NInputNumber, NSelect } from 'naive-ui'
+import { NButton, NIcon, NInputNumber } from 'naive-ui'
 import { computed, reactive } from 'vue'
 import CandidateTable from '@/components/common/CandidateTable.vue'
 import MiniLineChart from '@/components/common/MiniLineChart.vue'
@@ -16,6 +16,7 @@ const form = reactive({
   direction: 'sellPut' as StrategyDirection,
   strike: 72000,
   quantity: 0.01,
+  limitPrice: 0,
   expiry: store.candidates[0]?.expiry ?? new Date(Date.now() + 14 * 86400_000).toISOString().slice(0, 10),
 })
 
@@ -23,19 +24,18 @@ const selectedCandidate = computed(() =>
   store.candidates.find(candidate => candidate.direction === form.direction) ?? store.candidates[0],
 )
 
-const directionOptions = [
-  { label: '卖 Put 抄底 BTC', value: 'sellPut' },
-  { label: '卖 Call 止盈 BTC', value: 'sellCall' },
-]
-
 function applyCandidate(candidate: StrategyCandidate) {
   form.direction = candidate.direction
   form.strike = Number(candidate.strike)
   form.quantity = Number(candidate.quantity)
+  form.limitPrice = Number(candidate.premium)
   form.expiry = candidate.expiry
 }
 
-function submit(live: boolean) {
+function submit() {
+  if (!window.confirm('确认发送 Binance 实盘期权订单？')) {
+    return
+  }
   void store.placeStrategy({
     candidateId: selectedCandidate.value?.id,
     symbol: 'BTCUSDT',
@@ -44,8 +44,8 @@ function submit(live: boolean) {
     expiry: form.expiry,
     strike: String(form.strike),
     quantity: form.quantity.toFixed(2),
-    live,
-    confirmLive: !live || window.confirm('确认发送主网期权订单？'),
+    limitPrice: String(form.limitPrice),
+    confirmLive: true,
   })
 }
 </script>
@@ -65,10 +65,6 @@ function submit(live: boolean) {
           </button>
         </div>
         <label>
-          策略方向
-          <NSelect v-model:value="form.direction" :options="directionOptions" />
-        </label>
-        <label>
           执行价 USDT
           <NInputNumber v-model:value="form.strike" :min="1" :step="100" />
         </label>
@@ -77,13 +73,17 @@ function submit(live: boolean) {
           <NInputNumber v-model:value="form.quantity" :min="0.01" :step="0.01" />
         </label>
         <label>
+          权利金限价 USDT
+          <NInputNumber v-model:value="form.limitPrice" :min="0.01" :step="0.01" />
+        </label>
+        <label>
           到期日
           <input v-model="form.expiry" class="native-input" type="date">
         </label>
         <div class="button-row">
-          <NButton type="primary" size="large" @click="submit(store.settings?.mode === 'live')">
+          <NButton type="primary" size="large" @click="submit">
             <template #icon><NIcon :component="Zap" /></template>
-            立即下单
+            发送实盘订单
           </NButton>
           <NButton secondary size="large" @click="store.activeView = 'auto'">
             <template #icon><NIcon :component="PlusCircle" /></template>

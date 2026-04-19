@@ -14,7 +14,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         builder = builder.icon(icon.clone());
     }
     builder
-        .tooltip("模拟双币赢后台助手")
+        .tooltip("双币赢实盘助手")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
             "quit" => app.exit(0),

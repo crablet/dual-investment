@@ -7,6 +7,8 @@ const props = defineProps<{
   center: string
 }>()
 
+const hasItems = computed(() => props.items.length > 0)
+
 const total = computed(() =>
   props.items.reduce((sum, item) => sum + Math.abs(Number(item.value)), 0) || 1,
 )
@@ -45,6 +47,7 @@ const segments = computed(() => {
       <text x="21" y="25" text-anchor="middle">USDT</text>
     </svg>
     <div class="donut-legend">
+      <p v-if="!hasItems" class="empty-state">暂无实盘构成数据</p>
       <div v-for="item in items" :key="item.label" class="legend-row">
         <span :style="{ background: item.color }" />
         <p>{{ item.label }}</p>

@@ -18,7 +18,6 @@ const views = {
   analytics: defineAsyncComponent(() => import('@/components/views/AnalyticsView.vue')),
   risk: defineAsyncComponent(() => import('@/components/views/RiskView.vue')),
   settings: defineAsyncComponent(() => import('@/components/views/SettingsView.vue')),
-  tray: defineAsyncComponent(() => import('@/components/views/TrayPreviewView.vue')),
 }
 
 const currentView = computed(() => views[store.activeView as keyof typeof views] ?? OverviewView)

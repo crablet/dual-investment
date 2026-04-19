@@ -2,7 +2,6 @@ use chrono::Utc;
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::{Client, StatusCode};
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
 
@@ -20,12 +19,9 @@ pub struct BinanceClient {
     spot_base: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug)]
 pub struct ExchangeOrderAck {
     pub order_id: String,
-    pub client_order_id: Option<String>,
-    pub raw: Value,
 }
 
 impl BinanceClient {
@@ -42,7 +38,6 @@ impl BinanceClient {
     pub async fn place_option_order(
         &self,
         request: &StrategyRequest,
-        protected_limit_price: Decimal,
     ) -> AppResult<ExchangeOrderAck> {
         let option_symbol = request.option_symbol.clone().ok_or_else(|| {
             AppError::Config("真实期权下单必须提供 Binance option symbol".to_string())
@@ -58,7 +53,7 @@ impl BinanceClient {
             ),
             (
                 "price".to_string(),
-                protected_limit_price.round_dp(2).normalize().to_string(),
+                request.limit_price.round_dp(2).normalize().to_string(),
             ),
             (
                 "newClientOrderId".to_string(),
@@ -128,20 +123,17 @@ impl BinanceClient {
             .send()
             .await
             .map_err(|error| AppError::Binance(error.to_string()))?;
-        let raw = Self::decode_response(response.status(), response.text().await).await?;
-        let order_id = raw
+        let response_json = Self::decode_response(response.status(), response.text().await).await?;
+        let order_id = response_json
             .get("orderId")
-            .map(Value::to_string)
+            .and_then(|value| {
+                value
+                    .as_str()
+                    .map(ToOwned::to_owned)
+                    .or_else(|| value.as_i64().map(|id| id.to_string()))
+            })
             .unwrap_or_else(|| format!("binance-{}", Utc::now().timestamp_millis()));
-        let client_order_id = raw
-            .get("clientOrderId")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned);
-        Ok(ExchangeOrderAck {
-            order_id,
-            client_order_id,
-            raw,
-        })
+        Ok(ExchangeOrderAck { order_id })
     }
 
     fn signed_params(&self, mut params: Vec<(String, String)>) -> AppResult<Vec<(String, String)>> {
@@ -165,7 +157,9 @@ impl BinanceClient {
     ) -> AppResult<Value> {
         let body = body_result.map_err(|error| AppError::Binance(error.to_string()))?;
         if !status.is_success() {
-            return Err(AppError::Binance(format!("HTTP {status}: {body}")));
+            return Err(AppError::Binance(format!(
+                "Binance 请求失败（HTTP {status}）"
+            )));
         }
         serde_json::from_str::<Value>(&body).map_err(|error| AppError::Binance(error.to_string()))
     }

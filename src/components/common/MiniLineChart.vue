@@ -6,8 +6,13 @@ const props = defineProps<{
   points: ChartPoint[]
 }>()
 
+const hasPoints = computed(() => props.points.length > 0)
+
 const polyline = computed(() => {
   const values = props.points.map(point => Number(point.value))
+  if (values.length === 0) {
+    return ''
+  }
   const min = Math.min(...values)
   const max = Math.max(...values)
   const span = max - min || 1
@@ -23,7 +28,7 @@ const polyline = computed(() => {
 
 <template>
   <div class="mini-chart">
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+    <svg v-if="hasPoints" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
       <defs>
         <linearGradient id="line-fill" x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stop-color="#f5b625" stop-opacity="0.35" />
@@ -33,7 +38,8 @@ const polyline = computed(() => {
       <polyline :points="`0,100 ${polyline} 100,100`" fill="url(#line-fill)" stroke="none" />
       <polyline :points="polyline" fill="none" stroke="#f5b625" stroke-width="2.4" stroke-linecap="round" />
     </svg>
-    <div class="chart-axis">
+    <div v-else class="mini-chart-empty">暂无实盘收益数据</div>
+    <div v-if="hasPoints" class="chart-axis">
       <span v-for="point in points" :key="point.label">{{ point.label }}</span>
     </div>
   </div>

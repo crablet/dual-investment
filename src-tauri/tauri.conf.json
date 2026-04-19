@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "模拟双币赢",
+  "productName": "双币赢实盘助手",
   "version": "0.1.0",
   "identifier": "com.dualinvestment.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "模拟双币赢",
+        "title": "双币赢实盘助手",
         "width": 1440,
         "height": 940,
         "minWidth": 1180,
@@ -30,6 +30,6 @@
     "targets": "all",
     "category": "Finance",
     "shortDescription": "Options and spot strategy runner",
-    "longDescription": "A desktop app that simulates Binance Dual Investment using options and spot orders."
+    "longDescription": "A desktop app that runs Binance dual-investment-style option and spot strategies in live mode."
   }
 }

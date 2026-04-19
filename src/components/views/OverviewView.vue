@@ -14,6 +14,30 @@ const { money } = useFormat()
 
 const activeStrategies = computed(() => store.orders.slice(0, 4))
 const pnlCenter = computed(() => Number(store.pnl?.cumulative ?? 0).toLocaleString('zh-CN'))
+const expiringOrdersCount = computed(() => {
+  const today = new Date()
+  const threshold = new Date(today.getTime() + 7 * 86400_000)
+  return store.orders.filter((order) => {
+    const expiry = new Date(order.expiry)
+    return expiry >= today && expiry <= threshold
+  }).length
+})
+const pendingTasks = computed(() => [
+  {
+    id: 'expiring-orders',
+    tone: '',
+    text: `${expiringOrdersCount.value} 个实盘订单将在 7 天内到期`,
+    view: 'orders',
+    visible: expiringOrdersCount.value > 0,
+  },
+  {
+    id: 'candidate-count',
+    tone: 'blue',
+    text: `当前有 ${store.candidates.length} 个实盘候选机会`,
+    view: 'auto',
+    visible: store.candidates.length > 0,
+  },
+].filter(item => item.visible))
 const autoStatusItems = computed(() => [
   {
     label: '自动扫描',
@@ -33,6 +57,9 @@ const autoStatusItems = computed(() => [
 ])
 
 function placeCandidate(candidate: StrategyCandidate) {
+  if (!window.confirm('确认发送 Binance 实盘期权订单？')) {
+    return
+  }
   void store.placeStrategy({
     candidateId: candidate.id,
     symbol: candidate.symbol,
@@ -41,8 +68,8 @@ function placeCandidate(candidate: StrategyCandidate) {
     expiry: candidate.expiry,
     strike: candidate.strike,
     quantity: candidate.quantity,
-    live: store.settings?.mode === 'live',
-    confirmLive: store.settings?.mode !== 'live' || window.confirm('确认发送主网期权订单？'),
+    limitPrice: candidate.premium,
+    confirmLive: true,
   })
 }
 </script>
@@ -71,30 +98,21 @@ function placeCandidate(candidate: StrategyCandidate) {
 
     <Panel title="待处理事项" class="span-6">
       <div class="task-list">
-        <div class="task-row">
-          <span class="task-index">1</span>
-          有 2 个双币订单即将到期
-          <button type="button" @click="store.activeView = 'orders'">查看</button>
-        </div>
-        <div class="task-row">
-          <span class="task-index warning">2</span>
-          1 个策略订单缺少保证金补充
-          <button type="button" @click="store.activeView = 'risk'">查看</button>
-        </div>
-        <div class="task-row">
-          <span class="task-index blue">3</span>
-          自动定投发现 3 个候选机会
-          <button type="button" @click="store.activeView = 'auto'">查看</button>
+        <p v-if="pendingTasks.length === 0" class="empty-state">暂无待处理事项</p>
+        <div v-for="(task, index) in pendingTasks" :key="task.id" class="task-row">
+          <span class="task-index" :class="task.tone">{{ index + 1 }}</span>
+          {{ task.text }}
+          <button type="button" @click="store.activeView = task.view">查看</button>
         </div>
       </div>
     </Panel>
 
-    <Panel title="自动定投状态" class="span-6">
+    <Panel title="自动定投状态" class="span-6 auto-status-panel">
       <div class="auto-state">
         <div class="auto-scan-card">
-          <span>下次扫描时间</span>
-          <strong>01:23:45</strong>
-          <em>预计 11:30 自动扫描市场</em>
+          <span>扫描计划</span>
+          <strong>{{ store.autoRule?.schedule ?? '未设置' }}</strong>
+          <em>{{ store.settings?.connected ? '实盘 API 已连接' : '等待 Binance 实盘 API 连接' }}</em>
         </div>
         <div class="auto-status-list">
           <p v-for="item in autoStatusItems" :key="item.label" class="auto-status-item">

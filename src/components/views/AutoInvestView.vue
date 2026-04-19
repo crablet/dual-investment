@@ -61,9 +61,12 @@ function save() {
 }
 
 function toggle(value: boolean) {
+  if (value && !window.confirm('确认开启实盘自动定投？后续符合条件的自动单不会逐笔确认。')) {
+    return
+  }
   void store.toggleAuto({
     enabled: value,
-    confirmLive: store.settings?.mode !== 'live' || window.confirm('确认开启实盘自动定投？'),
+    confirmLive: true,
   })
 }
 </script>
@@ -85,6 +88,7 @@ function toggle(value: boolean) {
 
     <Panel title="策略预览 / 今日扫描结果" class="span-5 row-span-3">
       <div class="scan-list">
+        <p v-if="recommended.length === 0" class="empty-state">暂无实盘候选机会</p>
         <article v-for="candidate in recommended" :key="candidate.id" :class="candidate.recommendation">
           <header>
             <strong>{{ candidate.direction === 'sellPut' ? 'BTC 双币赢 抄底' : 'BTC 双币赢 止盈' }}</strong>
@@ -127,10 +131,10 @@ function toggle(value: boolean) {
 
     <Panel title="3. 执行保护" class="span-7">
       <div class="protection-grid">
-        <p>单笔最大亏损限制 <strong>{{ money(store.risk?.rules.maxSingleOrderUsdt ?? '500') }}</strong></p>
-        <p>单日最大执行次数 <strong>{{ store.risk?.rules.maxDailyOrders ?? '20' }} 次</strong></p>
-        <p>连续亏损停止 <strong>{{ store.risk?.rules.stopAfterConsecutiveLosses ?? 3 }} 次</strong></p>
-        <p>市场剧烈波动暂停 <strong>已启用</strong></p>
+        <p>单笔最大亏损限制 <strong>{{ money(store.risk?.rules.maxSingleOrderUsdt ?? '0') }}</strong></p>
+        <p>单日最大执行次数 <strong>{{ store.risk?.rules.maxDailyOrders ?? '0' }} 次</strong></p>
+        <p>连续亏损停止 <strong>{{ store.risk?.rules.stopAfterConsecutiveLosses ?? 0 }} 次</strong></p>
+        <p>最大回撤阈值 <strong>{{ percent(store.risk?.rules.maxDrawdown ?? '0') }}</strong></p>
       </div>
       <template #action>
         <NSwitch :value="store.settings?.autoEnabled ?? false" @update:value="toggle" />
@@ -141,7 +145,7 @@ function toggle(value: boolean) {
       <div class="button-row">
         <NButton type="primary" size="large" @click="save">
           <template #icon><NIcon :component="Save" /></template>
-          保存并启动自动定投
+          保存实盘规则
         </NButton>
         <NButton secondary size="large" @click="store.scan">
           <template #icon><NIcon :component="Search" /></template>

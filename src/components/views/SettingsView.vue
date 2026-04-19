@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { Download, KeyRound, RefreshCw, Trash2 } from 'lucide-vue-next'
-import { NButton, NIcon, NInput, NSwitch } from 'naive-ui'
-import { reactive } from 'vue'
+import { Download, KeyRound } from 'lucide-vue-next'
+import { NButton, NIcon, NInput } from 'naive-ui'
+import { computed, reactive } from 'vue'
 import Panel from '@/components/common/Panel.vue'
 import { api } from '@/services/api'
 import { useAppStore } from '@/stores/app'
@@ -10,88 +10,231 @@ const store = useAppStore()
 const form = reactive({
   apiKey: '',
   apiSecret: '',
-  live: false,
 })
 
-function connect() {
-  void store.connect({ ...form })
+const canConnect = computed(() => form.apiKey.trim().length > 0 && form.apiSecret.length > 0)
+const backendStatus = computed(() => store.settings?.connected ? '实盘已连接' : '等待连接')
+const backendStatusClass = computed(() => store.settings?.connected ? 'positive' : 'warning')
+const auditCountLabel = computed(() => `${store.auditRecent.length} 条`)
+
+async function connect() {
+  if (!canConnect.value) {
+    return
+  }
+
+  const request = {
+    apiKey: form.apiKey.trim(),
+    apiSecret: form.apiSecret,
+  }
+  form.apiSecret = ''
+  await store.connect(request)
 }
 
 async function exportLogs() {
   const payload = await api.exportAuditLogs()
-  console.info(payload)
-  window.alert('审计日志已输出到开发者控制台。Tauri 打包版会返回 JSON 内容用于保存。')
+  const blob = new Blob([payload], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `dual-investment-audit-${new Date().toISOString().slice(0, 10)}.json`
+  link.click()
+  URL.revokeObjectURL(url)
+  window.alert('审计日志已导出。')
 }
 </script>
 
 <template>
-  <div class="view-grid">
-    <Panel title="账户与 API" class="span-8">
-      <div class="settings-grid">
-        <p><span>API 连接状态</span><strong :class="store.settings?.connected ? 'positive' : 'warning'">{{ store.settings?.connected ? '已连接' : '未连接' }}</strong></p>
-        <p><span>连接账户</span><strong>Binance（现货 & 期权）</strong></p>
-        <p><span>API Key</span><strong>{{ store.settings?.apiKeyMasked ?? '未配置' }}</strong></p>
-        <p><span>权限要求</span><strong>读取账户、读取行情、现货交易、期权交易；禁止提现</strong></p>
-      </div>
-      <div class="connect-form">
-        <NInput v-model:value="form.apiKey" placeholder="API Key" />
-        <NInput v-model:value="form.apiSecret" type="password" placeholder="API Secret" show-password-on="click" />
-        <label class="inline-control">
-          实盘模式
-          <NSwitch v-model:value="form.live" />
-        </label>
-        <NButton type="primary" @click="connect">
-          <template #icon><NIcon :component="KeyRound" /></template>
-          重新连接
-        </NButton>
-      </div>
-    </Panel>
-
-    <Panel title="当前环境" class="span-4">
-      <div class="detail-list">
-        <p><span>运行模式</span><strong>{{ store.settings?.mode === 'live' ? '实盘模式' : '模拟模式' }}</strong></p>
-        <p><span>后台状态</span><strong class="positive">后台运行中</strong></p>
-        <p><span>数据存储</span><strong>本地 SQLite</strong></p>
-        <p><span>版本号</span><strong>v0.1.0</strong></p>
-      </div>
-    </Panel>
-
-    <Panel title="通知设置" class="span-4">
-      <div class="setting-list">
-        <article><span>系统托盘通知</span><NSwitch :value="true" /></article>
-        <article><span>提示音</span><NSwitch :value="true" /></article>
-        <article><span>Telegram 通知</span><NSwitch :value="true" /></article>
-        <article><span>邮件通知</span><NSwitch :value="false" /></article>
-      </div>
-    </Panel>
-
-    <Panel title="应用偏好" class="span-4">
-      <div class="setting-list">
-        <article><span>开机启动</span><NSwitch :value="true" /></article>
-        <article><span>最小化到托盘</span><NSwitch :value="true" /></article>
-        <article><span>快速成交</span><NSwitch :value="store.settings?.quickExecution" /></article>
-        <article><span>自动更新</span><NSwitch :value="true" /></article>
-      </div>
-    </Panel>
-
-    <Panel title="安全与日志" class="span-4">
-      <div class="security-list">
-        <div class="security-action">
-          <NIcon :component="Download" />
-          <span>导出日志</span>
-          <NButton class="security-action-button" size="small" secondary @click="exportLogs">导出</NButton>
+  <div class="settings-page">
+    <Panel title="实盘连接" class="settings-main">
+      <div class="settings-connection">
+        <div class="settings-connect-form">
+          <NInput v-model:value="form.apiKey" placeholder="API Key" />
+          <NInput v-model:value="form.apiSecret" type="password" placeholder="API Secret" show-password-on="click" />
+          <NButton type="primary" :disabled="!canConnect" :loading="store.loading" @click="connect">
+            <template #icon><NIcon :component="KeyRound" /></template>
+            连接实盘账户
+          </NButton>
         </div>
-        <div class="security-action">
-          <NIcon :component="Trash2" />
-          <span>清除缓存</span>
-          <NButton class="security-action-button" size="small" secondary>清除</NButton>
+
+        <section class="settings-permissions" aria-label="API 权限">
+          <h3>权限</h3>
+          <ul>
+            <li><span>读取账户</span><strong>需要</strong></li>
+            <li><span>读取行情</span><strong>需要</strong></li>
+            <li><span>现货交易</span><strong>需要</strong></li>
+            <li><span>期权交易</span><strong>需要</strong></li>
+            <li><span>提现</span><strong class="warning">禁止</strong></li>
+          </ul>
+        </section>
+      </div>
+    </Panel>
+
+    <Panel title="运行状态" class="settings-side">
+      <dl class="settings-status-list">
+        <div>
+          <dt>模式</dt>
+          <dd>实盘</dd>
         </div>
-        <div class="security-action">
-          <NIcon :component="RefreshCw" />
-          <span>检查更新</span>
-          <NButton class="security-action-button" size="small" secondary>检查</NButton>
+        <div>
+          <dt>后台</dt>
+          <dd :class="backendStatusClass">{{ backendStatus }}</dd>
         </div>
+        <div>
+          <dt>存储</dt>
+          <dd>本地 SQLite</dd>
+        </div>
+        <div>
+          <dt>版本</dt>
+          <dd>v0.1.0</dd>
+        </div>
+      </dl>
+    </Panel>
+
+    <Panel title="安全与日志" class="settings-ops">
+      <div class="settings-operation-row">
+        <NIcon :component="Download" />
+        <span>审计日志</span>
+        <strong>{{ auditCountLabel }}</strong>
+        <NButton size="small" secondary @click="exportLogs">导出</NButton>
       </div>
     </Panel>
   </div>
 </template>
+
+<style scoped>
+.settings-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.85fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.settings-ops {
+  grid-column: 1 / -1;
+}
+
+.settings-connection {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(220px, 0.72fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.settings-connect-form {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-connect-form :deep(.n-button) {
+  width: 100%;
+}
+
+.settings-permissions {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
+}
+
+.settings-permissions h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-permissions ul {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-permissions li,
+.settings-status-list div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  min-height: 38px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-permissions li:last-child,
+.settings-status-list div:last-child {
+  border-bottom: 0;
+}
+
+.settings-permissions span,
+.settings-status-list dt {
+  min-width: 0;
+  color: var(--muted);
+}
+
+.settings-permissions strong,
+.settings-status-list dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.settings-permissions strong.warning,
+.settings-status-list dd.warning {
+  color: var(--gold);
+}
+
+.settings-status-list dd.positive {
+  color: var(--green);
+}
+
+.settings-status-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.settings-operation-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 40px;
+}
+
+.settings-operation-row .n-icon {
+  color: var(--muted);
+  font-size: 20px;
+}
+
+.settings-operation-row span {
+  min-width: 0;
+}
+
+.settings-operation-row strong {
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 1120px) {
+  .settings-page,
+  .settings-connection {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-ops {
+    grid-column: auto;
+  }
+
+  .settings-permissions {
+    padding-top: 16px;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+</style>

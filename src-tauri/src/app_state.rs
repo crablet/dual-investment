@@ -8,14 +8,13 @@ use crate::binance::BinanceClient;
 use crate::domain::{
     AppError, AppResult, AppSettings, AppSnapshot, AuditEvent, AutoInvestmentRule, BalanceRow,
     ConnectBinanceRequest, PnlReport, RiskSnapshot, StrategyCandidate, StrategyOrder,
-    StrategyRequest, ToggleAutoRequest, TradingMode,
+    StrategyRequest, ToggleAutoRequest,
 };
 use crate::persistence::Persistence;
 use crate::strategy;
 
 #[derive(Clone, Debug)]
 pub struct RuntimeConfig {
-    pub mode: TradingMode,
     pub connected: bool,
     pub api_key_masked: Option<String>,
     pub api_key: Option<String>,
@@ -28,12 +27,11 @@ pub struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            mode: TradingMode::Simulation,
             connected: false,
             api_key_masked: None,
             api_key: None,
             api_secret: None,
-            auto_enabled: true,
+            auto_enabled: false,
             quick_execution: true,
             default_symbol: "BTCUSDT".to_string(),
         }
@@ -43,7 +41,6 @@ impl Default for RuntimeConfig {
 impl RuntimeConfig {
     pub fn settings(&self) -> AppSettings {
         AppSettings {
-            mode: self.mode,
             connected: self.connected,
             api_key_masked: self.api_key_masked.clone(),
             auto_enabled: self.auto_enabled,
@@ -63,21 +60,19 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> AppResult<Self> {
         let persistence = Persistence::open_default()?;
-        let mut orders = persistence.list_orders()?;
-        if orders.is_empty() {
-            orders = strategy::seed_orders();
-            for order in &orders {
-                persistence.save_order(order)?;
-            }
-        }
+        let orders = persistence
+            .list_orders()?
+            .into_iter()
+            .filter(|order| order.exchange_order_id.is_some())
+            .collect();
 
         let state = Self {
             runtime: RwLock::new(RuntimeConfig::default()),
-            auto_rule: RwLock::new(strategy::default_auto_rule(true)),
+            auto_rule: RwLock::new(strategy::default_auto_rule(false)),
             orders: RwLock::new(orders),
             persistence: Mutex::new(persistence),
         };
-        state.record_audit("app.started", "应用已启动，默认进入模拟模式")?;
+        state.record_audit("app.started", "应用已启动，等待 Binance 实盘 API 连接")?;
         Ok(state)
     }
 
@@ -93,10 +88,10 @@ impl AppState {
 
         Ok(AppSnapshot {
             metrics: strategy::build_metrics(&settings),
-            balances: strategy::default_balances(),
-            candidates: strategy::default_candidates(),
-            pnl: strategy::build_pnl_report(),
-            risk: strategy::build_risk_snapshot(),
+            balances: Vec::new(),
+            candidates: Vec::new(),
+            pnl: strategy::empty_pnl_report(),
+            risk: strategy::empty_risk_snapshot(),
             settings,
             auto_rule,
             orders,
@@ -110,11 +105,6 @@ impl AppState {
         }
 
         let mut runtime = self.runtime.write().await;
-        runtime.mode = if request.live {
-            TradingMode::Live
-        } else {
-            TradingMode::Simulation
-        };
         runtime.connected = true;
         runtime.api_key_masked = Some(mask_api_key(&request.api_key));
         runtime.api_key = Some(request.api_key);
@@ -122,22 +112,15 @@ impl AppState {
         let settings = runtime.settings();
         drop(runtime);
 
-        self.record_audit(
-            "account.connected",
-            &format!(
-                "已连接 Binance，运行模式：{}",
-                match settings.mode {
-                    TradingMode::Simulation => "模拟",
-                    TradingMode::Live => "实盘",
-                }
-            ),
-        )?;
+        self.record_audit("account.connected", "已连接 Binance 实盘账户")?;
         Ok(settings)
     }
 
     pub async fn scan_candidates(&self) -> AppResult<Vec<StrategyCandidate>> {
-        self.record_audit("strategy.scan", "完成一次自动定投候选扫描")?;
-        Ok(strategy::default_candidates())
+        self.ensure_connected().await?;
+        Err(AppError::Config(
+            "实盘候选扫描尚未接入 Binance 行情数据源".to_string(),
+        ))
     }
 
     pub async fn preview_strategy(
@@ -154,35 +137,24 @@ impl AppState {
     ) -> AppResult<StrategyOrder> {
         validate_request(&request)?;
         let runtime = self.runtime.read().await.clone();
-        if request.live {
-            if runtime.mode != TradingMode::Live {
-                return Err(AppError::Config(
-                    "当前不是实盘模式，不能发起主网下单".to_string(),
-                ));
-            }
-            if !request.confirm_live {
-                return Err(AppError::RiskRejected(
-                    "主网手动下单需要显式确认".to_string(),
-                ));
-            }
+        if !runtime.connected {
+            return Err(AppError::Config("请先连接 Binance 实盘 API".to_string()));
+        }
+        if !request.confirm_live {
+            return Err(AppError::RiskRejected(
+                "实盘手动下单需要显式确认".to_string(),
+            ));
         }
 
-        let preview = strategy::preview_strategy(&request);
-        let exchange_order_id = if request.live {
-            let api_key = runtime
-                .api_key
-                .ok_or_else(|| AppError::Config("缺少 Binance API Key".to_string()))?;
-            let api_secret = runtime
-                .api_secret
-                .ok_or_else(|| AppError::Config("缺少 Binance API Secret".to_string()))?;
-            let client = BinanceClient::new(api_key, api_secret);
-            let ack = client
-                .place_option_order(&request, preview.protected_limit_price)
-                .await?;
-            Some(ack.order_id)
-        } else {
-            None
-        };
+        let api_key = runtime
+            .api_key
+            .ok_or_else(|| AppError::Config("缺少 Binance API Key".to_string()))?;
+        let api_secret = runtime
+            .api_secret
+            .ok_or_else(|| AppError::Config("缺少 Binance API Secret".to_string()))?;
+        let client = BinanceClient::new(api_key, api_secret);
+        let ack = client.place_option_order(&request).await?;
+        let exchange_order_id = Some(ack.order_id);
 
         let order = strategy::order_from_request(&request, exchange_order_id);
         {
@@ -218,7 +190,10 @@ impl AppState {
 
     pub async fn toggle_auto_strategy(&self, request: ToggleAutoRequest) -> AppResult<AppSettings> {
         let mut runtime = self.runtime.write().await;
-        if request.enabled && runtime.mode == TradingMode::Live && !request.confirm_live {
+        if request.enabled && !runtime.connected {
+            return Err(AppError::Config("请先连接 Binance 实盘 API".to_string()));
+        }
+        if request.enabled && !request.confirm_live {
             return Err(AppError::RiskRejected(
                 "实盘自动策略开启需要二次确认".to_string(),
             ));
@@ -247,15 +222,15 @@ impl AppState {
     }
 
     pub fn balances(&self) -> Vec<BalanceRow> {
-        strategy::default_balances()
+        Vec::new()
     }
 
     pub fn pnl_report(&self) -> PnlReport {
-        strategy::build_pnl_report()
+        strategy::empty_pnl_report()
     }
 
     pub fn risk_snapshot(&self) -> RiskSnapshot {
-        strategy::build_risk_snapshot()
+        strategy::empty_risk_snapshot()
     }
 
     pub fn export_audit_logs(&self) -> AppResult<String> {
@@ -279,6 +254,14 @@ impl AppState {
             .map_err(|error| AppError::Storage(error.to_string()))?
             .append_audit(&event)
     }
+
+    async fn ensure_connected(&self) -> AppResult<()> {
+        if self.runtime.read().await.connected {
+            Ok(())
+        } else {
+            Err(AppError::Config("请先连接 Binance 实盘 API".to_string()))
+        }
+    }
 }
 
 fn validate_request(request: &StrategyRequest) -> AppResult<()> {
@@ -294,6 +277,9 @@ fn validate_request(request: &StrategyRequest) -> AppResult<()> {
     }
     if request.strike <= rust_decimal::Decimal::ZERO {
         return Err(AppError::RiskRejected("执行价必须大于 0".to_string()));
+    }
+    if request.limit_price <= rust_decimal::Decimal::ZERO {
+        return Err(AppError::RiskRejected("实盘限价必须大于 0".to_string()));
     }
     Ok(())
 }
