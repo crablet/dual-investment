@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Activity, Coins, Shield, Wallet } from 'lucide-vue-next'
+import { Activity, Coins, Shield, Wallet } from '@lucide/vue'
 import { NIcon } from 'naive-ui'
 import type { MetricCard } from '@/types/domain'
 

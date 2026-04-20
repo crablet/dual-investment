@@ -55,8 +55,31 @@ export interface StrategyCandidate {
   ivRank: DecimalString
   exerciseProbability: DecimalString
   breakeven: DecimalString
+  spotPrice: DecimalString
+  strikeDistancePercent: DecimalString
   recommendation: RecommendationLevel
   reason: string
+}
+
+export interface CandidateScanDiagnostics {
+  rawContracts: number
+  rawMarks: number
+  btcContracts: number
+  tradingContracts: number
+  directionMatched: number
+  expiryMatched: number
+  markMatched: number
+  quantityMatched: number
+  returnedCandidates: number
+  returnedSellPut: number
+  returnedSellCall: number
+  browseMinDays: number
+  browseMaxDays: number
+}
+
+export interface CandidateScanResult {
+  candidates: StrategyCandidate[]
+  diagnostics: CandidateScanDiagnostics
 }
 
 export interface StrategyOrder {
@@ -185,6 +208,7 @@ export interface AppSnapshot {
   metrics: MetricCard[]
   balances: BalanceRow[]
   candidates: StrategyCandidate[]
+  scanDiagnostics: CandidateScanDiagnostics
   orders: StrategyOrder[]
   pnl: PnlReport
   risk: RiskSnapshot

@@ -17,10 +17,10 @@ use uuid::Uuid;
 use crate::binance::BinanceClient;
 use crate::domain::{
     AppError, AppResult, AppSettings, AppSnapshot, AuditEvent, AutoInvestmentRule, BalanceRow,
-    ConnectBinanceRequest, ExchangeOrderAck, OptionAccountSnapshot, OptionContract,
-    OptionMarkPrice, OrderAttempt, OrderAttemptStatus, OrderAttemptView, PnlReport, RiskSnapshot,
-    SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder, StrategyRequest,
-    StrategyStatus, ToggleAutoRequest,
+    CandidateScanDiagnostics, CandidateScanResult, ConnectBinanceRequest, ExchangeOrderAck,
+    OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt, OrderAttemptStatus,
+    OrderAttemptView, PnlReport, RiskSnapshot, SpotAccountSnapshot, StrategyCandidate,
+    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
 };
 use crate::persistence::Persistence;
 use crate::secrets;
@@ -72,6 +72,7 @@ pub struct AppState {
     runtime: Arc<RwLock<RuntimeConfig>>,
     client: Arc<RwLock<Option<BinanceClient>>>,
     candidates: Arc<RwLock<Vec<StrategyCandidate>>>,
+    scan_diagnostics: Arc<RwLock<CandidateScanDiagnostics>>,
     auto_rule: Arc<RwLock<AutoInvestmentRule>>,
     orders: Arc<RwLock<Vec<StrategyOrder>>>,
     persistence: Arc<Mutex<Persistence>>,
@@ -99,6 +100,7 @@ impl AppState {
             runtime: Arc::new(RwLock::new(RuntimeConfig::default())),
             client: Arc::new(RwLock::new(None)),
             candidates: Arc::new(RwLock::new(Vec::new())),
+            scan_diagnostics: Arc::new(RwLock::new(CandidateScanDiagnostics::default())),
             auto_rule: Arc::new(RwLock::new(auto_rule)),
             orders: Arc::new(RwLock::new(orders)),
             persistence: Arc::new(Mutex::new(persistence)),
@@ -113,6 +115,7 @@ impl AppState {
         let settings = self.runtime.read().await.settings();
         let auto_rule = self.auto_rule.read().await.clone();
         let candidates = self.candidates.read().await.clone();
+        let scan_diagnostics = self.scan_diagnostics.read().await.clone();
         let orders = self.orders.read().await.clone();
         let accounts = self.live_accounts_if_connected().await?;
         let (audit_recent, order_attempts) = {
@@ -144,6 +147,7 @@ impl AppState {
             metrics: strategy::build_metrics(&settings, option_account, &orders),
             balances,
             candidates,
+            scan_diagnostics,
             pnl: strategy::pnl_report_from_orders_with_spot(&orders, spot_price),
             risk: option_account.map_or_else(
                 strategy::empty_risk_snapshot,
@@ -268,6 +272,10 @@ impl AppState {
             candidates.clear();
         }
         {
+            let mut scan_diagnostics = self.scan_diagnostics.write().await;
+            *scan_diagnostics = CandidateScanDiagnostics::default();
+        }
+        {
             let mut rule = self.auto_rule.write().await;
             rule.enabled = false;
         }
@@ -278,7 +286,7 @@ impl AppState {
         Ok(settings)
     }
 
-    pub async fn scan_candidates(&self) -> AppResult<Vec<StrategyCandidate>> {
+    pub async fn scan_candidates(&self) -> AppResult<CandidateScanResult> {
         let client = self.live_client().await?;
         let account_task = spawn_binance_request({
             let client = client.clone();
@@ -292,22 +300,32 @@ impl AppState {
             let client = client.clone();
             async move { client.option_mark_prices().await }
         });
+        let spot_price_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.spot_price("BTCUSDT").await }
+        });
         let auto_rule = self.auto_rule.read().await.clone();
         let orders = self.orders.read().await.clone();
         let account = join_binance_request(account_task).await;
         let contracts = join_binance_request(contracts_task).await;
         let marks = join_binance_request(marks_task).await;
+        let spot_price = join_binance_request(spot_price_task).await;
         let account = account?;
         let contracts = contracts?;
         let marks = marks?;
-        let candidates = strategy::build_candidates(
-            &contracts, &marks, &auto_rule, &account, &orders,
+        let spot_price = spot_price?;
+        let result = strategy::build_candidates(
+            &contracts, &marks, &auto_rule, &account, &orders, spot_price,
         );
         {
             let mut cached_candidates = self.candidates.write().await;
-            cached_candidates.clone_from(&candidates);
+            cached_candidates.clone_from(&result.candidates);
         }
-        Ok(candidates)
+        {
+            let mut scan_diagnostics = self.scan_diagnostics.write().await;
+            scan_diagnostics.clone_from(&result.diagnostics);
+        }
+        Ok(result)
     }
 
     pub fn preview_strategy(
@@ -323,9 +341,7 @@ impl AppState {
     ) -> AppResult<StrategyOrder> {
         validate_request(&request)?;
         if !request.confirm_live {
-            return Err(AppError::RiskRejected(
-                "手动下单需要显式确认".to_string(),
-            ));
+            return Err(AppError::RiskRejected("手动下单需要显式确认".to_string()));
         }
         self.place_live_strategy(request, "manual").await
     }
@@ -850,8 +866,8 @@ impl AppState {
     }
 
     async fn execute_auto_strategy(&self) -> AppResult<Option<StrategyOrder>> {
-        let candidates = self.scan_candidates().await?;
-        let Some(candidate) = candidates.into_iter().find(|candidate| {
+        let result = self.scan_candidates().await?;
+        let Some(candidate) = result.candidates.into_iter().find(|candidate| {
             candidate.recommendation == crate::domain::RecommendationLevel::Recommended
         }) else {
             self.record_audit("strategy.auto.no_candidate", "本次自动扫描无推荐候选")?;
@@ -1146,9 +1162,7 @@ fn resolve_contract<'a>(
                 && contract.side == request.direction.option_type()
         })
         .ok_or_else(|| {
-            AppError::RiskRejected(
-                "未找到与方向、到期日和执行价匹配的 Binance 合约".to_string(),
-            )
+            AppError::RiskRejected("未找到与方向、到期日和执行价匹配的 Binance 合约".to_string())
         })
 }
 

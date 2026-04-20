@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RefreshCw, ScanLine } from 'lucide-vue-next'
+import { RefreshCw, ScanLine } from '@lucide/vue'
 import { computed, shallowRef, watchEffect } from 'vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
 import Panel from '@/components/common/Panel.vue'
@@ -42,11 +42,11 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
           </NButton>
         </div>
       </template>
-      <div class="summary-cards">
-        <article><span>总订单数</span><strong>{{ store.orders.length }}</strong><em>本地订单</em></article>
-        <article><span>进行中订单</span><strong>{{ store.runningOrders.length }}</strong><em>当前未结算</em></article>
-        <article><span>今日到期</span><strong>{{ todayExpiryCount }}</strong><em>按本地订单统计</em></article>
-        <article><span>累计权利金</span><strong>{{ money(String(totalPremium)) }}</strong><em>已记录订单</em></article>
+      <div class="summary-cards order-summary-cards">
+        <article><span>总订单数</span><strong>{{ store.orders.length }}</strong></article>
+        <article><span>进行中订单</span><strong>{{ store.runningOrders.length }}</strong></article>
+        <article><span>今日到期</span><strong>{{ todayExpiryCount }}</strong></article>
+        <article><span>累计权利金</span><strong>{{ money(String(totalPremium)) }}</strong></article>
       </div>
     </Panel>
 

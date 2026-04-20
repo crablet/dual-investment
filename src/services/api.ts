@@ -4,11 +4,11 @@ import type {
   AppSnapshot,
   AutoInvestmentRule,
   BalanceRow,
+  CandidateScanResult,
   ConnectBinanceRequest,
   OrderAttemptView,
   PnlReport,
   RiskSnapshot,
-  StrategyCandidate,
   StrategyOrder,
   StrategyPreview,
   StrategyRequest,
@@ -31,7 +31,7 @@ export const api = {
     call<AppSettings>('connect_binance', { request }),
   connectSavedBinance: () => call<AppSettings>('connect_saved_binance'),
   forgetBinanceCredentials: () => call<AppSettings>('forget_binance_credentials'),
-  scanCandidates: () => call<StrategyCandidate[]>('scan_candidates'),
+  scanCandidates: () => call<CandidateScanResult>('scan_candidates'),
   previewStrategy: (request: StrategyRequest) =>
     call<StrategyPreview>('preview_strategy', { request }),
   placeManualStrategy: (request: StrategyRequest) =>

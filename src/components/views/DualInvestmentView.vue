@@ -1,16 +1,89 @@
 <script setup lang="ts">
-import { ArrowDownCircle, ArrowUpCircle, PlusCircle, Zap } from 'lucide-vue-next'
-import { NButton, NDatePicker, NIcon, NInput, NInputNumber } from 'naive-ui'
-import { computed, reactive, watch } from 'vue'
-import CandidateTable from '@/components/common/CandidateTable.vue'
-import MiniLineChart from '@/components/common/MiniLineChart.vue'
-import Panel from '@/components/common/Panel.vue'
+import {
+  ArrowDownCircle,
+  ArrowUpDown,
+  ArrowUpCircle,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  Zap,
+} from '@lucide/vue'
+import {
+  NButton,
+  NCheckbox,
+  NDatePicker,
+  NIcon,
+  NInput,
+  NInputNumber,
+  NSlider,
+  NSwitch,
+} from 'naive-ui'
+import { computed, reactive, shallowRef, watch, watchEffect } from 'vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import type { StrategyCandidate, StrategyDirection } from '@/types/domain'
 
+interface RuleForm {
+  enabled: boolean
+  schedule: string
+  quantity: number
+  minAnnualized: number
+  maxDeltaAbs: number
+  maxIvRank: number
+  minDaysToExpiry: number
+  maxDaysToExpiry: number
+  includeBtc: boolean
+  excludeSameDirection: boolean
+}
+
+interface CandidateFilterForm {
+  minAnnualized: number | null
+  maxExerciseProbability: number | null
+  maxDistanceAbs: number | null
+}
+
+type CandidateSortKey = 'strike' | 'annualized' | 'expiry' | 'limitPrice' | 'exerciseProbability'
+type CandidateSortDirection = 'asc' | 'desc'
+
 const store = useAppStore()
 const { money, percent } = useFormat()
+
+const dayMs = 86_400_000
+const expiryFilters = [
+  { id: 'all', label: '所有到期日' },
+  { id: 'lt3', label: '< 3 天' },
+  { id: 'lt7', label: '< 7 天' },
+  { id: 'd7_30', label: '7-30 天' },
+  { id: 'd30_60', label: '30-60 天' },
+  { id: 'gt60', label: '> 60 天' },
+] as const
+
+const candidateSortColumns: Array<{ key: CandidateSortKey, label: string }> = [
+  { key: 'strike', label: '目标价' },
+  { key: 'annualized', label: '年化' },
+  { key: 'expiry', label: '到期' },
+  { key: 'limitPrice', label: '价格' },
+  { key: 'exerciseProbability', label: '被行权概率' },
+]
+
+const candidateSortDefaultDirection: Record<CandidateSortKey, CandidateSortDirection> = {
+  strike: 'asc',
+  annualized: 'desc',
+  expiry: 'asc',
+  limitPrice: 'desc',
+  exerciseProbability: 'asc',
+}
+
+type ExpiryFilter = typeof expiryFilters[number]['id']
+
+const selectedCandidateId = shallowRef<string>()
+const expiryFilter = shallowRef<ExpiryFilter>('all')
+const candidateSortKey = shallowRef<CandidateSortKey>('annualized')
+const candidateSortDirection = shallowRef<CandidateSortDirection>('desc')
+const advancedAutoOpen = shallowRef(false)
+const autoScanRequested = shallowRef(false)
 
 function formatDateInput(date: Date) {
   const year = date.getFullYear()
@@ -24,8 +97,40 @@ const form = reactive({
   strike: 72000,
   quantity: 0.01,
   limitPrice: 0,
-  expiry: store.candidates[0]?.expiry ?? formatDateInput(new Date(Date.now() + 14 * 86400_000)),
+  expiry: store.candidates[0]?.expiry ?? formatDateInput(new Date(Date.now() + 14 * dayMs)),
   optionSymbol: '',
+})
+
+const ruleForm = reactive<RuleForm>({
+  enabled: false,
+  schedule: '每天 11:30',
+  quantity: 0.01,
+  minAnnualized: 15,
+  maxDeltaAbs: 0.30,
+  maxIvRank: 60,
+  minDaysToExpiry: 7,
+  maxDaysToExpiry: 45,
+  includeBtc: true,
+  excludeSameDirection: true,
+})
+
+const candidateFilter = reactive<CandidateFilterForm>({
+  minAnnualized: null,
+  maxExerciseProbability: null,
+  maxDistanceAbs: null,
+})
+
+watchEffect(() => {
+  if (!store.autoRule) {
+    return
+  }
+  Object.assign(ruleForm, {
+    ...store.autoRule,
+    quantity: Number(store.autoRule.quantity),
+    minAnnualized: Number(store.autoRule.minAnnualized),
+    maxDeltaAbs: Number(store.autoRule.maxDeltaAbs),
+    maxIvRank: Number(store.autoRule.maxIvRank),
+  })
 })
 
 const matchingCandidate = computed(() =>
@@ -35,26 +140,246 @@ const matchingCandidate = computed(() =>
     && Number(candidate.strike) === form.strike,
   ),
 )
+
 const selectedCandidate = computed(() =>
-  store.candidates.find(candidate => candidate.optionSymbol === form.optionSymbol)
+  store.candidates.find(candidate => candidate.id === selectedCandidateId.value && candidateMatchesForm(candidate))
+  ?? store.candidates.find(candidate => candidate.optionSymbol === form.optionSymbol && candidateMatchesForm(candidate))
   ?? matchingCandidate.value,
 )
+
+const filteredCandidates = computed(() =>
+  store.candidates
+    .filter(candidate => candidate.direction === form.direction)
+    .filter(matchesExpiryFilter)
+    .filter(matchesCandidateFilters),
+)
+
+const sortedCandidates = computed(() =>
+  filteredCandidates.value
+    .map((candidate, index) => ({ candidate, index }))
+    .sort((left, right) => {
+      const modifier = candidateSortDirection.value === 'asc' ? 1 : -1
+      const delta = compareCandidateSortValue(
+        left.candidate,
+        right.candidate,
+        candidateSortKey.value,
+      )
+      return delta === 0 ? left.index - right.index : delta * modifier
+    })
+    .map(item => item.candidate),
+)
+
+const activeCandidateFilterCount = computed(() =>
+  [
+    candidateFilter.minAnnualized,
+    candidateFilter.maxExerciseProbability,
+    candidateFilter.maxDistanceAbs,
+  ].filter(value => value !== null).length,
+)
+
+const referenceSpotPrice = computed(() =>
+  store.candidates.find(candidate => Number(candidate.spotPrice) > 0)?.spotPrice,
+)
+
+const directionStats = computed(() => ({
+  sellPut: store.candidates.filter(candidate => candidate.direction === 'sellPut').length,
+  sellCall: store.candidates.filter(candidate => candidate.direction === 'sellCall').length,
+}))
+
+const panelTitle = computed(() =>
+  form.direction === 'sellPut' ? '以 USDT 低买 BTC' : '以 BTC 高卖 BTC',
+)
+
+const activeDirectionLabel = computed(() =>
+  form.direction === 'sellPut' ? '低买' : '高卖',
+)
+
+const otherDirectionLabel = computed(() =>
+  form.direction === 'sellPut' ? '高卖' : '低买',
+)
+
+const activeOptionType = computed(() =>
+  form.direction === 'sellPut' ? 'Put' : 'Call',
+)
+
+const optionSymbolPlaceholder = computed(() =>
+  form.direction === 'sellPut' ? 'BTC-260626-72000-P' : 'BTC-260626-82000-C',
+)
+
+const currentDirectionCandidateCount = computed(() =>
+  form.direction === 'sellPut' ? directionStats.value.sellPut : directionStats.value.sellCall,
+)
+
+const otherDirectionCandidateCount = computed(() =>
+  form.direction === 'sellPut' ? directionStats.value.sellCall : directionStats.value.sellPut,
+)
+
+const emptyCandidateTitle = computed(() => {
+  if (store.candidates.length === 0) return '暂无候选'
+  if (activeCandidateFilterCount.value > 0) return '当前筛选没有候选'
+  if (currentDirectionCandidateCount.value > 0) return '当前到期日没有候选'
+  return `暂无${activeDirectionLabel.value}（${activeOptionType.value}）候选`
+})
+
+const emptyCandidateHint = computed(() => {
+  if (store.candidates.length === 0) return '当前还没有候选，请先重新扫描。'
+  if (activeCandidateFilterCount.value > 0) {
+    return '可以放宽年化、被行权概率或距现货筛选，也可以一键重置筛选条件。'
+  }
+  if (currentDirectionCandidateCount.value === 0 && otherDirectionCandidateCount.value > 0) {
+    return `本次扫描只有${otherDirectionLabel.value}候选，当前没有${activeDirectionLabel.value}候选。可以放宽自动复投规则，或切换到${otherDirectionLabel.value}查看。`
+  }
+  return '当前到期日筛选没有命中；候选浏览范围为 1-90 天，可以切换到所有到期日，或在右侧手动输入合约参数。'
+})
+
+const projectedPremium = computed(() => form.limitPrice * form.quantity)
+const projectedBreakeven = computed(() =>
+  form.direction === 'sellPut'
+    ? form.strike - form.limitPrice
+    : form.strike + form.limitPrice,
+)
+
+const strikeMatchesDirection = computed(() => {
+  const spot = Number(referenceSpotPrice.value)
+  if (!Number.isFinite(spot) || spot <= 0) return true
+  return form.direction === 'sellPut'
+    ? form.strike < spot
+    : form.strike > spot
+})
+
 const canSubmit = computed(() =>
   Boolean(store.settings?.connected)
   && form.strike > 0
   && form.quantity >= 0.01
-  && form.limitPrice > 0,
+  && form.limitPrice > 0
+  && strikeMatchesDirection.value,
+)
+
+watch(
+  sortedCandidates,
+  (candidates) => {
+    if (selectedCandidateId.value && candidates.some(candidate => candidate.id === selectedCandidateId.value)) {
+      return
+    }
+    if (candidates[0]) {
+      selectCandidate(candidates[0])
+    }
+  },
+  { immediate: true },
 )
 
 watch(
   () => [form.direction, form.expiry, form.strike] as const,
   () => {
-    form.optionSymbol = matchingCandidate.value?.optionSymbol ?? ''
+    const selected = store.candidates.find(candidate => candidate.id === selectedCandidateId.value)
+    if (selected && !candidateMatchesForm(selected)) {
+      selectedCandidateId.value = undefined
+    }
+    if (!selectedCandidate.value) {
+      form.optionSymbol = matchingCandidate.value?.optionSymbol ?? ''
+    }
+  },
+)
+
+watch(
+  () => [store.settings?.connected ?? false, store.loading] as const,
+  ([connected, loading]) => {
+    if (!connected) {
+      autoScanRequested.value = false
+      return
+    }
+    if (loading || autoScanRequested.value) {
+      return
+    }
+    autoScanRequested.value = true
+    void store.scan()
   },
   { immediate: true },
 )
 
-function applyCandidate(candidate: StrategyCandidate) {
+function daysUntil(expiry: string) {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const target = new Date(`${expiry}T00:00:00`)
+  return Math.max(0, Math.ceil((target.getTime() - today.getTime()) / dayMs))
+}
+
+function matchesExpiryFilter(candidate: StrategyCandidate) {
+  const days = daysUntil(candidate.expiry)
+  if (expiryFilter.value === 'lt3') return days < 3
+  if (expiryFilter.value === 'lt7') return days < 7
+  if (expiryFilter.value === 'd7_30') return days >= 7 && days <= 30
+  if (expiryFilter.value === 'd30_60') return days > 30 && days <= 60
+  if (expiryFilter.value === 'gt60') return days > 60
+  return true
+}
+
+function matchesCandidateFilters(candidate: StrategyCandidate) {
+  const annualized = Number(candidate.annualized)
+  const exerciseProbability = Number(candidate.exerciseProbability)
+  const distanceAbs = Math.abs(Number(candidate.strikeDistancePercent))
+
+  if (candidateFilter.minAnnualized !== null && annualized < candidateFilter.minAnnualized) {
+    return false
+  }
+  if (
+    candidateFilter.maxExerciseProbability !== null
+    && exerciseProbability > candidateFilter.maxExerciseProbability
+  ) {
+    return false
+  }
+  if (candidateFilter.maxDistanceAbs !== null && distanceAbs > candidateFilter.maxDistanceAbs) {
+    return false
+  }
+  return true
+}
+
+function candidateSortNumber(candidate: StrategyCandidate, key: CandidateSortKey) {
+  if (key === 'expiry') {
+    return new Date(`${candidate.expiry}T00:00:00`).getTime()
+  }
+  return Number(candidate[key])
+}
+
+function compareCandidateSortValue(
+  left: StrategyCandidate,
+  right: StrategyCandidate,
+  key: CandidateSortKey,
+) {
+  const leftValue = candidateSortNumber(left, key)
+  const rightValue = candidateSortNumber(right, key)
+  if (!Number.isFinite(leftValue) && !Number.isFinite(rightValue)) return 0
+  if (!Number.isFinite(leftValue)) return 1
+  if (!Number.isFinite(rightValue)) return -1
+  return leftValue - rightValue
+}
+
+function toggleCandidateSort(key: CandidateSortKey) {
+  if (candidateSortKey.value === key) {
+    candidateSortDirection.value = candidateSortDirection.value === 'asc' ? 'desc' : 'asc'
+    return
+  }
+  candidateSortKey.value = key
+  candidateSortDirection.value = candidateSortDefaultDirection[key]
+}
+
+function candidateMatchesForm(candidate: StrategyCandidate) {
+  return candidate.direction === form.direction
+    && candidate.expiry === form.expiry
+    && Number(candidate.strike) === form.strike
+}
+
+function selectDirection(direction: StrategyDirection) {
+  if (form.direction === direction) {
+    return
+  }
+  form.direction = direction
+  selectedCandidateId.value = undefined
+  form.optionSymbol = ''
+}
+
+function selectCandidate(candidate: StrategyCandidate) {
+  selectedCandidateId.value = candidate.id
   form.direction = candidate.direction
   form.strike = Number(candidate.strike)
   form.quantity = Number(candidate.quantity)
@@ -66,7 +391,52 @@ function applyCandidate(candidate: StrategyCandidate) {
 function updateExpiry(value: string | [string, string] | null) {
   if (typeof value === 'string' && value.length > 0) {
     form.expiry = value
+    selectedCandidateId.value = undefined
   }
+}
+
+function resetCandidateFilters() {
+  candidateFilter.minAnnualized = null
+  candidateFilter.maxExerciseProbability = null
+  candidateFilter.maxDistanceAbs = null
+}
+
+function signedPercent(value: string | number) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '--'
+  const sign = numeric > 0 ? '+' : ''
+  return `${sign}${percent(numeric)}`
+}
+
+function saveAutoRule() {
+  void store.saveRule({
+    ...ruleForm,
+    quantity: ruleForm.quantity.toFixed(2),
+    minAnnualized: String(ruleForm.minAnnualized),
+    maxDeltaAbs: ruleForm.maxDeltaAbs.toFixed(2),
+    maxIvRank: String(ruleForm.maxIvRank),
+  })
+}
+
+function useCurrentOrderQuantityForRule() {
+  ruleForm.quantity = form.quantity
+}
+
+function toggleAuto(value: boolean) {
+  if (value && !window.confirm('确认开启自动定投？后续符合条件的自动单不会逐笔确认。')) {
+    return
+  }
+  void store.toggleAuto({
+    enabled: value,
+    confirmLive: true,
+  })
+}
+
+function runAutoNow() {
+  if (!window.confirm('确认立即执行一次自动扫描？若存在推荐候选，将直接发送 Binance 订单。')) {
+    return
+  }
+  void store.runAutoOnce()
 }
 
 function submit() {
@@ -88,101 +458,284 @@ function submit() {
 </script>
 
 <template>
-  <div class="view-grid">
-    <Panel title="新建策略" subtitle="快速成交，后台同步到期状态并执行 ITM 现货补齐" class="span-5">
-      <div class="strategy-form">
-        <div class="segmented">
-          <button :class="{ active: form.direction === 'sellPut' }" type="button" @click="form.direction = 'sellPut'">
-            <NIcon :component="ArrowDownCircle" />
-            卖 Put 抄底
-          </button>
-          <button :class="{ active: form.direction === 'sellCall' }" type="button" @click="form.direction = 'sellCall'">
-            <NIcon :component="ArrowUpCircle" />
-            卖 Call 止盈
-          </button>
-        </div>
-        <label>
-          执行价 USDT
-          <NInputNumber v-model:value="form.strike" :min="1" :step="100" />
-        </label>
-        <label>
-          下单数量 张
-          <NInputNumber v-model:value="form.quantity" :min="0.01" :step="0.01" />
-        </label>
-        <label>
-          权利金限价 USDT
-          <NInputNumber v-model:value="form.limitPrice" :min="0.01" :step="0.01" />
-        </label>
-        <label>
-          到期日
-          <NDatePicker
-            class="date-picker-control"
-            type="date"
-            :formatted-value="form.expiry"
-            value-format="yyyy-MM-dd"
-            format="yyyy-MM-dd"
-            placeholder="选择到期日"
-            input-readonly
-            close-on-select
-            :actions="null"
-            @update:formatted-value="updateExpiry"
-          />
-        </label>
-        <label>
-          Binance 期权合约
-          <NInput v-model:value="form.optionSymbol" placeholder="BTC-260626-72000-P" />
-        </label>
-        <div class="button-row">
-          <NButton type="primary" size="large" :disabled="!canSubmit" @click="submit">
-            <template #icon><NIcon :component="Zap" /></template>
-            发送订单
-          </NButton>
-          <NButton secondary size="large" @click="store.activeView = 'auto'">
-            <template #icon><NIcon :component="PlusCircle" /></template>
-            加入自动规则
-          </NButton>
-        </div>
-      </div>
-    </Panel>
+  <div class="dual-workbench">
+    <div class="deal-main">
+      <section class="direction-switch">
+        <button :class="{ active: form.direction === 'sellPut' }" type="button" @click="selectDirection('sellPut')">
+          <NIcon :component="ArrowDownCircle" />
+          <span>低买</span>
+          <strong>卖 Put 抄底</strong>
+        </button>
+        <button :class="{ active: form.direction === 'sellCall' }" type="button" @click="selectDirection('sellCall')">
+          <NIcon :component="ArrowUpCircle" />
+          <span>高卖</span>
+          <strong>卖 Call 止盈</strong>
+        </button>
+      </section>
 
-    <Panel title="策略收益示意" class="span-7">
-      <div class="payoff-panel">
-        <MiniLineChart v-if="store.pnl" :points="store.pnl.points.slice(0, 7)" />
-        <div v-if="selectedCandidate" class="payoff-stats">
+      <section class="candidate-board">
+        <div class="candidate-toolbar">
+          <div class="expiry-tabs" aria-label="到期日筛选">
+            <button
+              v-for="filter in expiryFilters"
+              :key="filter.id"
+              :class="{ active: expiryFilter === filter.id }"
+              type="button"
+              @click="expiryFilter = filter.id"
+            >
+              {{ filter.label }}
+            </button>
+          </div>
+
+          <div class="candidate-toolbar-actions">
+            <span v-if="referenceSpotPrice" class="spot-price">BTC 现货 {{ money(referenceSpotPrice) }}</span>
+            <NButton
+              circle
+              secondary
+              size="small"
+              title="刷新候选"
+              aria-label="刷新候选"
+              :loading="store.loading"
+              @click="store.scan"
+            >
+              <template #icon><NIcon :component="RefreshCw" /></template>
+            </NButton>
+          </div>
+        </div>
+
+        <div class="candidate-filter-bar" aria-label="候选筛选">
+          <label>
+            年化 ≥
+            <NInputNumber
+              v-model:value="candidateFilter.minAnnualized"
+              clearable
+              placeholder="不限"
+              :min="0"
+              :step="1"
+            />
+          </label>
+          <label>
+            被行权概率 ≤
+            <NInputNumber
+              v-model:value="candidateFilter.maxExerciseProbability"
+              clearable
+              placeholder="不限"
+              :min="0"
+              :max="100"
+              :step="1"
+            />
+          </label>
+          <label>
+            距现货 ≤
+            <NInputNumber
+              v-model:value="candidateFilter.maxDistanceAbs"
+              clearable
+              placeholder="不限"
+              :min="0"
+              :step="0.5"
+            />
+          </label>
+          <NButton secondary @click="resetCandidateFilters">重置</NButton>
+        </div>
+
+        <div class="opportunity-table">
+          <div class="opportunity-row opportunity-head">
+            <button
+              v-for="column in candidateSortColumns"
+              :key="column.key"
+              class="opportunity-sort"
+              :class="{ active: candidateSortKey === column.key }"
+              type="button"
+              :aria-pressed="candidateSortKey === column.key"
+              @click="toggleCandidateSort(column.key)"
+            >
+              <span>{{ column.label }}</span>
+              <NIcon
+                :component="candidateSortKey === column.key
+                  ? (candidateSortDirection === 'asc' ? ChevronUp : ChevronDown)
+                  : ArrowUpDown"
+              />
+            </button>
+          </div>
+          <button
+            v-for="candidate in sortedCandidates"
+            :key="candidate.id"
+            class="opportunity-row"
+            :class="{ selected: selectedCandidate?.id === candidate.id }"
+            type="button"
+            @click="selectCandidate(candidate)"
+          >
+            <span>
+              <strong>{{ money(candidate.strike) }}</strong>
+              <em>
+                距现货 {{ signedPercent(candidate.strikeDistancePercent) }}
+              </em>
+            </span>
+            <span class="positive">{{ percent(candidate.annualized) }}</span>
+            <span>
+              <strong>{{ candidate.expiry }}</strong>
+              <em>{{ daysUntil(candidate.expiry) }} 天</em>
+            </span>
+            <span>{{ money(candidate.limitPrice) }}</span>
+            <span>{{ percent(candidate.exerciseProbability) }}</span>
+          </button>
+        </div>
+
+        <div v-if="filteredCandidates.length === 0" class="empty-state opportunity-empty">
+          <strong>{{ emptyCandidateTitle }}</strong>
+          <span>{{ emptyCandidateHint }}</span>
+          <NButton size="small" secondary :loading="store.loading" @click="store.scan">重新扫描</NButton>
+        </div>
+      </section>
+    </div>
+
+    <aside class="order-panel">
+      <section class="order-card">
+        <header>
+          <div>
+            <span class="order-eyebrow">下单</span>
+            <h3>{{ panelTitle }}</h3>
+          </div>
+          <NIcon :component="Zap" />
+        </header>
+
+        <div class="deal-summary">
           <article>
-            <span>最大收益</span>
-            <strong>{{ money(selectedCandidate.premium) }}</strong>
+            <span>年化</span>
+            <strong :class="{ positive: selectedCandidate }">
+              {{ selectedCandidate ? percent(selectedCandidate.annualized) : '--' }}
+            </strong>
+            <em v-if="selectedCandidate && Number(selectedCandidate.spotPrice) > 0">
+              距现货 {{ signedPercent(selectedCandidate.strikeDistancePercent) }}
+            </em>
           </article>
           <article>
-            <span>单位限价</span>
-            <strong>{{ money(selectedCandidate.limitPrice) }}</strong>
+            <span>到期日</span>
+            <strong>{{ form.expiry }}</strong>
+            <em>{{ daysUntil(form.expiry) }} 天</em>
+          </article>
+          <article>
+            <span>预计权利金</span>
+            <strong>{{ money(String(projectedPremium)) }}</strong>
           </article>
           <article>
             <span>保本价</span>
-            <strong>{{ money(selectedCandidate.breakeven) }}</strong>
-          </article>
-          <article>
-            <span>年化收益</span>
-            <strong class="positive">{{ percent(selectedCandidate.annualized) }}</strong>
-          </article>
-          <article>
-            <span>被行权概率</span>
-            <strong class="warning">{{ percent(selectedCandidate.exerciseProbability) }}</strong>
+            <strong>{{ money(String(projectedBreakeven)) }}</strong>
           </article>
         </div>
-      </div>
-    </Panel>
 
-    <Panel title="策略摘要" class="span-12">
-      <ul class="summary-list">
-        <li>卖出看跌期权，若 BTC 低于执行价到期，则自动用预留 USDT 买入 BTC。</li>
-        <li>卖出看涨期权，若 BTC 高于执行价到期，则自动卖出预留 BTC 完成止盈。</li>
-        <li>快速成交使用单位限价 IOC，未成交、部分成交和拒绝状态都会写入本地订单。</li>
-      </ul>
-    </Panel>
+        <div class="order-form">
+          <label>
+            下单数量（张）
+            <NInputNumber v-model:value="form.quantity" :min="0.01" :step="0.01" />
+          </label>
+          <label>
+            执行价 USDT
+            <NInputNumber v-model:value="form.strike" :min="1" :step="100" />
+          </label>
+          <label>
+            价格 USDT
+            <NInputNumber v-model:value="form.limitPrice" :min="0.01" :step="0.01" />
+          </label>
+          <label>
+            到期日
+            <NDatePicker
+              class="date-picker-control"
+              type="date"
+              :formatted-value="form.expiry"
+              value-format="yyyy-MM-dd"
+              format="yyyy-MM-dd"
+              placeholder="选择到期日"
+              input-readonly
+              close-on-select
+              :actions="null"
+              @update:formatted-value="updateExpiry"
+            />
+          </label>
+          <label>
+            Binance 期权合约
+            <NInput v-model:value="form.optionSymbol" :placeholder="optionSymbolPlaceholder" />
+          </label>
+        </div>
 
-    <Panel title="今日可选机会" class="span-12">
-      <CandidateTable :candidates="store.candidates" @order="applyCandidate" />
-    </Panel>
+        <p class="order-note">
+          期权按张数下单；快速成交按所填价格发 IOC，成交状态会写入本地订单。
+        </p>
+        <p v-if="!strikeMatchesDirection" class="order-warning">
+          {{ form.direction === 'sellPut' ? '低买执行价需要低于 BTC 现货价。' : '高卖执行价需要高于 BTC 现货价。' }}
+        </p>
+
+        <NButton type="primary" size="large" block :disabled="!canSubmit" :loading="store.loading" @click="submit">
+          <template #icon><NIcon :component="Zap" /></template>
+          发送订单
+        </NButton>
+      </section>
+
+      <section class="auto-card">
+        <header>
+          <div>
+            <span class="order-eyebrow">自动复投</span>
+            <h3>{{ store.settings?.autoEnabled ? '已启用' : '未启用' }}</h3>
+          </div>
+          <NSwitch :value="store.settings?.autoEnabled ?? false" @update:value="toggleAuto" />
+        </header>
+
+        <div class="auto-card-body">
+          <label>
+            扫描计划
+            <input v-model="ruleForm.schedule" class="native-input">
+          </label>
+          <label>
+            每次下单数量
+            <div class="inline-input-action">
+              <NInputNumber v-model:value="ruleForm.quantity" :min="0.01" :step="0.01" />
+              <NButton size="small" secondary @click="useCurrentOrderQuantityForRule">用当前</NButton>
+            </div>
+          </label>
+
+          <button class="advanced-toggle" type="button" @click="advancedAutoOpen = !advancedAutoOpen">
+            <span>筛选条件</span>
+            <strong>{{ percent(ruleForm.minAnnualized) }} 起</strong>
+          </button>
+
+          <div v-if="advancedAutoOpen" class="auto-rule-grid">
+            <label>
+              预计年化 ≥ {{ percent(ruleForm.minAnnualized) }}
+              <NSlider v-model:value="ruleForm.minAnnualized" :min="5" :max="60" :step="1" />
+            </label>
+            <label>
+              Delta 绝对值 ≤ {{ ruleForm.maxDeltaAbs }}
+              <NSlider v-model:value="ruleForm.maxDeltaAbs" :min="0.05" :max="0.8" :step="0.01" />
+            </label>
+            <label>
+              Mark IV 代理 ≤ {{ percent(ruleForm.maxIvRank, 0) }}
+              <NSlider v-model:value="ruleForm.maxIvRank" :min="10" :max="100" :step="1" />
+            </label>
+            <div class="range-row compact-range">
+              <span>到期</span>
+              <NInputNumber v-model:value="ruleForm.minDaysToExpiry" :min="1" />
+              <span>至</span>
+              <NInputNumber v-model:value="ruleForm.maxDaysToExpiry" :min="ruleForm.minDaysToExpiry" />
+              <span>天</span>
+            </div>
+            <div class="checkbox-row">
+              <NCheckbox v-model:checked="ruleForm.includeBtc">BTC</NCheckbox>
+              <NCheckbox v-model:checked="ruleForm.excludeSameDirection">排除同方向持仓</NCheckbox>
+            </div>
+          </div>
+        </div>
+
+        <div class="auto-actions">
+          <NButton secondary :loading="store.loading" @click="saveAutoRule">
+            <template #icon><NIcon :component="Save" /></template>
+            保存规则
+          </NButton>
+          <NButton secondary :disabled="!store.settings?.autoEnabled" :loading="store.loading" @click="runAutoNow">
+            <template #icon><NIcon :component="ShieldCheck" /></template>
+            执行一次
+          </NButton>
+        </div>
+      </section>
+    </aside>
   </div>
 </template>

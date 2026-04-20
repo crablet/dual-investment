@@ -4,11 +4,10 @@ import {
   Bitcoin,
   ClipboardList,
   Home,
-  RefreshCw,
   Settings,
   ShieldCheck,
   Wallet,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import { NIcon } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 
@@ -17,7 +16,6 @@ const store = useAppStore()
 const navItems = [
   { id: 'overview', label: '总览', icon: Home },
   { id: 'dual', label: '双币赢', icon: Bitcoin },
-  { id: 'auto', label: '自动定投', icon: RefreshCw },
   { id: 'orders', label: '策略订单', icon: ClipboardList },
   { id: 'portfolio', label: '持仓与现货', icon: Wallet },
   { id: 'analytics', label: '收益分析', icon: BarChart3 },

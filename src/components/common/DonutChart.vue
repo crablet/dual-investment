@@ -13,6 +13,11 @@ const total = computed(() =>
   props.items.reduce((sum, item) => sum + Math.abs(Number(item.value)), 0) || 1,
 )
 
+const decimalFormatter = new Intl.NumberFormat('zh-CN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
 const segments = computed(() => {
   let offset = 25
   return props.items.map((item) => {
@@ -51,7 +56,7 @@ const segments = computed(() => {
       <div v-for="item in items" :key="item.label" class="legend-row">
         <span :style="{ background: item.color }" />
         <p>{{ item.label }}</p>
-        <strong>{{ Number(item.value).toLocaleString('zh-CN') }}</strong>
+        <strong>{{ decimalFormatter.format(Number(item.value)) }}</strong>
       </div>
     </div>
   </div>

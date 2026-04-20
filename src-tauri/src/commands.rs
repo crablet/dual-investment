@@ -2,9 +2,9 @@ use tauri::State;
 
 use crate::app_state::AppState;
 use crate::domain::{
-    AppSettings, AppSnapshot, AutoInvestmentRule, BalanceRow, ConnectBinanceRequest,
-    OrderAttemptView, PnlReport, RiskSnapshot, StrategyCandidate, StrategyOrder, StrategyPreview,
-    StrategyRequest, ToggleAutoRequest,
+    AppSettings, AppSnapshot, AutoInvestmentRule, BalanceRow, CandidateScanResult,
+    ConnectBinanceRequest, OrderAttemptView, PnlReport, RiskSnapshot, StrategyOrder,
+    StrategyPreview, StrategyRequest, ToggleAutoRequest,
 };
 
 #[tauri::command]
@@ -40,7 +40,7 @@ pub async fn forget_binance_credentials(state: State<'_, AppState>) -> Result<Ap
 }
 
 #[tauri::command]
-pub async fn scan_candidates(state: State<'_, AppState>) -> Result<Vec<StrategyCandidate>, String> {
+pub async fn scan_candidates(state: State<'_, AppState>) -> Result<CandidateScanResult, String> {
     state.scan_candidates().await.map_err(to_command_error)
 }
 

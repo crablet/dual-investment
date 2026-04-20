@@ -10,7 +10,7 @@ import { useAppStore } from '@/stores/app'
 import type { StrategyCandidate } from '@/types/domain'
 
 const store = useAppStore()
-const { money } = useFormat()
+const { decimal, money } = useFormat()
 
 const activeStrategies = computed(() => store.orders.slice(0, 4))
 const pnlCenter = computed(() => Number(store.pnl?.cumulative ?? 0).toLocaleString('zh-CN'))
@@ -34,7 +34,7 @@ const pendingTasks = computed(() => [
     id: 'candidate-count',
     tone: 'blue',
     text: `当前有 ${store.candidates.length} 个候选机会`,
-    view: 'auto',
+    view: 'dual',
     visible: store.candidates.length > 0,
   },
 ].filter(item => item.visible))
@@ -81,9 +81,11 @@ function placeCandidate(candidate: StrategyCandidate) {
     <Panel title="账户概览" class="span-3">
       <div class="account-list">
         <div v-for="balance in store.balances" :key="balance.asset" class="account-row">
-          <span>{{ balance.asset }}</span>
-          <strong>{{ balance.free }}</strong>
-          <em>{{ money(balance.usdtValue) }}</em>
+          <span class="account-asset">{{ balance.asset }}</span>
+          <span class="account-values">
+            <strong>{{ decimal(balance.free) }}</strong>
+            <em>{{ money(balance.usdtValue) }}</em>
+          </span>
         </div>
       </div>
     </Panel>
@@ -112,7 +114,7 @@ function placeCandidate(candidate: StrategyCandidate) {
         <div class="auto-scan-card">
           <span>扫描计划</span>
           <strong>{{ store.autoRule?.schedule ?? '未设置' }}</strong>
-          <em>{{ store.settings?.connected ? 'Binance 已连接' : '等待 Binance 连接' }}</em>
+          <em>{{ store.settings?.connected ? '已连接' : '等待连接' }}</em>
         </div>
         <div class="auto-status-list">
           <p v-for="item in autoStatusItems" :key="item.label" class="auto-status-item">

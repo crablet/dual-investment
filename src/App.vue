@@ -8,11 +8,11 @@ import { useAppStore } from '@/stores/app'
 const store = useAppStore()
 
 const OverviewView = defineAsyncComponent(() => import('@/components/views/OverviewView.vue'))
+const DualInvestmentView = defineAsyncComponent(() => import('@/components/views/DualInvestmentView.vue'))
 
 const views = {
   overview: OverviewView,
-  dual: defineAsyncComponent(() => import('@/components/views/DualInvestmentView.vue')),
-  auto: defineAsyncComponent(() => import('@/components/views/AutoInvestView.vue')),
+  dual: DualInvestmentView,
   orders: defineAsyncComponent(() => import('@/components/views/OrdersView.vue')),
   portfolio: defineAsyncComponent(() => import('@/components/views/PortfolioView.vue')),
   analytics: defineAsyncComponent(() => import('@/components/views/AnalyticsView.vue')),

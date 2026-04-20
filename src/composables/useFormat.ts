@@ -5,6 +5,11 @@ const moneyFormatter = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 2,
 })
 
+const decimalFormatter = new Intl.NumberFormat('zh-CN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
 const percentFormatters = new Map<number, Intl.NumberFormat>()
 
 const directionTextMap: Record<StrategyDirection, string> = {
@@ -56,6 +61,9 @@ export function useFormat() {
   const money = (value: string | number, currency = 'USDT') =>
     `${moneyFormatter.format(Number(value))} ${currency}`
 
+  const decimal = (value: string | number) =>
+    decimalFormatter.format(Number(value))
+
   const percent = (value: string | number, digits = 2) =>
     `${percentFormatter(digits).format(Number(value))}%`
 
@@ -68,6 +76,7 @@ export function useFormat() {
   const statusTone = (status: StrategyStatus) => statusToneMap[status]
 
   return {
+    decimal,
     money,
     percent,
     directionText,

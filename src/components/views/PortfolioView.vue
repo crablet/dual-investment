@@ -6,7 +6,7 @@ import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
-const { money } = useFormat()
+const { decimal, money } = useFormat()
 
 const obligationOrders = computed(() =>
   store.orders.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
@@ -36,10 +36,14 @@ const balanceBreakdown = computed(() =>
       <div class="account-list large">
         <p v-if="store.balances.length === 0" class="empty-state">暂无持仓</p>
         <div v-for="balance in store.balances" :key="balance.asset" class="account-row">
-          <span>{{ balance.asset }}</span>
-          <strong>{{ balance.free }}</strong>
-          <small>{{ balance.source }}</small>
-          <em>{{ money(balance.usdtValue) }}</em>
+          <span class="account-asset">
+            <strong>{{ balance.asset }}</strong>
+            <small>{{ balance.source }}</small>
+          </span>
+          <span class="account-values">
+            <strong>{{ decimal(balance.free) }}</strong>
+            <em>{{ money(balance.usdtValue) }}</em>
+          </span>
         </div>
       </div>
     </Panel>
@@ -54,7 +58,7 @@ const balanceBreakdown = computed(() =>
         <article>
           <strong>卖出看涨义务仓</strong>
           <span>{{ obligationOrders.filter(order => order.direction === 'sellCall').length }} 个</span>
-          <em>BTC 占用 {{ sellCallQuantity.toFixed(4) }}</em>
+          <em>BTC 占用 {{ decimal(sellCallQuantity) }}</em>
         </article>
       </div>
     </Panel>
@@ -84,7 +88,7 @@ const balanceBreakdown = computed(() =>
             <tr v-for="order in obligationOrders" :key="order.id">
               <td>BTC</td>
               <td>{{ order.direction === 'sellPut' ? '卖出看跌（义务）' : '卖出看涨（义务）' }}</td>
-              <td>{{ order.quantity }} BTC</td>
+              <td>{{ decimal(order.quantity) }} BTC</td>
               <td>{{ money(order.strike) }}</td>
               <td>{{ order.expiry }}</td>
               <td class="positive">{{ money(order.estimatedPnl) }}</td>
@@ -93,7 +97,7 @@ const balanceBreakdown = computed(() =>
             <tr v-for="balance in store.balances" :key="balance.asset">
               <td>{{ balance.asset }}</td>
               <td>现货</td>
-              <td>{{ balance.free }}</td>
+              <td>{{ decimal(balance.free) }}</td>
               <td>--</td>
               <td>--</td>
               <td>--</td>

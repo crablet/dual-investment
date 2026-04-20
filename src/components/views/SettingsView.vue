@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Download, KeyRound } from 'lucide-vue-next'
+import { Download, KeyRound } from '@lucide/vue'
 import { NButton, NIcon, NInput } from 'naive-ui'
 import { computed, reactive } from 'vue'
 import Panel from '@/components/common/Panel.vue'

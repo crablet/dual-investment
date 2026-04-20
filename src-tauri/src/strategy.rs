@@ -6,12 +6,15 @@ use rust_decimal_macros::dec;
 use uuid::Uuid;
 
 use crate::domain::{
-    AppSettings, AutoInvestmentRule, BalanceRow, ChartPoint, ExchangeOrderAck, MetricCard,
-    OptionAccountSnapshot, OptionContract, OptionMarkPrice, PnlBreakdown, PnlReport,
-    RecommendationLevel, RiskAlert, RiskRuleSet, RiskSeverity, RiskSnapshot, SpotAccountSnapshot,
-    StrategyCandidate, StrategyDirection, StrategyOrder, StrategyPreview, StrategyRequest,
-    StrategyStatus,
+    AppSettings, AutoInvestmentRule, BalanceRow, CandidateScanDiagnostics, CandidateScanResult,
+    ChartPoint, ExchangeOrderAck, MetricCard, OptionAccountSnapshot, OptionContract,
+    OptionMarkPrice, PnlBreakdown, PnlReport, RecommendationLevel, RiskAlert, RiskRuleSet,
+    RiskSeverity, RiskSnapshot, SpotAccountSnapshot, StrategyCandidate, StrategyDirection,
+    StrategyOrder, StrategyPreview, StrategyRequest, StrategyStatus,
 };
+
+const BROWSE_MIN_DAYS_TO_EXPIRY: i64 = 1;
+const BROWSE_MAX_DAYS_TO_EXPIRY: i64 = 90;
 
 pub fn default_auto_rule(enabled: bool) -> AutoInvestmentRule {
     AutoInvestmentRule {
@@ -303,9 +306,21 @@ pub fn build_candidates(
     rule: &AutoInvestmentRule,
     account: &OptionAccountSnapshot,
     orders: &[StrategyOrder],
-) -> Vec<StrategyCandidate> {
-    if !rule.include_btc {
-        return Vec::new();
+    spot_price: Decimal,
+) -> CandidateScanResult {
+    let mut diagnostics = CandidateScanDiagnostics {
+        raw_contracts: contracts.len(),
+        raw_marks: marks.len(),
+        browse_min_days: BROWSE_MIN_DAYS_TO_EXPIRY,
+        browse_max_days: BROWSE_MAX_DAYS_TO_EXPIRY,
+        ..CandidateScanDiagnostics::default()
+    };
+
+    if spot_price <= Decimal::ZERO {
+        return CandidateScanResult {
+            candidates: Vec::new(),
+            diagnostics,
+        };
     }
 
     let mark_by_symbol = marks
@@ -325,32 +340,42 @@ pub fn build_candidates(
         })
     };
 
-    let mut candidates = contracts
-        .iter()
-        .filter_map(|contract| {
+    let mut candidates = Vec::new();
+
+    for contract in contracts {
+        if contract.underlying != "BTCUSDT" || contract.quote_asset != "USDT" {
+            continue;
+        }
+        diagnostics.btc_contracts += 1;
+
+        if contract.status != "TRADING" {
+            continue;
+        }
+        diagnostics.trading_contracts += 1;
+
+        if rule.quantity < contract.min_qty || rule.quantity > contract.max_qty {
+            continue;
+        }
+        diagnostics.quantity_matched += 1;
+
+        if let Some(candidate) = (|| {
             let direction = direction_from_option_side(&contract.side)?;
-            if rule.exclude_same_direction && has_open_direction(direction) {
+            if !strike_matches_direction(contract.strike_price, direction, spot_price) {
                 return None;
             }
-            if contract.underlying != "BTCUSDT"
-                || contract.quote_asset != "USDT"
-                || contract.status != "TRADING"
-                || rule.quantity < contract.min_qty
-                || rule.quantity > contract.max_qty
-            {
-                return None;
-            }
+            diagnostics.direction_matched += 1;
 
             let days_to_expiry = (contract.expiry - today).num_days();
-            if days_to_expiry < rule.min_days_to_expiry || days_to_expiry > rule.max_days_to_expiry
-            {
+            if !(BROWSE_MIN_DAYS_TO_EXPIRY..=BROWSE_MAX_DAYS_TO_EXPIRY).contains(&days_to_expiry) {
                 return None;
             }
+            diagnostics.expiry_matched += 1;
 
             let mark = mark_by_symbol.get(contract.symbol.as_str()).copied()?;
             if mark.mark_price <= Decimal::ZERO {
                 return None;
             }
+            diagnostics.mark_matched += 1;
 
             let delta_abs = abs_decimal(mark.delta);
             let iv_rank = (mark.mark_iv * dec!(100)).round_dp(2);
@@ -364,6 +389,8 @@ pub fn build_candidates(
                 days_to_expiry.max(1),
             );
             let exercise_probability = (delta_abs * dec!(100)).round_dp(2);
+            let strike_distance_percent =
+                calculate_strike_distance_percent(contract.strike_price, spot_price);
             let breakeven = match direction {
                 StrategyDirection::SellPut => contract.strike_price - mark.mark_price,
                 StrategyDirection::SellCall => contract.strike_price + mark.mark_price,
@@ -372,7 +399,11 @@ pub fn build_candidates(
             let available_margin = account
                 .asset("USDT")
                 .map_or(Decimal::ZERO, |asset| asset.available);
-            let passes_rule = annualized >= rule.min_annualized
+            let passes_rule = rule.include_btc
+                && (!rule.exclude_same_direction || !has_open_direction(direction))
+                && days_to_expiry >= rule.min_days_to_expiry
+                && days_to_expiry <= rule.max_days_to_expiry
+                && annualized >= rule.min_annualized
                 && delta_abs <= rule.max_delta_abs
                 && iv_rank <= rule.max_iv_rank
                 && available_margin >= required_margin;
@@ -384,11 +415,15 @@ pub fn build_candidates(
                 RecommendationLevel::Reject
             };
             let reason = if passes_rule {
-                format!("来自 Binance 合约和 mark price，满足当前自动规则，mark IV 代理值 {iv_rank}%")
+                format!(
+                    "来自 Binance 合约和 mark price，满足当前自动规则，mark IV 代理值 {iv_rank}%"
+                )
             } else if available_margin < required_margin {
                 "可用保证金不足，暂不建议下单".to_string()
             } else {
-                format!("来自 Binance 合约和 mark price，未完全满足当前自动规则，mark IV 代理值 {iv_rank}%")
+                format!(
+                    "来自 Binance 合约和 mark price，未完全满足当前自动规则，mark IV 代理值 {iv_rank}%"
+                )
             };
 
             Some(StrategyCandidate {
@@ -406,20 +441,31 @@ pub fn build_candidates(
                 iv_rank,
                 exercise_probability,
                 breakeven,
+                spot_price,
+                strike_distance_percent,
                 recommendation,
                 reason,
             })
-        })
-        .collect::<Vec<_>>();
+        })() {
+            candidates.push(candidate);
+        }
+    }
 
-    candidates.sort_by(|left, right| {
-        recommendation_rank(right.recommendation)
-            .cmp(&recommendation_rank(left.recommendation))
-            .then_with(|| right.annualized.cmp(&left.annualized))
-            .then_with(|| left.expiry.cmp(&right.expiry))
-    });
-    candidates.truncate(20);
-    candidates
+    sort_candidates(&mut candidates);
+    diagnostics.returned_candidates = candidates.len();
+    diagnostics.returned_sell_put = candidates
+        .iter()
+        .filter(|candidate| candidate.direction == StrategyDirection::SellPut)
+        .count();
+    diagnostics.returned_sell_call = candidates
+        .iter()
+        .filter(|candidate| candidate.direction == StrategyDirection::SellCall)
+        .count();
+
+    CandidateScanResult {
+        candidates,
+        diagnostics,
+    }
 }
 
 pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
@@ -458,6 +504,8 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
         iv_rank: Decimal::ZERO,
         exercise_probability: Decimal::ZERO,
         breakeven,
+        spot_price: Decimal::ZERO,
+        strike_distance_percent: Decimal::ZERO,
         recommendation: RecommendationLevel::Watch,
         reason: "基于用户输入限价的订单预览".to_string(),
     };
@@ -613,12 +661,39 @@ fn direction_from_option_side(side: &str) -> Option<StrategyDirection> {
     }
 }
 
+fn strike_matches_direction(
+    strike: Decimal,
+    direction: StrategyDirection,
+    spot_price: Decimal,
+) -> bool {
+    match direction {
+        StrategyDirection::SellPut => strike < spot_price,
+        StrategyDirection::SellCall => strike > spot_price,
+    }
+}
+
+fn calculate_strike_distance_percent(strike: Decimal, spot_price: Decimal) -> Decimal {
+    if spot_price <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+    (((strike - spot_price) / spot_price) * dec!(100)).round_dp(2)
+}
+
 fn recommendation_rank(level: RecommendationLevel) -> u8 {
     match level {
         RecommendationLevel::Reject => 0,
         RecommendationLevel::Watch => 1,
         RecommendationLevel::Recommended => 2,
     }
+}
+
+fn sort_candidates(candidates: &mut [StrategyCandidate]) {
+    candidates.sort_by(|left, right| {
+        recommendation_rank(right.recommendation)
+            .cmp(&recommendation_rank(left.recommendation))
+            .then_with(|| right.annualized.cmp(&left.annualized))
+            .then_with(|| left.expiry.cmp(&right.expiry))
+    });
 }
 
 fn default_risk_rules() -> RiskRuleSet {
@@ -719,13 +794,15 @@ mod tests {
         };
         let account = account_snapshot(dec!(1000));
 
-        let candidates = build_candidates(
+        let result = build_candidates(
             &[contract],
             &[mark],
             &default_auto_rule(false),
             &account,
             &[],
+            dec!(78000),
         );
+        let candidates = result.candidates;
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].option_symbol, "BTC-260626-72000-P");

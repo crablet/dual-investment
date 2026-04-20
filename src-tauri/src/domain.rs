@@ -133,8 +133,37 @@ pub struct StrategyCandidate {
     pub exercise_probability: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub breakeven: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub spot_price: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub strike_distance_percent: Decimal,
     pub recommendation: RecommendationLevel,
     pub reason: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateScanDiagnostics {
+    pub raw_contracts: usize,
+    pub raw_marks: usize,
+    pub btc_contracts: usize,
+    pub trading_contracts: usize,
+    pub direction_matched: usize,
+    pub expiry_matched: usize,
+    pub mark_matched: usize,
+    pub quantity_matched: usize,
+    pub returned_candidates: usize,
+    pub returned_sell_put: usize,
+    pub returned_sell_call: usize,
+    pub browse_min_days: i64,
+    pub browse_max_days: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateScanResult {
+    pub candidates: Vec<StrategyCandidate>,
+    pub diagnostics: CandidateScanDiagnostics,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -481,6 +510,7 @@ pub struct AppSnapshot {
     pub metrics: Vec<MetricCard>,
     pub balances: Vec<BalanceRow>,
     pub candidates: Vec<StrategyCandidate>,
+    pub scan_diagnostics: CandidateScanDiagnostics,
     pub orders: Vec<StrategyOrder>,
     pub pnl: PnlReport,
     pub risk: RiskSnapshot,

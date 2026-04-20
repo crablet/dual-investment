@@ -21,6 +21,7 @@ export const useAppStore = defineStore('app', () => {
   const metrics = computed(() => snapshot.value?.metrics ?? [])
   const balances = computed(() => snapshot.value?.balances ?? [])
   const candidates = computed(() => snapshot.value?.candidates ?? [])
+  const scanDiagnostics = computed(() => snapshot.value?.scanDiagnostics)
   const orders = computed(() => snapshot.value?.orders ?? [])
   const pnl = computed(() => snapshot.value?.pnl)
   const risk = computed(() => snapshot.value?.risk)
@@ -87,7 +88,11 @@ export const useAppStore = defineStore('app', () => {
   async function scan() {
     const next = await run(() => api.scanCandidates())
     if (next && snapshot.value) {
-      snapshot.value = { ...snapshot.value, candidates: next }
+      snapshot.value = {
+        ...snapshot.value,
+        candidates: next.candidates,
+        scanDiagnostics: next.diagnostics,
+      }
     }
   }
 
@@ -170,6 +175,7 @@ export const useAppStore = defineStore('app', () => {
     metrics,
     balances,
     candidates,
+    scanDiagnostics,
     orders,
     pnl,
     risk,
