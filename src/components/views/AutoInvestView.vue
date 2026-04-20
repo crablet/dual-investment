@@ -61,7 +61,7 @@ function save() {
 }
 
 function toggle(value: boolean) {
-  if (value && !window.confirm('确认开启实盘自动定投？后续符合条件的自动单不会逐笔确认。')) {
+  if (value && !window.confirm('确认开启自动定投？后续符合条件的自动单不会逐笔确认。')) {
     return
   }
   void store.toggleAuto({
@@ -71,7 +71,7 @@ function toggle(value: boolean) {
 }
 
 function runAutoNow() {
-  if (!window.confirm('确认立即执行一次自动扫描？若存在推荐候选，将直接发送实盘订单。')) {
+  if (!window.confirm('确认立即执行一次自动扫描？若存在推荐候选，将直接发送 Binance 订单。')) {
     return
   }
   void store.runAutoOnce()
@@ -95,7 +95,7 @@ function runAutoNow() {
 
     <Panel title="策略预览 / 今日扫描结果" class="span-5 row-span-3">
       <div class="scan-list">
-        <p v-if="recommended.length === 0" class="empty-state">暂无实盘候选机会</p>
+        <p v-if="recommended.length === 0" class="empty-state">暂无候选机会</p>
         <article v-for="candidate in recommended" :key="candidate.id" :class="candidate.recommendation">
           <header>
             <strong>{{ candidate.direction === 'sellPut' ? 'BTC 双币赢 抄底' : 'BTC 双币赢 止盈' }}</strong>
@@ -153,7 +153,7 @@ function runAutoNow() {
       <div class="button-row">
         <NButton type="primary" size="large" @click="save">
           <template #icon><NIcon :component="Save" /></template>
-          保存实盘规则
+          保存规则
         </NButton>
         <NButton secondary size="large" @click="store.scan">
           <template #icon><NIcon :component="Search" /></template>

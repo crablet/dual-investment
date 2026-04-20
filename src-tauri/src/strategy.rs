@@ -39,7 +39,7 @@ pub fn build_metrics(
         } else if account.is_some() {
             "Binance 期权账户".to_string()
         } else {
-            "等待实盘数据同步".to_string()
+            "等待数据同步".to_string()
         }
     } else {
         "等待 API 连接".to_string()
@@ -60,7 +60,7 @@ pub fn build_metrics(
             title: "总资产估值".to_string(),
             value: format_money(total_equity),
             sub_value: sync_state.clone(),
-            change: "实盘".to_string(),
+            change: "Binance".to_string(),
             icon: "wallet".to_string(),
             tone: "gold".to_string(),
         },
@@ -69,7 +69,7 @@ pub fn build_metrics(
             title: "可用保证金".to_string(),
             value: format_money(available_margin),
             sub_value: sync_state.clone(),
-            change: "实盘".to_string(),
+            change: "Binance".to_string(),
             icon: "shield".to_string(),
             tone: "blue".to_string(),
         },
@@ -78,7 +78,7 @@ pub fn build_metrics(
             title: "今日权利金".to_string(),
             value: format_money(today_premium),
             sub_value: "本地订单统计".to_string(),
-            change: "实盘".to_string(),
+            change: "本地".to_string(),
             icon: "coins".to_string(),
             tone: "gold".to_string(),
         },
@@ -93,7 +93,7 @@ pub fn build_metrics(
                 "未连接"
             }
             .to_string(),
-            sub_value: "实盘模式".to_string(),
+            sub_value: "Tauri 客户端".to_string(),
             change: sync_state.clone(),
             icon: "activity".to_string(),
             tone: if settings.auto_enabled {
@@ -384,11 +384,11 @@ pub fn build_candidates(
                 RecommendationLevel::Reject
             };
             let reason = if passes_rule {
-                format!("来自 Binance 实盘合约和 mark price，满足当前自动规则，mark IV 代理值 {iv_rank}%")
+                format!("来自 Binance 合约和 mark price，满足当前自动规则，mark IV 代理值 {iv_rank}%")
             } else if available_margin < required_margin {
                 "可用保证金不足，暂不建议下单".to_string()
             } else {
-                format!("来自 Binance 实盘合约和 mark price，未完全满足当前自动规则，mark IV 代理值 {iv_rank}%")
+                format!("来自 Binance 合约和 mark price，未完全满足当前自动规则，mark IV 代理值 {iv_rank}%")
             };
 
             Some(StrategyCandidate {
@@ -459,7 +459,7 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
         exercise_probability: Decimal::ZERO,
         breakeven,
         recommendation: RecommendationLevel::Watch,
-        reason: "基于用户输入限价的实盘订单预览".to_string(),
+        reason: "基于用户输入限价的订单预览".to_string(),
     };
 
     let reserved_asset = match request.direction {
@@ -468,8 +468,8 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
     };
     let protected_limit_price = request.limit_price;
     let action = match request.direction {
-        StrategyDirection::SellPut => "到期 ITM 后自动买入 BTC，完成实盘补齐",
-        StrategyDirection::SellCall => "到期 ITM 后自动卖出 BTC，完成实盘补齐",
+        StrategyDirection::SellPut => "到期 ITM 后自动买入 BTC，完成补齐",
+        StrategyDirection::SellCall => "到期 ITM 后自动卖出 BTC，完成补齐",
     };
 
     StrategyPreview {
@@ -478,7 +478,7 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
         reserved_asset,
         protected_limit_price,
         summary: vec![
-            format!("快速成交：以用户输入限价尝试 IOC 实盘成交"),
+            format!("快速成交：以用户输入限价尝试 IOC 成交"),
             format!("{action}"),
             format!("预计年化 {}%，数量 {} 张", annualized, request.quantity),
         ],

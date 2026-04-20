@@ -34,7 +34,7 @@ const balanceBreakdown = computed(() =>
   <div class="view-grid">
     <Panel title="现货持仓" class="span-4">
       <div class="account-list large">
-        <p v-if="store.balances.length === 0" class="empty-state">暂无实盘持仓</p>
+        <p v-if="store.balances.length === 0" class="empty-state">暂无持仓</p>
         <div v-for="balance in store.balances" :key="balance.asset" class="account-row">
           <span>{{ balance.asset }}</span>
           <strong>{{ balance.free }}</strong>
@@ -101,7 +101,7 @@ const balanceBreakdown = computed(() =>
             </tr>
           </tbody>
         </table>
-        <p v-if="store.orders.length === 0 && store.balances.length === 0" class="empty-state">暂无实盘持仓明细</p>
+        <p v-if="store.orders.length === 0 && store.balances.length === 0" class="empty-state">暂无持仓明细</p>
       </div>
     </Panel>
 

@@ -53,11 +53,11 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
 
     <Panel title="月度复盘" class="span-12">
       <div v-if="store.pnl" class="summary-cards">
-        <article><span>本月收益</span><strong>{{ money(store.pnl.cumulative) }}</strong><em>实盘记录</em></article>
-        <article><span>本月权利金</span><strong>{{ money(store.pnl.optionPremium) }}</strong><em>实盘记录</em></article>
+        <article><span>本月收益</span><strong>{{ money(store.pnl.cumulative) }}</strong><em>本地记录</em></article>
+        <article><span>本月权利金</span><strong>{{ money(store.pnl.optionPremium) }}</strong><em>本地记录</em></article>
         <article><span>现货已实现盈亏</span><strong>暂未计算</strong><em>缺少外部 BTC 成本基准</em></article>
         <article><span>补齐 BTC 浮动盈亏</span><strong>{{ money(store.pnl.floatingSpot) }}</strong><em>按当前 BTCUSDT 估算</em></article>
-        <article><span>手续费支出</span><strong>{{ money(store.pnl.fees) }}</strong><em>实盘记录</em></article>
+        <article><span>手续费支出</span><strong>{{ money(store.pnl.fees) }}</strong><em>本地记录</em></article>
         <article><span>最大回撤</span><strong>{{ percent(store.risk?.dailyDrawdown ?? '0') }}</strong><em>本地风险记录</em></article>
       </div>
     </Panel>
@@ -86,7 +86,7 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
             </tr>
           </tbody>
         </table>
-        <p v-if="store.orders.length === 0" class="empty-state">暂无实盘收益明细</p>
+        <p v-if="store.orders.length === 0" class="empty-state">暂无收益明细</p>
       </div>
     </Panel>
   </div>

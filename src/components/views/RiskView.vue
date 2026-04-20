@@ -47,7 +47,7 @@ function tagType(severity: RiskSeverity) {
     </Panel>
 
     <Panel title="保证金占用率" class="span-3">
-      <div class="risk-metric"><strong>{{ percent(store.risk?.marginUsage ?? '0') }}</strong><span>实盘保证金占用</span></div>
+      <div class="risk-metric"><strong>{{ percent(store.risk?.marginUsage ?? '0') }}</strong><span>保证金占用</span></div>
       <NProgress :percentage="Number(store.risk?.marginUsage ?? 0)" :show-indicator="false" />
     </Panel>
 
@@ -57,7 +57,7 @@ function tagType(severity: RiskSeverity) {
     </Panel>
 
     <Panel title="单日最大回撤" class="span-3">
-      <div class="risk-metric"><strong>{{ percent(store.risk?.dailyDrawdown ?? '0') }}</strong><span>本地实盘记录</span></div>
+      <div class="risk-metric"><strong>{{ percent(store.risk?.dailyDrawdown ?? '0') }}</strong><span>本地记录</span></div>
       <NProgress :percentage="Number(store.risk?.dailyDrawdown ?? 0) * 10" status="success" :show-indicator="false" />
     </Panel>
 
@@ -91,7 +91,7 @@ function tagType(severity: RiskSeverity) {
         <article><span>最低目标年化</span><strong>{{ percent(store.autoRule?.minAnnualized ?? '0') }}</strong></article>
         <article><span>最大回撤阈值</span><strong>{{ percent(store.risk?.rules.maxDrawdown ?? '0') }}</strong></article>
         <article><span>连续亏损停止</span><strong>连续亏损 {{ store.risk?.rules.stopAfterConsecutiveLosses ?? 0 }} 次</strong></article>
-        <article><span>实盘下单确认</span><strong>逐笔确认</strong></article>
+        <article><span>下单确认</span><strong>逐笔确认</strong></article>
       </div>
     </Panel>
 

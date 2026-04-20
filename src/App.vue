@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { darkTheme, NConfigProvider, NDialogProvider, NMessageProvider } from 'naive-ui'
+import { darkTheme, dateZhCN, NConfigProvider, NDialogProvider, NMessageProvider, zhCN } from 'naive-ui'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue'
 import AppShell from '@/components/layout/AppShell.vue'
@@ -69,7 +69,7 @@ const themeOverrides: GlobalThemeOverrides = {
 }
 
 onMounted(() => {
-  void store.refresh()
+  void store.bootstrap()
   syncTimer = window.setInterval(() => {
     if (store.settings?.connected) {
       void store.syncLiveState()
@@ -85,7 +85,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides">
+  <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
     <NDialogProvider>
       <NMessageProvider>
         <AppShell>

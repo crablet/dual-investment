@@ -53,6 +53,13 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function bootstrap() {
+    await refresh()
+    if (snapshot.value?.settings.savedCredentials && !snapshot.value.settings.connected) {
+      await connectSaved()
+    }
+  }
+
   async function connect(request: ConnectBinanceRequest) {
     const next = await run(() => api.connectBinance(request))
     patchSettings(next)
@@ -170,6 +177,7 @@ export const useAppStore = defineStore('app', () => {
     auditRecent,
     orderAttempts,
     runningOrders,
+    bootstrap,
     refresh,
     connect,
     connectSaved,

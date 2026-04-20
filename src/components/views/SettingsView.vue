@@ -13,7 +13,7 @@ const form = reactive({
 })
 
 const canConnect = computed(() => form.apiKey.trim().length > 0 && form.apiSecret.length > 0)
-const backendStatus = computed(() => store.settings?.connected ? '实盘已连接' : '等待连接')
+const backendStatus = computed(() => store.settings?.connected ? '已连接' : '等待连接')
 const backendStatusClass = computed(() => store.settings?.connected ? 'positive' : 'warning')
 const auditCountLabel = computed(() => `${store.auditRecent.length} 条`)
 
@@ -35,7 +35,7 @@ async function connectSaved() {
 }
 
 async function forgetCredentials() {
-  if (!window.confirm('确认从系统 keyring 删除 Binance API 凭据？这会断开当前实盘连接。')) {
+  if (!window.confirm('确认从系统 keyring 删除 Binance API 凭据？这会断开当前连接。')) {
     return
   }
   await store.forgetCredentials()
@@ -56,14 +56,14 @@ async function exportLogs() {
 
 <template>
   <div class="settings-page">
-    <Panel title="实盘连接" class="settings-main">
+    <Panel title="Binance 连接" class="settings-main">
       <div class="settings-connection">
         <div class="settings-connect-form">
           <NInput v-model:value="form.apiKey" placeholder="API Key" />
           <NInput v-model:value="form.apiSecret" type="password" placeholder="API Secret" show-password-on="click" />
           <NButton type="primary" :disabled="!canConnect" :loading="store.loading" @click="connect">
             <template #icon><NIcon :component="KeyRound" /></template>
-            连接实盘账户
+            连接 Binance
           </NButton>
           <NButton
             secondary
@@ -92,8 +92,8 @@ async function exportLogs() {
     <Panel title="运行状态" class="settings-side">
       <dl class="settings-status-list">
         <div>
-          <dt>模式</dt>
-          <dd>实盘</dd>
+          <dt>运行环境</dt>
+          <dd>Tauri 客户端</dd>
         </div>
         <div>
           <dt>后台</dt>

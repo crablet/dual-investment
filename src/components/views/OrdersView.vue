@@ -43,7 +43,7 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
         </div>
       </template>
       <div class="summary-cards">
-        <article><span>总订单数</span><strong>{{ store.orders.length }}</strong><em>本地实盘订单</em></article>
+        <article><span>总订单数</span><strong>{{ store.orders.length }}</strong><em>本地订单</em></article>
         <article><span>进行中订单</span><strong>{{ store.runningOrders.length }}</strong><em>当前未结算</em></article>
         <article><span>今日到期</span><strong>{{ todayExpiryCount }}</strong><em>按本地订单统计</em></article>
         <article><span>累计权利金</span><strong>{{ money(String(totalPremium)) }}</strong><em>已记录订单</em></article>
@@ -83,7 +83,7 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
             </tr>
           </tbody>
         </table>
-        <p v-if="store.orders.length === 0" class="empty-state">暂无实盘订单</p>
+        <p v-if="store.orders.length === 0" class="empty-state">暂无订单</p>
       </div>
     </Panel>
 

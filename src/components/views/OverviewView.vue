@@ -26,14 +26,14 @@ const pendingTasks = computed(() => [
   {
     id: 'expiring-orders',
     tone: '',
-    text: `${expiringOrdersCount.value} 个实盘订单将在 7 天内到期`,
+    text: `${expiringOrdersCount.value} 个订单将在 7 天内到期`,
     view: 'orders',
     visible: expiringOrdersCount.value > 0,
   },
   {
     id: 'candidate-count',
     tone: 'blue',
-    text: `当前有 ${store.candidates.length} 个实盘候选机会`,
+    text: `当前有 ${store.candidates.length} 个候选机会`,
     view: 'auto',
     visible: store.candidates.length > 0,
   },
@@ -57,7 +57,7 @@ const autoStatusItems = computed(() => [
 ])
 
 function placeCandidate(candidate: StrategyCandidate) {
-  if (!window.confirm('确认发送 Binance 实盘期权订单？')) {
+  if (!window.confirm('确认发送 Binance 期权订单？')) {
     return
   }
   void store.placeStrategy({
@@ -112,7 +112,7 @@ function placeCandidate(candidate: StrategyCandidate) {
         <div class="auto-scan-card">
           <span>扫描计划</span>
           <strong>{{ store.autoRule?.schedule ?? '未设置' }}</strong>
-          <em>{{ store.settings?.connected ? '实盘 API 已连接' : '等待 Binance 实盘 API 连接' }}</em>
+          <em>{{ store.settings?.connected ? 'Binance 已连接' : '等待 Binance 连接' }}</em>
         </div>
         <div class="auto-status-list">
           <p v-for="item in autoStatusItems" :key="item.label" class="auto-status-item">

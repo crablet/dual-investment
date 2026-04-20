@@ -38,7 +38,7 @@ const polyline = computed(() => {
       <polyline :points="`0,100 ${polyline} 100,100`" fill="url(#line-fill)" stroke="none" />
       <polyline :points="polyline" fill="none" stroke="#f5b625" stroke-width="2.4" stroke-linecap="round" />
     </svg>
-    <div v-else class="mini-chart-empty">暂无实盘收益数据</div>
+    <div v-else class="mini-chart-empty">暂无收益数据</div>
     <div v-if="hasPoints" class="chart-axis">
       <span v-for="point in points" :key="point.label">{{ point.label }}</span>
     </div>

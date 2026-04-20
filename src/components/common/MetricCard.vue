@@ -21,8 +21,6 @@ const icons = {
     <div>
       <p class="metric-title">{{ metric.title }}</p>
       <strong>{{ metric.value }}</strong>
-      <span>{{ metric.subValue }}</span>
-      <em>{{ metric.change }}</em>
     </div>
   </article>
 </template>

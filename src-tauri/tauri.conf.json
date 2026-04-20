@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "双币赢实盘助手",
+  "productName": "双币赢助手",
   "version": "0.1.0",
   "identifier": "com.dualinvestment.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "双币赢实盘助手",
+        "title": "双币赢助手",
         "width": 1440,
         "height": 940,
         "minWidth": 1180,
@@ -38,6 +38,6 @@
       "icons/icon.png"
     ],
     "shortDescription": "Options and spot strategy runner",
-    "longDescription": "A desktop app that runs Binance dual-investment-style option and spot strategies in live mode."
+    "longDescription": "A desktop app that runs Binance dual-investment-style option and spot strategies."
   }
 }

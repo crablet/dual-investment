@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowDownCircle, ArrowUpCircle, PlusCircle, Zap } from 'lucide-vue-next'
-import { NButton, NIcon, NInput, NInputNumber } from 'naive-ui'
+import { NButton, NDatePicker, NIcon, NInput, NInputNumber } from 'naive-ui'
 import { computed, reactive, watch } from 'vue'
 import CandidateTable from '@/components/common/CandidateTable.vue'
 import MiniLineChart from '@/components/common/MiniLineChart.vue'
@@ -12,12 +12,19 @@ import type { StrategyCandidate, StrategyDirection } from '@/types/domain'
 const store = useAppStore()
 const { money, percent } = useFormat()
 
+function formatDateInput(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 const form = reactive({
   direction: 'sellPut' as StrategyDirection,
   strike: 72000,
   quantity: 0.01,
   limitPrice: 0,
-  expiry: store.candidates[0]?.expiry ?? new Date(Date.now() + 14 * 86400_000).toISOString().slice(0, 10),
+  expiry: store.candidates[0]?.expiry ?? formatDateInput(new Date(Date.now() + 14 * 86400_000)),
   optionSymbol: '',
 })
 
@@ -56,8 +63,14 @@ function applyCandidate(candidate: StrategyCandidate) {
   form.optionSymbol = candidate.optionSymbol
 }
 
+function updateExpiry(value: string | [string, string] | null) {
+  if (typeof value === 'string' && value.length > 0) {
+    form.expiry = value
+  }
+}
+
 function submit() {
-  if (!window.confirm('确认发送 Binance 实盘期权订单？')) {
+  if (!window.confirm('确认发送 Binance 期权订单？')) {
     return
   }
   void store.placeStrategy({
@@ -102,7 +115,18 @@ function submit() {
         </label>
         <label>
           到期日
-          <input v-model="form.expiry" class="native-input" type="date">
+          <NDatePicker
+            class="date-picker-control"
+            type="date"
+            :formatted-value="form.expiry"
+            value-format="yyyy-MM-dd"
+            format="yyyy-MM-dd"
+            placeholder="选择到期日"
+            input-readonly
+            close-on-select
+            :actions="null"
+            @update:formatted-value="updateExpiry"
+          />
         </label>
         <label>
           Binance 期权合约
@@ -111,7 +135,7 @@ function submit() {
         <div class="button-row">
           <NButton type="primary" size="large" :disabled="!canSubmit" @click="submit">
             <template #icon><NIcon :component="Zap" /></template>
-            发送实盘订单
+            发送订单
           </NButton>
           <NButton secondary size="large" @click="store.activeView = 'auto'">
             <template #icon><NIcon :component="PlusCircle" /></template>

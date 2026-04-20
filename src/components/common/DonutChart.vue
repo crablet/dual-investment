@@ -47,7 +47,7 @@ const segments = computed(() => {
       <text x="21" y="25" text-anchor="middle">USDT</text>
     </svg>
     <div class="donut-legend">
-      <p v-if="!hasItems" class="empty-state">暂无实盘构成数据</p>
+      <p v-if="!hasItems" class="empty-state">暂无收益构成数据</p>
       <div v-for="item in items" :key="item.label" class="legend-row">
         <span :style="{ background: item.color }" />
         <p>{{ item.label }}</p>

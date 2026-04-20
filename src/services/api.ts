@@ -22,7 +22,7 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
   if (isTauriRuntime()) {
     return invoke<T>(command, args)
   }
-  throw new Error(`命令 ${command} 只能在 Tauri 实盘客户端中执行`)
+  throw new Error(`命令 ${command} 只能在 Tauri 客户端中执行`)
 }
 
 export const api = {

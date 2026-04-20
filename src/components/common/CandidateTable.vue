@@ -52,6 +52,6 @@ const { directionText, directionTone, money, percent } = useFormat()
         </tr>
       </tbody>
     </table>
-    <p v-if="candidates.length === 0" class="empty-state">暂无实盘候选机会</p>
+    <p v-if="candidates.length === 0" class="empty-state">暂无候选机会</p>
   </div>
 </template>

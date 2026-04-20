@@ -1,4 +1,5 @@
 use std::{
+    future::Future,
     path::Path,
     sync::{
         Arc, Mutex,
@@ -69,6 +70,8 @@ impl RuntimeConfig {
 #[derive(Clone)]
 pub struct AppState {
     runtime: Arc<RwLock<RuntimeConfig>>,
+    client: Arc<RwLock<Option<BinanceClient>>>,
+    candidates: Arc<RwLock<Vec<StrategyCandidate>>>,
     auto_rule: Arc<RwLock<AutoInvestmentRule>>,
     orders: Arc<RwLock<Vec<StrategyOrder>>>,
     persistence: Arc<Mutex<Persistence>>,
@@ -94,19 +97,22 @@ impl AppState {
 
         let state = Self {
             runtime: Arc::new(RwLock::new(RuntimeConfig::default())),
+            client: Arc::new(RwLock::new(None)),
+            candidates: Arc::new(RwLock::new(Vec::new())),
             auto_rule: Arc::new(RwLock::new(auto_rule)),
             orders: Arc::new(RwLock::new(orders)),
             persistence: Arc::new(Mutex::new(persistence)),
             worker_started: Arc::new(AtomicBool::new(false)),
             last_auto_scan_day: Arc::new(RwLock::new(None)),
         };
-        state.record_audit("app.started", "应用已启动，等待 Binance 实盘 API 连接")?;
+        state.record_audit("app.started", "应用已启动，等待 Binance API 连接")?;
         Ok(state)
     }
 
     pub async fn snapshot(&self) -> AppResult<AppSnapshot> {
         let settings = self.runtime.read().await.settings();
         let auto_rule = self.auto_rule.read().await.clone();
+        let candidates = self.candidates.read().await.clone();
         let orders = self.orders.read().await.clone();
         let accounts = self.live_accounts_if_connected().await?;
         let (audit_recent, order_attempts) = {
@@ -137,7 +143,7 @@ impl AppState {
         Ok(AppSnapshot {
             metrics: strategy::build_metrics(&settings, option_account, &orders),
             balances,
-            candidates: Vec::new(),
+            candidates,
             pnl: strategy::pnl_report_from_orders_with_spot(&orders, spot_price),
             risk: option_account.map_or_else(
                 strategy::empty_risk_snapshot,
@@ -159,8 +165,18 @@ impl AppState {
         let api_key = request.api_key.trim().to_string();
         let api_secret = request.api_secret;
         let client = BinanceClient::new(api_key.clone(), api_secret.clone())?;
-        client.verify_account().await?;
-        let spot_account = client.spot_account().await?;
+        let option_account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.verify_account().await }
+        });
+        let spot_account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.spot_account().await }
+        });
+        let option_account = join_binance_request(option_account_task).await;
+        let spot_account = join_binance_request(spot_account_task).await;
+        option_account?;
+        let spot_account = spot_account?;
         if !spot_account.can_trade {
             return Err(AppError::Config(
                 "Binance 现货账户当前不可交易，无法执行到期补齐".to_string(),
@@ -176,9 +192,13 @@ impl AppState {
         runtime.saved_credentials = true;
         let settings = runtime.settings();
         drop(runtime);
+        {
+            let mut cached_client = self.client.write().await;
+            *cached_client = Some(client);
+        }
 
         self.ensure_background_worker();
-        self.record_audit("account.connected", "已连接 Binance 实盘账户")?;
+        self.record_audit("account.connected", "已连接 Binance 账户")?;
         Ok(settings)
     }
 
@@ -189,8 +209,18 @@ impl AppState {
             ));
         };
         let client = BinanceClient::new(api_key.clone(), api_secret.clone())?;
-        client.verify_account().await?;
-        let spot_account = client.spot_account().await?;
+        let option_account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.verify_account().await }
+        });
+        let spot_account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.spot_account().await }
+        });
+        let option_account = join_binance_request(option_account_task).await;
+        let spot_account = join_binance_request(spot_account_task).await;
+        option_account?;
+        let spot_account = spot_account?;
         if !spot_account.can_trade {
             return Err(AppError::Config(
                 "Binance 现货账户当前不可交易，无法执行到期补齐".to_string(),
@@ -205,11 +235,15 @@ impl AppState {
         runtime.saved_credentials = true;
         let settings = runtime.settings();
         drop(runtime);
+        {
+            let mut cached_client = self.client.write().await;
+            *cached_client = Some(client);
+        }
 
         self.ensure_background_worker();
         self.record_audit(
             "account.connected.saved",
-            "已使用系统 keyring 凭据连接 Binance 实盘账户",
+            "已使用系统 keyring 凭据连接 Binance 账户",
         )?;
         Ok(settings)
     }
@@ -226,6 +260,14 @@ impl AppState {
         let settings = runtime.settings();
         drop(runtime);
         {
+            let mut cached_client = self.client.write().await;
+            *cached_client = None;
+        }
+        {
+            let mut candidates = self.candidates.write().await;
+            candidates.clear();
+        }
+        {
             let mut rule = self.auto_rule.write().await;
             rule.enabled = false;
         }
@@ -238,14 +280,34 @@ impl AppState {
 
     pub async fn scan_candidates(&self) -> AppResult<Vec<StrategyCandidate>> {
         let client = self.live_client().await?;
+        let account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.option_account().await }
+        });
+        let contracts_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.exchange_info().await }
+        });
+        let marks_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.option_mark_prices().await }
+        });
         let auto_rule = self.auto_rule.read().await.clone();
         let orders = self.orders.read().await.clone();
-        let account = client.option_account().await?;
-        let contracts = client.exchange_info().await?;
-        let marks = client.option_mark_prices().await?;
-        Ok(strategy::build_candidates(
+        let account = join_binance_request(account_task).await;
+        let contracts = join_binance_request(contracts_task).await;
+        let marks = join_binance_request(marks_task).await;
+        let account = account?;
+        let contracts = contracts?;
+        let marks = marks?;
+        let candidates = strategy::build_candidates(
             &contracts, &marks, &auto_rule, &account, &orders,
-        ))
+        );
+        {
+            let mut cached_candidates = self.candidates.write().await;
+            cached_candidates.clone_from(&candidates);
+        }
+        Ok(candidates)
     }
 
     pub fn preview_strategy(
@@ -262,7 +324,7 @@ impl AppState {
         validate_request(&request)?;
         if !request.confirm_live {
             return Err(AppError::RiskRejected(
-                "实盘手动下单需要显式确认".to_string(),
+                "手动下单需要显式确认".to_string(),
             ));
         }
         self.place_live_strategy(request, "manual").await
@@ -287,11 +349,11 @@ impl AppState {
     pub async fn toggle_auto_strategy(&self, request: ToggleAutoRequest) -> AppResult<AppSettings> {
         let mut runtime = self.runtime.write().await;
         if request.enabled && !runtime.connected {
-            return Err(AppError::Config("请先连接 Binance 实盘 API".to_string()));
+            return Err(AppError::Config("请先连接 Binance API".to_string()));
         }
         if request.enabled && !request.confirm_live {
             return Err(AppError::RiskRejected(
-                "实盘自动策略开启需要二次确认".to_string(),
+                "自动策略开启需要二次确认".to_string(),
             ));
         }
         runtime.auto_enabled = request.enabled;
@@ -354,9 +416,24 @@ impl AppState {
 
     pub async fn balances(&self) -> AppResult<Vec<BalanceRow>> {
         let client = self.live_client().await?;
-        let option = client.option_account().await?;
-        let spot = client.spot_account().await?;
-        let spot_price = client.spot_price("BTCUSDT").await?;
+        let option_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.option_account().await }
+        });
+        let spot_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.spot_account().await }
+        });
+        let spot_price_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.spot_price("BTCUSDT").await }
+        });
+        let option = join_binance_request(option_task).await;
+        let spot = join_binance_request(spot_task).await;
+        let spot_price = join_binance_request(spot_price_task).await;
+        let option = option?;
+        let spot = spot?;
+        let spot_price = spot_price?;
         Ok(combined_balances(&option, &spot, spot_price))
     }
 
@@ -388,7 +465,7 @@ impl AppState {
     pub async fn run_auto_once(&self) -> AppResult<Option<StrategyOrder>> {
         let runtime = self.runtime.read().await.clone();
         if !runtime.connected {
-            return Err(AppError::Config("请先连接 Binance 实盘 API".to_string()));
+            return Err(AppError::Config("请先连接 Binance API".to_string()));
         }
         if !runtime.auto_enabled {
             return Err(AppError::RiskRejected("自动定投未启用".to_string()));
@@ -413,9 +490,24 @@ impl AppState {
     ) -> AppResult<StrategyOrder> {
         validate_request(&request)?;
         let client = self.live_client().await?;
-        let account = client.option_account().await?;
-        let contracts = client.exchange_info().await?;
-        let marks = client.option_mark_prices().await?;
+        let account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.option_account().await }
+        });
+        let contracts_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.exchange_info().await }
+        });
+        let marks_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.option_mark_prices().await }
+        });
+        let account = join_binance_request(account_task).await;
+        let contracts = join_binance_request(contracts_task).await;
+        let marks = join_binance_request(marks_task).await;
+        let account = account?;
+        let contracts = contracts?;
+        let marks = marks?;
         let orders = self.orders.read().await.clone();
         let contract = resolve_contract(&request, &contracts)?;
         request.option_symbol = Some(contract.symbol.clone());
@@ -432,7 +524,7 @@ impl AppState {
             direction: request.direction,
             status: OrderAttemptStatus::Attempted,
             exchange_order_id: None,
-            message: "已通过本地风控，准备发送 Binance 实盘订单".to_string(),
+            message: "已通过本地风控，准备发送 Binance 订单".to_string(),
             created_at: now,
             updated_at: now,
         };
@@ -592,18 +684,7 @@ impl AppState {
         let orders = self.orders.read().await.clone();
         let mut updated = Vec::new();
 
-        for order in orders.into_iter().filter(should_settle_order) {
-            let mut order = match self.sync_single_order(&client, order.clone()).await {
-                Ok(order) => order,
-                Err(error) => {
-                    self.record_audit(
-                        "strategy.settlement.sync_failed",
-                        &format!("{} 结算前同步失败：{}", order.option_symbol, error),
-                    )?;
-                    order
-                }
-            };
-
+        for mut order in orders.into_iter().filter(should_settle_order) {
             if order.filled_quantity <= Decimal::ZERO {
                 order.status = StrategyStatus::Expired;
                 order.updated_at = Utc::now();
@@ -885,24 +966,62 @@ impl AppState {
     }
 
     async fn live_client(&self) -> AppResult<BinanceClient> {
+        if let Some(client) = self.client.read().await.as_ref().cloned() {
+            return Ok(client);
+        }
         let runtime = self.runtime.read().await.clone();
-        client_from_runtime(&runtime)
+        let client = client_from_runtime(&runtime)?;
+        {
+            let mut cached_client = self.client.write().await;
+            *cached_client = Some(client.clone());
+        }
+        Ok(client)
     }
 
     async fn live_accounts_if_connected(
         &self,
     ) -> AppResult<Option<(OptionAccountSnapshot, SpotAccountSnapshot, Decimal)>> {
-        let runtime = self.runtime.read().await.clone();
-        if !runtime.connected {
+        let connected = self.runtime.read().await.connected;
+        if !connected {
             return Ok(None);
         }
-        let client = client_from_runtime(&runtime)?;
-        Ok(Some((
-            client.option_account().await?,
-            client.spot_account().await?,
-            client.spot_price("BTCUSDT").await?,
-        )))
+        let client = self.live_client().await?;
+        let option_account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.option_account().await }
+        });
+        let spot_account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.spot_account().await }
+        });
+        let spot_price_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.spot_price("BTCUSDT").await }
+        });
+        let option_account = join_binance_request(option_account_task).await;
+        let spot_account = join_binance_request(spot_account_task).await;
+        let spot_price = join_binance_request(spot_price_task).await;
+        let option_account = option_account?;
+        let spot_account = spot_account?;
+        let spot_price = spot_price?;
+        Ok(Some((option_account, spot_account, spot_price)))
     }
+}
+
+fn spawn_binance_request<T, F>(future: F) -> tauri::async_runtime::JoinHandle<AppResult<T>>
+where
+    T: Send + 'static,
+    F: Future<Output = AppResult<T>> + Send + 'static,
+{
+    tauri::async_runtime::spawn(future)
+}
+
+async fn join_binance_request<T>(
+    handle: tauri::async_runtime::JoinHandle<AppResult<T>>,
+) -> AppResult<T> {
+    handle
+        .await
+        .map_err(|error| AppError::Binance(format!("Binance 异步请求任务失败：{error}")))?
 }
 
 fn validate_request(request: &StrategyRequest) -> AppResult<()> {
@@ -920,7 +1039,7 @@ fn validate_request(request: &StrategyRequest) -> AppResult<()> {
         return Err(AppError::RiskRejected("执行价必须大于 0".to_string()));
     }
     if request.limit_price <= Decimal::ZERO {
-        return Err(AppError::RiskRejected("实盘限价必须大于 0".to_string()));
+        return Err(AppError::RiskRejected("限价必须大于 0".to_string()));
     }
     Ok(())
 }
@@ -939,7 +1058,7 @@ fn validate_auto_rule(rule: &AutoInvestmentRule) -> AppResult<()> {
 
 fn client_from_runtime(runtime: &RuntimeConfig) -> AppResult<BinanceClient> {
     if !runtime.connected {
-        return Err(AppError::Config("请先连接 Binance 实盘 API".to_string()));
+        return Err(AppError::Config("请先连接 Binance API".to_string()));
     }
     let api_key = runtime
         .api_key
@@ -1028,7 +1147,7 @@ fn resolve_contract<'a>(
         })
         .ok_or_else(|| {
             AppError::RiskRejected(
-                "未找到与方向、到期日和执行价匹配的 Binance 实盘合约".to_string(),
+                "未找到与方向、到期日和执行价匹配的 Binance 合约".to_string(),
             )
         })
 }
@@ -1148,7 +1267,7 @@ fn enforce_risk_rules(
         .count();
     if Decimal::from(daily_orders) >= rules.max_daily_orders {
         return Err(AppError::RiskRejected(format!(
-            "今日实盘下单次数已达到风控上限 {}",
+            "今日下单次数已达到风控上限 {}",
             rules.max_daily_orders
         )));
     }

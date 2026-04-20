@@ -1,6 +1,6 @@
-# 双币赢实盘助手
+# 双币赢助手
 
-一个 Tauri 桌面客户端，用 Binance 期权 + 现货执行类似“双币赢”的实盘策略，目标是减少交易所打包产品对权利金收益的抽水。
+一个 Tauri 桌面客户端，用 Binance 期权 + 现货执行类似“双币赢”的策略，目标是减少交易所打包产品对权利金收益的抽水。
 
 Rust 后端要求 Rust 1.95 或更新版本。
 
@@ -14,6 +14,7 @@ Rust 后端要求 Rust 1.95 或更新版本。
 - 自动定投：默认每天 `11:30` 扫描，单次 `0.01` 张，使用稳健筛选 preset。
 - 后台常驻：系统托盘提供主界面入口。
 - 数据持久化：Tauri 应用数据目录中的 SQLite 保存策略订单、订单尝试和审计日志；API 凭据通过 `keyring-core` 保存在系统 keyring。
+- 已保存凭据：启动时会自动读取系统 keyring 中的 Binance 凭据并尝试连接；不会自动开启自动策略。
 
 ## 重要风险
 
@@ -21,7 +22,7 @@ Rust 后端要求 Rust 1.95 或更新版本。
 
 本应用只保留实盘模式，会发起真实 Binance 订单。API Key 必须关闭提现权限，仅开启读取账户、读取行情、现货交易和期权交易权限。
 
-业务数据只来自 Binance 实盘接口或本地 SQLite 中已记录的真实事件。浏览器运行只适合检查静态布局，所有业务命令都需要在 Tauri 客户端内执行。
+业务数据只来自 Binance 接口或本地 SQLite 中已记录的真实事件。浏览器运行只适合检查静态布局，所有业务命令都需要在 Tauri 客户端内执行。
 
 ## 开发运行
 
@@ -30,7 +31,7 @@ pnpm install
 pnpm tauri:dev
 ```
 
-检查前端布局时可以运行 `pnpm dev`，但普通浏览器没有 Tauri runtime，业务命令会返回“只能在 Tauri 实盘客户端中执行”。
+检查前端布局时可以运行 `pnpm dev`，但普通浏览器没有 Tauri runtime，业务命令会返回“只能在 Tauri 客户端中执行”。
 
 如果 `pnpm tauri:dev` 在 Linux 上启动后出现 `gdk-pixbuf` 的 `data.len() must fit the width, height, and row_stride` panic，优先检查 `src-tauri/icons/icon.png`。Tauri 会把这个 PNG 解码成窗口图标的 RGBA 数据，文件必须是有效 RGBA PNG；修改图标后 `src-tauri/build.rs` 会触发 context 缓存重建。
 
@@ -50,15 +51,15 @@ pnpm tauri:build
 
 - `get_app_snapshot` 等 Tauri commands 已连接前后端。
 - 浏览器开发环境不再提供前端数据 fallback，需要通过 Tauri 客户端调用后端命令。
-- 启动快照在未连接 API 前返回空持仓、空候选、空收益和空风控状态；连接后会从 Binance 期权保证金账户和现货账户同步余额、保证金和风控快照。
+- 启动快照在未连接 API 前返回空持仓、空候选、空收益和空风控状态；如果系统 keyring 中已有 Binance 凭据，前端启动流程会自动尝试连接并同步 Binance 状态。
 - Rust 后端有 Binance EAPI/Spot 签名请求封装，连接时会真实校验期权账户和现货交易权限，下单前会读取 exchangeInfo、mark price、账户保证金并执行合约过滤器和风控规则校验。
-- 候选扫描已接入 Binance exchangeInfo + option mark price，按 `BTCUSDT`、合约状态、到期天数、数量范围、delta、年化和可用保证金生成候选。
+- 候选扫描已接入 Binance exchangeInfo + option mark price，按 `BTCUSDT`、合约状态、到期天数、数量范围、delta、年化和可用保证金生成候选；扫描结果保存在运行态快照中，后续订单/账户同步不会把候选列表清空。
 - 真实期权下单使用单位限价 + IOC 的快速成交路径，订单入库使用 Binance 返回的 `orderId`、`clientOrderId`、成交数量、均价和交易所状态；零成交、部分成交、拒绝、过期会分别落到不同本地状态。
 - SQLite 会记录订单尝试阶段，前端订单页会展示恢复记录，并可从 Binance 查询真实订单来恢复“交易所已创建订单但本地保存失败”的本地状态。
 - 后台调度器会周期性同步订单状态、扫描到期订单；到期 ITM 后会按方向发送 Binance Spot 市价补齐订单，失败时进入 `rebalanceFailed` 并写审计事件。
-- 实盘自动策略开启需要二次确认；手动实盘下单也需要显式确认。
+- 自动策略开启需要二次确认；手动下单也需要显式确认。
 - 自动策略规则会持久化；应用重启后规则仍保留，但自动执行默认关闭，必须重新二次确认开启。开启后会按规则每日触发一次扫描，也可以在自动定投页手动执行一次自动扫描。
-- Binance API Key/Secret 通过 `keyring-core` + 平台 store 保存和读取；Linux 使用 DBus Secret Service，macOS 使用登录钥匙串，Windows 使用 Credential Manager。保存失败时不会建立实盘连接。
+- Binance API Key/Secret 通过 `keyring-core` + 平台 store 保存和读取；Linux 使用 DBus Secret Service，macOS 使用登录钥匙串，Windows 使用 Credential Manager。保存失败时不会建立连接；已保存凭据失效时会暴露连接错误，不会使用前端 fallback。
 
 ## 项目结构
 
@@ -75,7 +76,7 @@ src-tauri/
   src/domain.rs      金融领域模型
   src/persistence.rs SQLite 审计、订单和订单尝试存储
   src/secrets.rs     系统 keyring 凭据读写
-  src/strategy.rs    策略预览和实盘规则默认值
+  src/strategy.rs    策略预览和规则默认值
 ```
 
 ## 后续增强
