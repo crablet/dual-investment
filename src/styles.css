@@ -1052,27 +1052,6 @@ button.opportunity-row.selected:hover {
   color: var(--muted);
 }
 
-.order-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.order-warning {
-  margin: -2px 0 0;
-  color: var(--red);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.inline-input-action {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-
 .advanced-toggle {
   display: flex;
   align-items: center;
@@ -1334,16 +1313,6 @@ button.opportunity-row.selected:hover {
     grid-column: span 3;
   }
 
-  .settings-connection {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .settings-permissions {
-    padding-left: 0;
-    padding-top: 16px;
-    border-left: 0;
-    border-top: 1px solid var(--line);
-  }
 }
 
 @media (max-width: 1080px) {

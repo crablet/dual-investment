@@ -22,7 +22,7 @@ const { directionText, directionTone, money, percent } = useFormat()
           <th>方向</th>
           <th>到期日</th>
           <th>执行价</th>
-          <th>单位限价</th>
+          <th>价格</th>
           <th>权利金</th>
           <th>年化</th>
           <th>被行权概率</th>

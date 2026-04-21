@@ -11,12 +11,56 @@ import type {
   ToggleAutoRequest,
 } from '@/types/domain'
 
+type RequestKey =
+  | 'snapshot'
+  | 'connect'
+  | 'credentials'
+  | 'scan'
+  | 'sync'
+  | 'settlement'
+  | 'auto'
+  | 'recover'
+  | 'order'
+  | 'rule'
+
+interface RunOptions {
+  silent?: boolean
+}
+
+export type AppViewId =
+  | 'overview'
+  | 'dual'
+  | 'orders'
+  | 'portfolio'
+  | 'analytics'
+  | 'risk'
+  | 'settings'
+
+const emptyPending = (): Record<RequestKey, number> => ({
+  snapshot: 0,
+  connect: 0,
+  credentials: 0,
+  scan: 0,
+  sync: 0,
+  settlement: 0,
+  auto: 0,
+  recover: 0,
+  order: 0,
+  rule: 0,
+})
+
 export const useAppStore = defineStore('app', () => {
   const snapshot = shallowRef<AppSnapshot>()
-  const loading = shallowRef(false)
+  const pending = shallowRef(emptyPending())
+  const foregroundPending = shallowRef(0)
+  const backgroundPending = shallowRef(0)
   const error = shallowRef<string>()
-  const activeView = shallowRef('overview')
+  const backgroundError = shallowRef<string>()
+  const activeView = shallowRef<AppViewId>('overview')
 
+  const loading = computed(() => foregroundPending.value > 0)
+  const backgroundLoading = computed(() => backgroundPending.value > 0)
+  const busy = computed(() => Object.values(pending.value).some(count => count > 0))
   const settings = computed(() => snapshot.value?.settings)
   const metrics = computed(() => snapshot.value?.metrics ?? [])
   const balances = computed(() => snapshot.value?.balances ?? [])
@@ -32,23 +76,65 @@ export const useAppStore = defineStore('app', () => {
     orders.value.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
   )
 
-  async function run<T>(task: () => Promise<T>): Promise<T | undefined> {
-    loading.value = true
-    error.value = undefined
+  async function run<T>(
+    key: RequestKey,
+    task: () => Promise<T>,
+    options: RunOptions = {},
+  ): Promise<T | undefined> {
+    const silent = options.silent ?? false
+    setPending(key, 1)
+    if (silent) {
+      backgroundPending.value += 1
+    }
+    else {
+      foregroundPending.value += 1
+      error.value = undefined
+    }
     try {
-      return await task()
+      const result = await task()
+      if (silent) {
+        backgroundError.value = undefined
+      }
+      return result
     }
     catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught)
+      const message = caught instanceof Error ? caught.message : String(caught)
+      if (silent) {
+        backgroundError.value = message
+      }
+      else {
+        error.value = message
+      }
       return undefined
     }
     finally {
-      loading.value = false
+      setPending(key, -1)
+      if (silent) {
+        backgroundPending.value = Math.max(0, backgroundPending.value - 1)
+      }
+      else {
+        foregroundPending.value = Math.max(0, foregroundPending.value - 1)
+      }
     }
   }
 
-  async function refresh() {
-    const next = await run(() => api.getAppSnapshot())
+  function setPending(key: RequestKey, delta: number) {
+    pending.value = {
+      ...pending.value,
+      [key]: Math.max(0, pending.value[key] + delta),
+    }
+  }
+
+  function isLoading(key: RequestKey) {
+    return pending.value[key] > 0
+  }
+
+  function isBusy() {
+    return busy.value
+  }
+
+  async function refresh(options: RunOptions = {}) {
+    const next = await run('snapshot', () => api.getAppSnapshot(), options)
     if (next) {
       snapshot.value = next
     }
@@ -62,7 +148,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function connect(request: ConnectBinanceRequest) {
-    const next = await run(() => api.connectBinance(request))
+    const next = await run('connect', () => api.connectBinance(request))
     patchSettings(next)
     if (next?.connected) {
       await syncLiveState()
@@ -70,7 +156,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function connectSaved() {
-    const next = await run(() => api.connectSavedBinance())
+    const next = await run('connect', () => api.connectSavedBinance())
     patchSettings(next)
     if (next?.connected) {
       await syncLiveState()
@@ -78,15 +164,15 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function forgetCredentials() {
-    const next = await run(() => api.forgetBinanceCredentials())
+    const next = await run('credentials', () => api.forgetBinanceCredentials())
     patchSettings(next)
     if (next) {
       await refresh()
     }
   }
 
-  async function scan() {
-    const next = await run(() => api.scanCandidates())
+  async function scan(options: RunOptions = {}) {
+    const next = await run('scan', () => api.scanCandidates(), options)
     if (next && snapshot.value) {
       snapshot.value = {
         ...snapshot.value,
@@ -96,15 +182,53 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function syncLiveState() {
-    const next = await run(() => api.syncLiveState())
+  async function openView(view: AppViewId) {
+    activeView.value = view
+    await refreshViewData(view)
+  }
+
+  async function refreshViewData(view: AppViewId = activeView.value, options: RunOptions = {}) {
+    if (view === 'dual') {
+      if (settings.value?.connected) {
+        if (!isLoading('scan')) {
+          await scan(options)
+        }
+        return
+      }
+      if (!isLoading('snapshot')) {
+        await refresh(options)
+      }
+      return
+    }
+
+    if (view === 'settings') {
+      if (!isLoading('snapshot')) {
+        await refresh(options)
+      }
+      return
+    }
+
+    if (settings.value?.connected) {
+      if (!isLoading('sync')) {
+        await syncLiveState(options)
+      }
+      return
+    }
+
+    if (!isLoading('snapshot')) {
+      await refresh(options)
+    }
+  }
+
+  async function syncLiveState(options: RunOptions = {}) {
+    const next = await run('sync', () => api.syncLiveState(), options)
     if (next) {
       snapshot.value = next
     }
   }
 
   async function runSettlementScan() {
-    const next = await run(() => api.runSettlementScan())
+    const next = await run('settlement', () => api.runSettlementScan())
     if (next && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: mergeOrders(next, snapshot.value.orders) }
       await refresh()
@@ -112,7 +236,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function runAutoOnce() {
-    const order = await run(() => api.runAutoOnce())
+    const order = await run('auto', () => api.runAutoOnce())
     if (order && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: [order, ...snapshot.value.orders] }
       await refresh()
@@ -120,7 +244,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function recoverAttempt(attemptId: string) {
-    const order = await run(() => api.recoverOrderAttempt(attemptId))
+    const order = await run('recover', () => api.recoverOrderAttempt(attemptId))
     if (order && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: mergeOrders([order], snapshot.value.orders) }
       await refresh()
@@ -128,21 +252,21 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function placeStrategy(request: StrategyRequest) {
-    const order = await run(() => api.placeManualStrategy(request))
+    const order = await run('order', () => api.placeManualStrategy(request))
     if (order && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: [order, ...snapshot.value.orders] }
     }
   }
 
   async function saveRule(rule: AutoInvestmentRule) {
-    const next = await run(() => api.saveAutoRule(rule))
+    const next = await run('rule', () => api.saveAutoRule(rule))
     if (next && snapshot.value) {
       snapshot.value = { ...snapshot.value, autoRule: next }
     }
   }
 
   async function toggleAuto(request: ToggleAutoRequest) {
-    const next = await run(() => api.toggleAutoStrategy(request))
+    const next = await run('rule', () => api.toggleAutoStrategy(request))
     patchSettings(next)
     if (snapshot.value?.autoRule) {
       snapshot.value = {
@@ -168,8 +292,11 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     snapshot,
+    pending,
     loading,
+    backgroundLoading,
     error,
+    backgroundError,
     activeView,
     settings,
     metrics,
@@ -183,6 +310,8 @@ export const useAppStore = defineStore('app', () => {
     auditRecent,
     orderAttempts,
     runningOrders,
+    isLoading,
+    isBusy,
     bootstrap,
     refresh,
     connect,
@@ -196,5 +325,7 @@ export const useAppStore = defineStore('app', () => {
     placeStrategy,
     saveRule,
     toggleAuto,
+    openView,
+    refreshViewData,
   }
 })

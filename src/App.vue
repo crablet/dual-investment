@@ -20,7 +20,7 @@ const views = {
   settings: defineAsyncComponent(() => import('@/components/views/SettingsView.vue')),
 }
 
-const currentView = computed(() => views[store.activeView as keyof typeof views] ?? OverviewView)
+const currentView = computed(() => views[store.activeView] ?? OverviewView)
 let syncTimer: number | undefined
 
 const accentColor = '#f5b625'
@@ -72,7 +72,7 @@ onMounted(() => {
   void store.bootstrap()
   syncTimer = window.setInterval(() => {
     if (store.settings?.connected) {
-      void store.syncLiveState()
+      void store.syncLiveState({ silent: true })
     }
   }, 60_000)
 })

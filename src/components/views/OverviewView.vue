@@ -7,7 +7,16 @@ import MiniLineChart from '@/components/common/MiniLineChart.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
+import type { AppViewId } from '@/stores/app'
 import type { StrategyCandidate } from '@/types/domain'
+
+interface PendingTask {
+  id: string
+  tone: string
+  text: string
+  view: AppViewId
+  visible: boolean
+}
 
 const store = useAppStore()
 const { decimal, money } = useFormat()
@@ -22,22 +31,25 @@ const expiringOrdersCount = computed(() => {
     return expiry >= today && expiry <= threshold
   }).length
 })
-const pendingTasks = computed(() => [
-  {
-    id: 'expiring-orders',
-    tone: '',
-    text: `${expiringOrdersCount.value} 个订单将在 7 天内到期`,
-    view: 'orders',
-    visible: expiringOrdersCount.value > 0,
-  },
-  {
-    id: 'candidate-count',
-    tone: 'blue',
-    text: `当前有 ${store.candidates.length} 个候选机会`,
-    view: 'dual',
-    visible: store.candidates.length > 0,
-  },
-].filter(item => item.visible))
+const pendingTasks = computed<PendingTask[]>(() => {
+  const tasks: PendingTask[] = [
+    {
+      id: 'expiring-orders',
+      tone: '',
+      text: `${expiringOrdersCount.value} 个订单将在 7 天内到期`,
+      view: 'orders',
+      visible: expiringOrdersCount.value > 0,
+    },
+    {
+      id: 'candidate-count',
+      tone: 'blue',
+      text: `当前有 ${store.candidates.length} 个候选机会`,
+      view: 'dual',
+      visible: store.candidates.length > 0,
+    },
+  ]
+  return tasks.filter(item => item.visible)
+})
 const autoStatusItems = computed(() => [
   {
     label: '自动扫描',
@@ -104,7 +116,7 @@ function placeCandidate(candidate: StrategyCandidate) {
         <div v-for="(task, index) in pendingTasks" :key="task.id" class="task-row">
           <span class="task-index" :class="task.tone">{{ index + 1 }}</span>
           {{ task.text }}
-          <button type="button" @click="store.activeView = task.view">查看</button>
+          <button type="button" @click="store.openView(task.view)">查看</button>
         </div>
       </div>
     </Panel>

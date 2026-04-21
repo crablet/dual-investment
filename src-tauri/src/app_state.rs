@@ -540,7 +540,7 @@ impl AppState {
             direction: request.direction,
             status: OrderAttemptStatus::Attempted,
             exchange_order_id: None,
-            message: "已通过本地风控，准备发送 Binance 订单".to_string(),
+            message: "已通过风控校验，准备发送 Binance 订单".to_string(),
             created_at: now,
             updated_at: now,
         };
@@ -548,7 +548,7 @@ impl AppState {
         self.record_audit(
             &format!("strategy.order.{source}.attempted"),
             &format!(
-                "{} {} {} 张，合约 {}，单位限价 {}",
+                "{} {} {} 张，合约 {}，价格 {}",
                 request.symbol,
                 request.direction.display(),
                 request.quantity,
@@ -569,17 +569,17 @@ impl AppState {
         let order = strategy::order_from_request(&request, &ack);
         if let Err(error) = self.save_order(&order).await {
             attempt.status = OrderAttemptStatus::PersistFailed;
-            attempt.message = "交易所订单已创建，但本地订单保存失败".to_string();
+            attempt.message = "交易所订单已创建，但订单记录保存失败".to_string();
             attempt.updated_at = Utc::now();
             self.save_order_attempt(&attempt)?;
             return Err(AppError::Storage(format!(
-                "交易所订单已创建但本地保存失败，exchangeOrderId={}，clientOrderId={}。请先用 Binance 后台核对后再继续操作。原始错误：{}",
+                "交易所订单已创建但订单记录保存失败，exchangeOrderId={}，clientOrderId={}。请先用 Binance 后台核对后再继续操作。原始错误：{}",
                 ack.order_id, client_order_id, error
             )));
         }
 
         attempt.status = OrderAttemptStatus::Persisted;
-        attempt.message = "交易所订单和本地订单均已记录".to_string();
+        attempt.message = "交易所订单和订单记录均已保存".to_string();
         attempt.updated_at = Utc::now();
         self.save_order_attempt(&attempt)?;
         self.record_audit(
@@ -610,12 +610,12 @@ impl AppState {
         self.save_order(&order).await?;
         attempt.status = OrderAttemptStatus::Persisted;
         attempt.exchange_order_id = Some(ack.order_id.clone());
-        attempt.message = "已从 Binance 查询订单并恢复到本地订单表".to_string();
+        attempt.message = "已从 Binance 查询订单并恢复到订单记录".to_string();
         attempt.updated_at = Utc::now();
         self.save_order_attempt(&attempt)?;
         self.record_audit(
             "strategy.order.recovered",
-            &format!("{} 已从恢复记录重建本地订单", attempt.option_symbol),
+            &format!("{} 已从恢复记录重建订单记录", attempt.option_symbol),
         )?;
         Ok(order)
     }
@@ -640,7 +640,7 @@ impl AppState {
                 .cloned()
         }
         .ok_or_else(|| {
-            AppError::Storage("未找到现货补齐对应的本地期权订单，无法自动恢复".to_string())
+            AppError::Storage("未找到现货补齐对应的期权订单记录，无法自动恢复".to_string())
         })?;
 
         order.spot_order_id = Some(ack.order_id.clone());
@@ -649,7 +649,7 @@ impl AppState {
         self.save_order(&order).await?;
         attempt.status = OrderAttemptStatus::SpotPersisted;
         attempt.exchange_order_id = Some(ack.order_id.clone());
-        attempt.message = "已从 Binance 查询现货订单并恢复本地补齐状态".to_string();
+        attempt.message = "已从 Binance 查询现货订单并恢复补齐状态".to_string();
         attempt.updated_at = Utc::now();
         self.save_order_attempt(&attempt)?;
         self.record_audit(
@@ -828,18 +828,18 @@ impl AppState {
         apply_spot_ack(&mut order, &ack);
         if let Err(error) = self.save_order(&order).await {
             attempt.status = OrderAttemptStatus::SpotPersistFailed;
-            attempt.message = "交易所现货订单已创建，但本地补齐状态保存失败".to_string();
+            attempt.message = "交易所现货订单已创建，但补齐状态保存失败".to_string();
             attempt.updated_at = Utc::now();
             self.save_order_attempt(&attempt)?;
             return Err(AppError::Storage(format!(
-                "交易所现货订单已创建但本地保存失败，spotOrderId={}，clientOrderId={}。请先用 Binance 后台核对后再继续操作。原始错误：{}",
+                "交易所现货订单已创建但补齐状态保存失败，spotOrderId={}，clientOrderId={}。请先用 Binance 后台核对后再继续操作。原始错误：{}",
                 order.spot_order_id.as_deref().unwrap_or(""),
                 order.spot_client_order_id,
                 error
             )));
         }
         attempt.status = OrderAttemptStatus::SpotPersisted;
-        attempt.message = "交易所现货订单和本地补齐状态均已记录".to_string();
+        attempt.message = "交易所现货订单和补齐状态均已保存".to_string();
         attempt.updated_at = Utc::now();
         self.save_order_attempt(&attempt)?;
         self.record_audit(

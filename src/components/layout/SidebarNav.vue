@@ -9,7 +9,9 @@ import {
   Wallet,
 } from '@lucide/vue'
 import { NIcon } from 'naive-ui'
+import type { Component } from 'vue'
 import { useAppStore } from '@/stores/app'
+import type { AppViewId } from '@/stores/app'
 
 const store = useAppStore()
 
@@ -21,7 +23,7 @@ const navItems = [
   { id: 'analytics', label: '收益分析', icon: BarChart3 },
   { id: 'risk', label: '风险控制', icon: ShieldCheck },
   { id: 'settings', label: '设置', icon: Settings },
-]
+] as const satisfies ReadonlyArray<{ id: AppViewId, label: string, icon: Component }>
 </script>
 
 <template>
@@ -33,7 +35,7 @@ const navItems = [
         class="nav-item"
         :class="{ active: store.activeView === item.id }"
         type="button"
-        @click="store.activeView = item.id"
+        @click="store.openView(item.id)"
       >
         <NIcon :component="item.icon" />
         <span>{{ item.label }}</span>

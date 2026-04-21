@@ -57,7 +57,7 @@ function tagType(severity: RiskSeverity) {
     </Panel>
 
     <Panel title="单日最大回撤" class="span-3">
-      <div class="risk-metric"><strong>{{ percent(store.risk?.dailyDrawdown ?? '0') }}</strong><span>本地记录</span></div>
+      <div class="risk-metric"><strong>{{ percent(store.risk?.dailyDrawdown ?? '0') }}</strong><span>回撤</span></div>
       <NProgress :percentage="Number(store.risk?.dailyDrawdown ?? 0) * 10" status="success" :show-indicator="false" />
     </Panel>
 

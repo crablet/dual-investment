@@ -13,9 +13,7 @@ import {
 import {
   NButton,
   NCheckbox,
-  NDatePicker,
   NIcon,
-  NInput,
   NInputNumber,
   NSlider,
   NSwitch,
@@ -83,22 +81,10 @@ const expiryFilter = shallowRef<ExpiryFilter>('all')
 const candidateSortKey = shallowRef<CandidateSortKey>('annualized')
 const candidateSortDirection = shallowRef<CandidateSortDirection>('desc')
 const advancedAutoOpen = shallowRef(false)
-const autoScanRequested = shallowRef(false)
-
-function formatDateInput(date: Date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
 
 const form = reactive({
   direction: 'sellPut' as StrategyDirection,
-  strike: 72000,
   quantity: 0.01,
-  limitPrice: 0,
-  expiry: store.candidates[0]?.expiry ?? formatDateInput(new Date(Date.now() + 14 * dayMs)),
-  optionSymbol: '',
 })
 
 const ruleForm = reactive<RuleForm>({
@@ -133,18 +119,8 @@ watchEffect(() => {
   })
 })
 
-const matchingCandidate = computed(() =>
-  store.candidates.find(candidate =>
-    candidate.direction === form.direction
-    && candidate.expiry === form.expiry
-    && Number(candidate.strike) === form.strike,
-  ),
-)
-
 const selectedCandidate = computed(() =>
-  store.candidates.find(candidate => candidate.id === selectedCandidateId.value && candidateMatchesForm(candidate))
-  ?? store.candidates.find(candidate => candidate.optionSymbol === form.optionSymbol && candidateMatchesForm(candidate))
-  ?? matchingCandidate.value,
+  store.candidates.find(candidate => candidate.id === selectedCandidateId.value),
 )
 
 const filteredCandidates = computed(() =>
@@ -202,10 +178,6 @@ const activeOptionType = computed(() =>
   form.direction === 'sellPut' ? 'Put' : 'Call',
 )
 
-const optionSymbolPlaceholder = computed(() =>
-  form.direction === 'sellPut' ? 'BTC-260626-72000-P' : 'BTC-260626-82000-C',
-)
-
 const currentDirectionCandidateCount = computed(() =>
   form.direction === 'sellPut' ? directionStats.value.sellPut : directionStats.value.sellCall,
 )
@@ -229,30 +201,27 @@ const emptyCandidateHint = computed(() => {
   if (currentDirectionCandidateCount.value === 0 && otherDirectionCandidateCount.value > 0) {
     return `本次扫描只有${otherDirectionLabel.value}候选，当前没有${activeDirectionLabel.value}候选。可以放宽自动复投规则，或切换到${otherDirectionLabel.value}查看。`
   }
-  return '当前到期日筛选没有命中；候选浏览范围为 1-90 天，可以切换到所有到期日，或在右侧手动输入合约参数。'
+  return '当前到期日筛选没有命中；候选浏览范围为 1-90 天，可以切换到所有到期日，或重新扫描候选。'
 })
 
-const projectedPremium = computed(() => form.limitPrice * form.quantity)
-const projectedBreakeven = computed(() =>
-  form.direction === 'sellPut'
-    ? form.strike - form.limitPrice
-    : form.strike + form.limitPrice,
-)
+const projectedPremium = computed(() => {
+  if (!selectedCandidate.value) return 0
+  return Number(selectedCandidate.value.limitPrice) * form.quantity
+})
 
-const strikeMatchesDirection = computed(() => {
-  const spot = Number(referenceSpotPrice.value)
-  if (!Number.isFinite(spot) || spot <= 0) return true
-  return form.direction === 'sellPut'
-    ? form.strike < spot
-    : form.strike > spot
+const projectedBreakeven = computed(() => {
+  if (!selectedCandidate.value) return 0
+  const strike = Number(selectedCandidate.value.strike)
+  const price = Number(selectedCandidate.value.limitPrice)
+  return selectedCandidate.value.direction === 'sellPut'
+    ? strike - price
+    : strike + price
 })
 
 const canSubmit = computed(() =>
   Boolean(store.settings?.connected)
-  && form.strike > 0
+  && Boolean(selectedCandidate.value)
   && form.quantity >= 0.01
-  && form.limitPrice > 0
-  && strikeMatchesDirection.value,
 )
 
 watch(
@@ -263,36 +232,9 @@ watch(
     }
     if (candidates[0]) {
       selectCandidate(candidates[0])
-    }
-  },
-  { immediate: true },
-)
-
-watch(
-  () => [form.direction, form.expiry, form.strike] as const,
-  () => {
-    const selected = store.candidates.find(candidate => candidate.id === selectedCandidateId.value)
-    if (selected && !candidateMatchesForm(selected)) {
-      selectedCandidateId.value = undefined
-    }
-    if (!selectedCandidate.value) {
-      form.optionSymbol = matchingCandidate.value?.optionSymbol ?? ''
-    }
-  },
-)
-
-watch(
-  () => [store.settings?.connected ?? false, store.loading] as const,
-  ([connected, loading]) => {
-    if (!connected) {
-      autoScanRequested.value = false
       return
     }
-    if (loading || autoScanRequested.value) {
-      return
-    }
-    autoScanRequested.value = true
-    void store.scan()
+    selectedCandidateId.value = undefined
   },
   { immediate: true },
 )
@@ -363,36 +305,18 @@ function toggleCandidateSort(key: CandidateSortKey) {
   candidateSortDirection.value = candidateSortDefaultDirection[key]
 }
 
-function candidateMatchesForm(candidate: StrategyCandidate) {
-  return candidate.direction === form.direction
-    && candidate.expiry === form.expiry
-    && Number(candidate.strike) === form.strike
-}
-
 function selectDirection(direction: StrategyDirection) {
   if (form.direction === direction) {
     return
   }
   form.direction = direction
   selectedCandidateId.value = undefined
-  form.optionSymbol = ''
 }
 
 function selectCandidate(candidate: StrategyCandidate) {
   selectedCandidateId.value = candidate.id
   form.direction = candidate.direction
-  form.strike = Number(candidate.strike)
   form.quantity = Number(candidate.quantity)
-  form.limitPrice = Number(candidate.limitPrice)
-  form.expiry = candidate.expiry
-  form.optionSymbol = candidate.optionSymbol
-}
-
-function updateExpiry(value: string | [string, string] | null) {
-  if (typeof value === 'string' && value.length > 0) {
-    form.expiry = value
-    selectedCandidateId.value = undefined
-  }
 }
 
 function resetCandidateFilters() {
@@ -418,10 +342,6 @@ function saveAutoRule() {
   })
 }
 
-function useCurrentOrderQuantityForRule() {
-  ruleForm.quantity = form.quantity
-}
-
 function toggleAuto(value: boolean) {
   if (value && !window.confirm('确认开启自动定投？后续符合条件的自动单不会逐笔确认。')) {
     return
@@ -440,18 +360,22 @@ function runAutoNow() {
 }
 
 function submit() {
+  const candidate = selectedCandidate.value
+  if (!candidate) {
+    return
+  }
   if (!window.confirm('确认发送 Binance 期权订单？')) {
     return
   }
   void store.placeStrategy({
-    candidateId: selectedCandidate.value?.id,
-    symbol: 'BTCUSDT',
-    optionSymbol: form.optionSymbol.trim() || selectedCandidate.value?.optionSymbol,
-    direction: form.direction,
-    expiry: form.expiry,
-    strike: String(form.strike),
+    candidateId: candidate.id,
+    symbol: candidate.symbol,
+    optionSymbol: candidate.optionSymbol,
+    direction: candidate.direction,
+    expiry: candidate.expiry,
+    strike: candidate.strike,
     quantity: form.quantity.toFixed(2),
-    limitPrice: String(form.limitPrice),
+    limitPrice: candidate.limitPrice,
     confirmLive: true,
   })
 }
@@ -495,8 +419,8 @@ function submit() {
               size="small"
               title="刷新候选"
               aria-label="刷新候选"
-              :loading="store.loading"
-              @click="store.scan"
+              :loading="store.isLoading('scan')"
+              @click="store.scan()"
             >
               <template #icon><NIcon :component="RefreshCw" /></template>
             </NButton>
@@ -584,7 +508,7 @@ function submit() {
         <div v-if="filteredCandidates.length === 0" class="empty-state opportunity-empty">
           <strong>{{ emptyCandidateTitle }}</strong>
           <span>{{ emptyCandidateHint }}</span>
-          <NButton size="small" secondary :loading="store.loading" @click="store.scan">重新扫描</NButton>
+          <NButton size="small" secondary :loading="store.isLoading('scan')" @click="store.scan()">重新扫描</NButton>
         </div>
       </section>
     </div>
@@ -611,8 +535,8 @@ function submit() {
           </article>
           <article>
             <span>到期日</span>
-            <strong>{{ form.expiry }}</strong>
-            <em>{{ daysUntil(form.expiry) }} 天</em>
+            <strong>{{ selectedCandidate?.expiry ?? '--' }}</strong>
+            <em v-if="selectedCandidate">{{ daysUntil(selectedCandidate.expiry) }} 天</em>
           </article>
           <article>
             <span>预计权利金</span>
@@ -629,43 +553,9 @@ function submit() {
             下单数量（张）
             <NInputNumber v-model:value="form.quantity" :min="0.01" :step="0.01" />
           </label>
-          <label>
-            执行价 USDT
-            <NInputNumber v-model:value="form.strike" :min="1" :step="100" />
-          </label>
-          <label>
-            价格 USDT
-            <NInputNumber v-model:value="form.limitPrice" :min="0.01" :step="0.01" />
-          </label>
-          <label>
-            到期日
-            <NDatePicker
-              class="date-picker-control"
-              type="date"
-              :formatted-value="form.expiry"
-              value-format="yyyy-MM-dd"
-              format="yyyy-MM-dd"
-              placeholder="选择到期日"
-              input-readonly
-              close-on-select
-              :actions="null"
-              @update:formatted-value="updateExpiry"
-            />
-          </label>
-          <label>
-            Binance 期权合约
-            <NInput v-model:value="form.optionSymbol" :placeholder="optionSymbolPlaceholder" />
-          </label>
         </div>
 
-        <p class="order-note">
-          期权按张数下单；快速成交按所填价格发 IOC，成交状态会写入本地订单。
-        </p>
-        <p v-if="!strikeMatchesDirection" class="order-warning">
-          {{ form.direction === 'sellPut' ? '低买执行价需要低于 BTC 现货价。' : '高卖执行价需要高于 BTC 现货价。' }}
-        </p>
-
-        <NButton type="primary" size="large" block :disabled="!canSubmit" :loading="store.loading" @click="submit">
+        <NButton type="primary" size="large" block :disabled="!canSubmit" :loading="store.isLoading('order')" @click="submit">
           <template #icon><NIcon :component="Zap" /></template>
           发送订单
         </NButton>
@@ -687,10 +577,7 @@ function submit() {
           </label>
           <label>
             每次下单数量
-            <div class="inline-input-action">
-              <NInputNumber v-model:value="ruleForm.quantity" :min="0.01" :step="0.01" />
-              <NButton size="small" secondary @click="useCurrentOrderQuantityForRule">用当前</NButton>
-            </div>
+            <NInputNumber v-model:value="ruleForm.quantity" :min="0.01" :step="0.01" />
           </label>
 
           <button class="advanced-toggle" type="button" @click="advancedAutoOpen = !advancedAutoOpen">
@@ -726,11 +613,11 @@ function submit() {
         </div>
 
         <div class="auto-actions">
-          <NButton secondary :loading="store.loading" @click="saveAutoRule">
+          <NButton secondary :loading="store.isLoading('rule')" @click="saveAutoRule">
             <template #icon><NIcon :component="Save" /></template>
             保存规则
           </NButton>
-          <NButton secondary :disabled="!store.settings?.autoEnabled" :loading="store.loading" @click="runAutoNow">
+          <NButton secondary :disabled="!store.settings?.autoEnabled" :loading="store.isLoading('auto')" @click="runAutoNow">
             <template #icon><NIcon :component="ShieldCheck" /></template>
             执行一次
           </NButton>

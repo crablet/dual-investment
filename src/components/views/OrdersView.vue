@@ -32,11 +32,11 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
     <Panel title="订单统计" class="span-12">
       <template #action>
         <div class="button-row compact">
-          <NButton size="small" secondary :loading="store.loading" @click="store.syncLiveState()">
+          <NButton size="small" secondary :loading="store.isLoading('sync')" @click="store.syncLiveState()">
             <template #icon><NIcon :component="RefreshCw" /></template>
             同步订单
           </NButton>
-          <NButton size="small" secondary :loading="store.loading" @click="store.runSettlementScan()">
+          <NButton size="small" secondary :loading="store.isLoading('settlement')" @click="store.runSettlementScan()">
             <template #icon><NIcon :component="ScanLine" /></template>
             结算扫描
           </NButton>
@@ -111,8 +111,8 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
         <p><span>到期补齐</span><strong>{{ selected.settlementAction }}</strong></p>
         <p><span>补齐结果</span><strong>{{ selected.rebalanceMessage || '--' }}</strong></p>
         <div class="button-row compact">
-          <NButton secondary @click="store.activeView = 'portfolio'">查看持仓</NButton>
-          <NButton secondary @click="store.activeView = 'dual'">复制策略</NButton>
+          <NButton secondary @click="store.openView('portfolio')">查看持仓</NButton>
+          <NButton secondary @click="store.openView('dual')">复制策略</NButton>
         </div>
       </div>
       <p v-else class="empty-state">暂无订单详情</p>
