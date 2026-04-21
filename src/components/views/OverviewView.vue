@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import CandidateTable from '@/components/common/CandidateTable.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
+import EventCalendarBoard from '@/components/common/EventCalendarBoard.vue'
 import MetricCard from '@/components/common/MetricCard.vue'
 import MiniLineChart from '@/components/common/MiniLineChart.vue'
 import Panel from '@/components/common/Panel.vue'
@@ -135,6 +136,10 @@ function placeCandidate(candidate: StrategyCandidate) {
           </p>
         </div>
       </div>
+    </Panel>
+
+    <Panel title="事件日历看板" class="span-12">
+      <EventCalendarBoard />
     </Panel>
 
     <Panel title="快捷机会" class="span-12">
