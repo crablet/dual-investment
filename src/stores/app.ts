@@ -284,6 +284,7 @@ export const useAppStore = defineStore('app', () => {
     const order = await run('order', () => api.placeManualStrategy(request))
     if (order && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: [order, ...snapshot.value.orders] }
+      await refresh()
     }
   }
 

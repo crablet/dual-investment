@@ -318,6 +318,7 @@ pub fn build_candidates(
     account: &OptionAccountSnapshot,
     orders: &[StrategyOrder],
     spot_price: Decimal,
+    funding_available_usdt: Decimal,
 ) -> CandidateScanResult {
     let mut diagnostics = CandidateScanDiagnostics {
         raw_contracts: contracts.len(),
@@ -410,7 +411,8 @@ pub fn build_candidates(
             let required_margin = required_margin(contract, direction, quantity);
             let available_margin = account
                 .asset("USDT")
-                .map_or(Decimal::ZERO, |asset| asset.available);
+                .map_or(Decimal::ZERO, |asset| asset.available)
+                + funding_available_usdt;
             // 规则命中只影响推荐等级；不命中规则但仍有保证金的候选会保留为 Watch，方便排查。
             let passes_rule = rule.include_btc
                 && (!rule.exclude_same_direction || !has_open_direction(direction))

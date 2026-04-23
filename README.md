@@ -14,6 +14,7 @@ Rust 后端要求 Rust 1.95 或更新版本。
 - 双币赢工作台：低买/高卖方向选择、候选筛选、按张数下单和自动复投设置在同一页面完成。
 - 候选机会：浏览到期 `1-90` 天的 BTC 期权；低买只展示执行价低于现货的 Put，高卖只展示执行价高于现货的 Call。
 - 账户概览：期权保证金、现货和 Binance Simple Earn 持仓在前端按原始 ticker 汇总展示；现货账户里的 `LD*` 镜像资产会被忽略，理财数量来自 Simple Earn 活期/定期持仓接口。估值由后端使用 Binance 现货行情按 `XXXUSDT` 或 `XXXBTC * BTCUSDT` 计算，无法定价时显示“暂无估值”，hover 可查看各来源真实数量。
+- 资金准备和归集：下单或到期补齐前检查现货/期权可用余额；不足时从 Simple Earn 活期按 `0.01` 精度向上取整赎回到现货，并在需要时划转到期权保证金账户。流程结束后会把不再需要支撑保证金风控的空闲 USDT，以及现货补齐后的 BTC/USDT，重新申购 Simple Earn 活期。
 - 总览事件日历：从订单、自动复投规则、恢复记录、风险提醒和审计事件派生买入、到期、结算、补齐等日程。
 - 凭据和数据：API 凭据保存在系统 keyring；SQLite 保存策略订单、订单尝试和审计日志。
 
@@ -21,7 +22,7 @@ Rust 后端要求 Rust 1.95 或更新版本。
 
 币安期权是现金结算，期权本身不会直接把 USDT 换成 BTC 或把 BTC 换成 USDT。本应用会在到期 ITM 后执行额外的现货补齐订单，才形成类似双币赢的换币结果。
 
-本应用只保留实盘模式，会发起真实 Binance 订单。API Key 必须关闭提现权限，仅开启读取账户、读取行情、现货交易和期权交易权限。
+本应用只保留实盘模式，会发起真实 Binance 订单、Simple Earn 活期申购/赎回和现货-期权账户划转。API Key 必须关闭提现权限，仅开启读取账户、读取行情、现货交易、期权交易、Simple Earn 所需的 Spot & Margin Trading 权限，以及 Universal Transfer 权限。
 
 业务数据只来自 Binance 接口或本地 SQLite 中已记录的真实事件。普通浏览器运行只适合检查布局，所有业务命令都需要在 Tauri 客户端内执行。
 
@@ -39,7 +40,7 @@ pnpm tauri:dev
 ```bash
 pnpm typecheck
 pnpm build
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 pnpm tauri:build
 ```
@@ -55,8 +56,11 @@ pnpm tauri:build
 - 真实期权下单走 Binance 返回的订单号和成交状态；本地保存失败时通过 `order_attempts` 保留恢复线索。
 - 总览指标优先使用 Rust 快照中的事实口径；前端只做轻量展示派生和格式化。
 - 总览账户概览只在展示层合并同 ticker 资产；Simple Earn 使用真实活期/定期持仓，不使用现货账户里的 `LD*` 镜像行。估值来自 Rust 快照中的行情换算结果，原始资产代码、来源和数量仍保留在 hover 明细中。
+- 资金准备只在手动确认下单、已确认开启的自动策略或到期补齐流程内执行；候选扫描只把现货和可赎回活期 USDT 纳入可用资金判断，不会触发真实资金移动。
+- 期权下单后只归集超过当前保证金风控缓冲的空闲 USDT；到期结算或现货补齐后会再次尝试归集并申购活期，归集失败会写审计事件但不会把已创建订单伪装成失败。
 - 总览页事件日历只使用当前快照中的真实订单、规则、审计、风控和恢复记录，不新增后端日历接口或浏览器占位数据。
 - 自动策略和手动下单都有确认门禁；自动策略规则可持久化，但应用重启后自动执行保持关闭。
+- 当前按用户要求暂不保留单元测试代码；后续会专项恢复测试覆盖。专项恢复前，Rust 改动以 `cargo check` 作为最低验证。
 
 ## 项目结构
 

@@ -18,7 +18,8 @@ use sha2::Sha256;
 use crate::domain::{
     AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot,
     OptionAssetBalance, OptionContract, OptionMarkPrice, SimpleEarnAssetBalance,
-    SimpleEarnSnapshot, SpotAccountSnapshot, SpotAssetBalance, StrategyDirection, StrategyRequest,
+    SimpleEarnFlexibleProduct, SimpleEarnSnapshot, SpotAccountSnapshot, SpotAssetBalance,
+    StrategyDirection, StrategyRequest,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -158,6 +159,7 @@ impl BinanceClient {
                 "/sapi/v1/simple-earn/flexible/position",
                 "活期理财",
                 &["totalAmount"],
+                true,
             )
             .await?;
         balances.extend(
@@ -165,10 +167,97 @@ impl BinanceClient {
                 "/sapi/v1/simple-earn/locked/position",
                 "定期理财",
                 &["amount", "principal", "subscriptionAmount", "totalAmount"],
+                false,
             )
             .await?,
         );
         Ok(SimpleEarnSnapshot { balances })
+    }
+
+    /// 查询指定资产的 Simple Earn 活期产品。
+    pub async fn simple_earn_flexible_products(
+        &self,
+        asset: &str,
+    ) -> AppResult<Vec<SimpleEarnFlexibleProduct>> {
+        let response = self
+            .signed_get(
+                &self.spot_base,
+                "/sapi/v1/simple-earn/flexible/list",
+                vec![
+                    ("asset".to_string(), asset.to_string()),
+                    ("current".to_string(), "1".to_string()),
+                    ("size".to_string(), "100".to_string()),
+                ],
+            )
+            .await?;
+        parse_simple_earn_flexible_product_page(&response)
+    }
+
+    /// 从 Simple Earn 活期赎回到现货账户。
+    pub async fn redeem_simple_earn_flexible(
+        &self,
+        product_id: &str,
+        amount: Decimal,
+    ) -> AppResult<()> {
+        let response = self
+            .signed_post_value(
+                &self.spot_base,
+                "/sapi/v1/simple-earn/flexible/redeem",
+                vec![
+                    ("productId".to_string(), product_id.to_string()),
+                    ("redeemAll".to_string(), "false".to_string()),
+                    ("amount".to_string(), amount.normalize().to_string()),
+                    ("destAccount".to_string(), "SPOT".to_string()),
+                ],
+            )
+            .await?;
+        ensure_success_response(&response, "Simple Earn 活期赎回")
+    }
+
+    /// 从现货账户申购 Simple Earn 活期。
+    pub async fn subscribe_simple_earn_flexible(
+        &self,
+        product_id: &str,
+        amount: Decimal,
+    ) -> AppResult<()> {
+        let response = self
+            .signed_post_value(
+                &self.spot_base,
+                "/sapi/v1/simple-earn/flexible/subscribe",
+                vec![
+                    ("productId".to_string(), product_id.to_string()),
+                    ("amount".to_string(), amount.normalize().to_string()),
+                    ("autoSubscribe".to_string(), "true".to_string()),
+                    ("sourceAccount".to_string(), "SPOT".to_string()),
+                ],
+            )
+            .await?;
+        ensure_success_response(&response, "Simple Earn 活期申购")
+    }
+
+    /// 在现货账户和期权账户之间划转资金。
+    pub async fn universal_transfer(
+        &self,
+        transfer_type: &str,
+        asset: &str,
+        amount: Decimal,
+    ) -> AppResult<()> {
+        let response = self
+            .signed_post_value(
+                &self.spot_base,
+                "/sapi/v1/asset/transfer",
+                vec![
+                    ("type".to_string(), transfer_type.to_string()),
+                    ("asset".to_string(), asset.to_string()),
+                    ("amount".to_string(), amount.normalize().to_string()),
+                ],
+            )
+            .await?;
+        if response.get("tranId").is_some() {
+            Ok(())
+        } else {
+            Err(AppError::Binance("Binance 划转响应缺少 tranId".to_string()))
+        }
     }
 
     /// 查询现货价格。当前 v1 固定用于 `BTCUSDT`。
@@ -288,6 +377,7 @@ impl BinanceClient {
         path: &str,
         source: &str,
         amount_keys: &[&str],
+        flexible: bool,
     ) -> AppResult<Vec<SimpleEarnAssetBalance>> {
         let mut balances = Vec::new();
         let mut current = 1_u32;
@@ -303,7 +393,7 @@ impl BinanceClient {
                     ],
                 )
                 .await?;
-            let page = parse_simple_earn_position_page(&response, source, amount_keys)?;
+            let page = parse_simple_earn_position_page(&response, source, amount_keys, flexible)?;
             let page_len = page.rows.len();
             let total = page.total;
             balances.extend(page.rows);
@@ -357,6 +447,32 @@ impl BinanceClient {
             .map_err(|error| request_error("POST", path, &error))?;
         let response_json = Self::decode_response(status, &body)?;
         parse_order_ack(&response_json)
+    }
+
+    /// 发送带签名的 POST 请求并返回归一化 JSON。
+    ///
+    /// 非订单类接口只在本模块解析结果，不把原始响应扩散到上层。
+    async fn signed_post_value(
+        &self,
+        base: &str,
+        path: &str,
+        params: Vec<(String, String)>,
+    ) -> AppResult<Value> {
+        let signed = self.signed_params(params)?;
+        let response = self
+            .http
+            .post(format!("{base}{path}"))
+            .header("X-MBX-APIKEY", &self.api_key)
+            .query(&signed)
+            .send()
+            .await
+            .map_err(|error| request_error("POST", path, &error))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| request_error("POST", path, &error))?;
+        Self::decode_response(status, &body)
     }
 
     /// 生成 Binance 签名参数。
@@ -490,13 +606,14 @@ fn parse_simple_earn_position_page(
     value: &Value,
     source: &str,
     amount_keys: &[&str],
+    flexible: bool,
 ) -> AppResult<SimpleEarnPositionPage> {
     let rows = value
         .get("rows")
         .and_then(Value::as_array)
         .ok_or_else(|| AppError::Binance("Binance Simple Earn 响应缺少 rows 字段".to_string()))?
         .iter()
-        .map(|row| parse_simple_earn_position(row, source, amount_keys))
+        .map(|row| parse_simple_earn_position(row, source, amount_keys, flexible))
         .collect::<AppResult<Vec<_>>>()?;
     let total = value
         .get("total")
@@ -510,14 +627,64 @@ fn parse_simple_earn_position(
     value: &Value,
     source: &str,
     amount_keys: &[&str],
+    flexible: bool,
 ) -> AppResult<SimpleEarnAssetBalance> {
     let amount = decimal_from_any_field(value, amount_keys)?
         .ok_or_else(|| AppError::Binance("Binance Simple Earn 持仓响应缺少数量字段".to_string()))?;
     Ok(SimpleEarnAssetBalance {
         asset: string_field(value, "asset")?,
         source: source.to_string(),
+        product_id: optional_string_field(value, "productId").unwrap_or_default(),
         amount,
+        flexible,
+        can_redeem: value
+            .get("canRedeem")
+            .and_then(Value::as_bool)
+            .unwrap_or(flexible),
     })
+}
+
+/// 解析 Simple Earn 活期产品列表。
+fn parse_simple_earn_flexible_product_page(
+    value: &Value,
+) -> AppResult<Vec<SimpleEarnFlexibleProduct>> {
+    value
+        .get("rows")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            AppError::Binance("Binance Simple Earn 产品列表响应缺少 rows 字段".to_string())
+        })?
+        .iter()
+        .map(parse_simple_earn_flexible_product)
+        .collect()
+}
+
+fn parse_simple_earn_flexible_product(value: &Value) -> AppResult<SimpleEarnFlexibleProduct> {
+    Ok(SimpleEarnFlexibleProduct {
+        asset: string_field(value, "asset")?,
+        product_id: string_field(value, "productId")?,
+        can_purchase: value
+            .get("canPurchase")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_sold_out: value
+            .get("isSoldOut")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        status: value.get("status").map(value_to_string).unwrap_or_default(),
+        min_purchase_amount: optional_decimal_field(value, "minPurchaseAmount")?
+            .unwrap_or(Decimal::ZERO),
+    })
+}
+
+fn ensure_success_response(value: &Value, operation: &str) -> AppResult<()> {
+    match value.get("success").and_then(Value::as_bool) {
+        Some(true) => Ok(()),
+        Some(false) => Err(AppError::Binance(format!("{operation}未成功"))),
+        None => Err(AppError::Binance(format!(
+            "{operation}响应缺少 success 字段"
+        ))),
+    }
 }
 
 fn decimal_from_any_field(value: &Value, keys: &[&str]) -> AppResult<Option<Decimal>> {
@@ -726,6 +893,13 @@ fn string_field(value: &Value, key: &str) -> AppResult<String> {
         .map(value_to_string)
         .filter(|text| !text.trim().is_empty())
         .ok_or_else(|| AppError::Binance(format!("Binance 响应缺少 {key} 字段")))
+}
+
+fn optional_string_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .map(value_to_string)
+        .filter(|text| !text.trim().is_empty())
 }
 
 /// 读取必填 u32 字段。

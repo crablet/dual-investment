@@ -16,7 +16,7 @@ use std::{
 };
 
 use chrono::{Duration, Local, NaiveDate, NaiveTime, Utc};
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -336,6 +336,14 @@ impl AppState {
             let client = client.clone();
             async move { client.option_mark_prices().await }
         });
+        let spot_account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.spot_account().await }
+        });
+        let earn_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.simple_earn_snapshot().await }
+        });
         let spot_price_task = spawn_binance_request({
             let client = client.clone();
             async move { client.spot_price("BTCUSDT").await }
@@ -345,13 +353,25 @@ impl AppState {
         let account = join_binance_request(account_task).await;
         let contracts = join_binance_request(contracts_task).await;
         let marks = join_binance_request(marks_task).await;
+        let spot_account = join_binance_request(spot_account_task).await;
+        let earn = join_binance_request(earn_task).await;
         let spot_price = join_binance_request(spot_price_task).await;
         let account = account?;
         let contracts = contracts?;
         let marks = marks?;
+        let spot_account = spot_account?;
+        let earn = earn?;
         let spot_price = spot_price?;
+        let funding_available_usdt =
+            spot_asset_free(&spot_account, "USDT") + flexible_earn_asset_amount(&earn, "USDT");
         let result = strategy::build_candidates(
-            &contracts, &marks, &auto_rule, &account, &orders, spot_price,
+            &contracts,
+            &marks,
+            &auto_rule,
+            &account,
+            &orders,
+            spot_price,
+            funding_available_usdt,
         );
         {
             let mut cached_candidates = self.candidates.write().await;
@@ -522,14 +542,27 @@ impl AppState {
         let account = join_binance_request(account_task).await;
         let contracts = join_binance_request(contracts_task).await;
         let marks = join_binance_request(marks_task).await;
-        let account = account?;
+        let mut account = account?;
         let contracts = contracts?;
         let marks = marks?;
         let orders = self.orders.read().await.clone();
         let contract = resolve_contract(&request, &contracts)?;
         request.option_symbol = Some(contract.symbol.clone());
-        validate_contract_order(&request, contract, &account, &marks)?;
-        enforce_risk_rules(&request, contract, &account, &orders)?;
+        validate_contract_terms(&request, contract, &marks)?;
+        enforce_pre_funding_risk_rules(&request, contract, &account, &orders)?;
+        account = self
+            .prepare_option_margin_funding(&client, &account, contract, &request)
+            .await?;
+        if let Err(error) = validate_contract_order(&request, contract, &account, &marks) {
+            self.sweep_option_idle_usdt_best_effort(&client, "期权下单校验失败后归集")
+                .await;
+            return Err(error);
+        }
+        if let Err(error) = enforce_risk_rules(&request, contract, &account, &orders) {
+            self.sweep_option_idle_usdt_best_effort(&client, "期权风控拒绝后归集")
+                .await;
+            return Err(error);
+        }
 
         let client_order_id = make_client_order_id(request.direction);
         let now = Utc::now();
@@ -595,6 +628,8 @@ impl AppState {
                 order.exchange_status
             ),
         )?;
+        self.sweep_option_idle_usdt_best_effort(&client, "期权下单后归集")
+            .await;
         Ok(order)
     }
 
@@ -738,11 +773,15 @@ impl AppState {
                     "strategy.settlement.otm",
                     &format!("{} 到期 OTM，无需现货补齐", order.option_symbol),
                 )?;
+                self.sweep_option_idle_usdt_best_effort(&client, "期权到期结算后归集")
+                    .await;
                 updated.push(order);
                 continue;
             }
 
             let order = self.rebalance_spot_if_needed(&client, order).await?;
+            self.sweep_option_idle_usdt_best_effort(&client, "期权到期补齐后归集")
+                .await;
             updated.push(order);
         }
         Ok(updated)
@@ -786,6 +825,22 @@ impl AppState {
         if order.spot_order_id.is_some() {
             self.sync_spot_rebalance(client, &mut order).await?;
             self.save_order(&order).await?;
+            if order.status == StrategyStatus::Settled {
+                self.sweep_spot_rebalance_assets_best_effort(client, order.direction)
+                    .await;
+            }
+            return Ok(order);
+        }
+
+        if let Err(error) = self.prepare_spot_rebalance_funding(client, &order).await {
+            order.status = StrategyStatus::RebalanceFailed;
+            order.updated_at = Utc::now();
+            order.rebalance_message = format!("现货补齐资金准备失败：{error}");
+            self.save_order(&order).await?;
+            self.record_audit(
+                "strategy.rebalance.failed",
+                &format!("{} {}", order.option_symbol, order.rebalance_message),
+            )?;
             return Ok(order);
         }
 
@@ -864,6 +919,10 @@ impl AppState {
             "strategy.rebalance.created",
             &format!("{} {}", order.option_symbol, order.rebalance_message),
         )?;
+        if order.status == StrategyStatus::Settled {
+            self.sweep_spot_rebalance_assets_best_effort(client, order.direction)
+                .await;
+        }
         Ok(order)
     }
 
@@ -1068,6 +1127,211 @@ impl AppState {
             spot_prices,
         }))
     }
+
+    /// 确保期权保证金账户有足够 USDT 支撑本次订单和当前风控缓冲。
+    async fn prepare_option_margin_funding(
+        &self,
+        client: &BinanceClient,
+        account: &OptionAccountSnapshot,
+        contract: &OptionContract,
+        request: &StrategyRequest,
+    ) -> AppResult<OptionAccountSnapshot> {
+        let shortfall = option_funding_shortfall(account, contract, request);
+        if shortfall <= Decimal::ZERO {
+            return Ok(account.clone());
+        }
+
+        let amount = round_up_funding_amount(shortfall);
+        self.ensure_spot_asset_available(client, "USDT", amount, "期权保证金准备")
+            .await?;
+        client
+            .universal_transfer("MAIN_OPTION", "USDT", amount)
+            .await?;
+        self.record_audit(
+            "funding.transfer.main_option",
+            &format!("已从现货划转 {amount} USDT 到期权保证金账户，用于期权下单"),
+        )?;
+        client.option_account().await
+    }
+
+    /// 确保现货账户有足够资产执行到期 ITM 补齐。
+    async fn prepare_spot_rebalance_funding(
+        &self,
+        client: &BinanceClient,
+        order: &StrategyOrder,
+    ) -> AppResult<()> {
+        let (asset, required) = spot_rebalance_required_asset(order);
+        self.ensure_spot_asset_available(client, asset, required, "到期现货补齐")
+            .await
+    }
+
+    /// 现货余额不足时，从 Simple Earn 活期赎回缺口。
+    async fn ensure_spot_asset_available(
+        &self,
+        client: &BinanceClient,
+        asset: &str,
+        required: Decimal,
+        purpose: &str,
+    ) -> AppResult<()> {
+        if required <= Decimal::ZERO {
+            return Ok(());
+        }
+        let spot_account = client.spot_account().await?;
+        let available = spot_asset_free(&spot_account, asset);
+        if available >= required {
+            return Ok(());
+        }
+
+        let redeem_amount = round_up_funding_amount(required - available);
+        self.redeem_flexible_asset(client, asset, redeem_amount, purpose)
+            .await
+    }
+
+    async fn redeem_flexible_asset(
+        &self,
+        client: &BinanceClient,
+        asset: &str,
+        amount: Decimal,
+        purpose: &str,
+    ) -> AppResult<()> {
+        if amount <= Decimal::ZERO {
+            return Ok(());
+        }
+        let earn = client.simple_earn_snapshot().await?;
+        let position = earn
+            .balances
+            .iter()
+            .filter(|balance| {
+                balance.flexible
+                    && balance.asset == asset
+                    && balance.amount > Decimal::ZERO
+                    && balance.can_redeem
+                    && !balance.product_id.trim().is_empty()
+            })
+            .max_by(|left, right| left.amount.cmp(&right.amount))
+            .ok_or_else(|| {
+                AppError::RiskRejected(format!(
+                    "现货 {asset} 不足，且没有可赎回的 Simple Earn 活期持仓"
+                ))
+            })?;
+        if position.amount < amount {
+            return Err(AppError::RiskRejected(format!(
+                "Simple Earn 活期 {asset} 可赎回数量不足，预计需要 {}，当前可赎回 {}",
+                amount, position.amount
+            )));
+        }
+
+        client
+            .redeem_simple_earn_flexible(&position.product_id, amount)
+            .await?;
+        self.record_audit(
+            "funding.earn.redeemed",
+            &format!("已从 Simple Earn 活期赎回 {amount} {asset} 至现货账户，用于{purpose}"),
+        )
+    }
+
+    async fn sweep_option_idle_usdt_best_effort(&self, client: &BinanceClient, purpose: &str) {
+        if let Err(error) = self.sweep_option_idle_usdt(client, purpose).await {
+            let _ = self.record_audit("funding.sweep.failed", &format!("{purpose}失败：{error}"));
+        }
+    }
+
+    /// 把期权账户中不需要继续支撑保证金风控的 USDT 归集回现货并申购活期。
+    async fn sweep_option_idle_usdt(&self, client: &BinanceClient, purpose: &str) -> AppResult<()> {
+        let account = client.option_account().await?;
+        let amount = option_idle_usdt_sweep_amount(&account);
+        if amount < dec!(0.01) {
+            return Ok(());
+        }
+
+        client
+            .universal_transfer("OPTION_MAIN", "USDT", amount)
+            .await?;
+        self.record_audit(
+            "funding.transfer.option_main",
+            &format!("已从期权保证金账户归集 {amount} USDT 到现货账户，{purpose}"),
+        )?;
+        self.subscribe_spot_asset_to_earn(client, "USDT", amount, purpose)
+            .await
+    }
+
+    async fn sweep_spot_rebalance_assets_best_effort(
+        &self,
+        client: &BinanceClient,
+        direction: StrategyDirection,
+    ) {
+        if let Err(error) = self.sweep_spot_rebalance_assets(client, direction).await {
+            let _ = self.record_audit(
+                "funding.sweep.failed",
+                &format!("现货补齐后归集失败：{error}"),
+            );
+        }
+    }
+
+    /// 现货补齐完成后，把本流程会用到的 BTC/USDT 空闲余额重新放入活期赚币。
+    async fn sweep_spot_rebalance_assets(
+        &self,
+        client: &BinanceClient,
+        direction: StrategyDirection,
+    ) -> AppResult<()> {
+        let spot_account = client.spot_account().await?;
+        let assets = match direction {
+            StrategyDirection::SellPut | StrategyDirection::SellCall => ["USDT", "BTC"],
+        };
+        for asset in assets {
+            let amount = spot_asset_free(&spot_account, asset);
+            if amount <= Decimal::ZERO {
+                continue;
+            }
+            self.subscribe_spot_asset_to_earn(client, asset, amount, "现货补齐后归集")
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn subscribe_spot_asset_to_earn(
+        &self,
+        client: &BinanceClient,
+        asset: &str,
+        amount: Decimal,
+        purpose: &str,
+    ) -> AppResult<()> {
+        if amount <= Decimal::ZERO {
+            return Ok(());
+        }
+        let products = client.simple_earn_flexible_products(asset).await?;
+        let product = products
+            .into_iter()
+            .find(|product| {
+                product.asset == asset
+                    && product.can_purchase
+                    && !product.is_sold_out
+                    && product.status == "PURCHASING"
+            })
+            .ok_or_else(|| {
+                AppError::Binance(format!("未找到可申购的 Simple Earn 活期 {asset} 产品"))
+            })?;
+        if amount < product.min_purchase_amount {
+            self.record_audit(
+                "funding.earn.subscribe_skipped",
+                &format!(
+                    "{purpose}跳过 {asset} 活期申购：数量 {} 小于最小申购 {}",
+                    amount, product.min_purchase_amount
+                ),
+            )?;
+            return Ok(());
+        }
+
+        // Simple Earn 活期申购/赎回限制为同账户约 3 秒一次；归集是下单后的收尾动作，优先避免触发限频。
+        tokio::time::sleep(StdDuration::from_secs(3)).await;
+        client
+            .subscribe_simple_earn_flexible(&product.product_id, amount)
+            .await?;
+        self.record_audit(
+            "funding.earn.subscribed",
+            &format!("已把 {amount} {asset} 从现货账户重新申购 Simple Earn 活期，{purpose}"),
+        )
+    }
 }
 
 fn spawn_binance_request<T, F>(future: F) -> tauri::async_runtime::JoinHandle<AppResult<T>>
@@ -1260,6 +1524,27 @@ fn validate_contract_order(
     account: &OptionAccountSnapshot,
     marks: &[OptionMarkPrice],
 ) -> AppResult<()> {
+    validate_contract_terms(request, contract, marks)?;
+    let available = account
+        .asset("USDT")
+        .map_or(Decimal::ZERO, |asset| asset.available);
+    let required = strategy::required_margin(contract, request.direction, request.quantity);
+    if available < required {
+        return Err(AppError::RiskRejected(format!(
+            "可用 USDT 保证金不足，预计至少需要 {}，当前可用 {}",
+            required.round_dp(2),
+            available.round_dp(2)
+        )));
+    }
+    Ok(())
+}
+
+/// 校验不需要移动资金的合约与订单条件。
+fn validate_contract_terms(
+    request: &StrategyRequest,
+    contract: &OptionContract,
+    marks: &[OptionMarkPrice],
+) -> AppResult<()> {
     if contract.status != "TRADING" {
         return Err(AppError::RiskRejected(format!(
             "期权合约当前不可交易，状态 {}",
@@ -1304,23 +1589,42 @@ fn validate_contract_order(
             )));
         }
     }
-
-    let available = account
-        .asset("USDT")
-        .map_or(Decimal::ZERO, |asset| asset.available);
-    let required = strategy::required_margin(contract, request.direction, request.quantity);
-    if available < required {
-        return Err(AppError::RiskRejected(format!(
-            "可用 USDT 保证金不足，预计至少需要 {}，当前可用 {}",
-            required.round_dp(2),
-            available.round_dp(2)
-        )));
-    }
     Ok(())
 }
 
 /// 执行本地风控规则。
 fn enforce_risk_rules(
+    request: &StrategyRequest,
+    contract: &OptionContract,
+    account: &OptionAccountSnapshot,
+    orders: &[StrategyOrder],
+) -> AppResult<()> {
+    let rules = strategy::risk_snapshot_from_account(account).rules;
+    let required = strategy::required_margin(contract, request.direction, request.quantity);
+    enforce_pre_funding_risk_rules(request, contract, account, orders)?;
+
+    if let Some(usdt) = account.asset("USDT") {
+        let equity = if usdt.adjusted_equity > Decimal::ZERO {
+            usdt.adjusted_equity
+        } else {
+            usdt.equity
+        };
+        if equity > Decimal::ZERO {
+            let next_usage = ((usdt.initial_margin + required) / equity * dec!(100)).round_dp(2);
+            if next_usage > rules.max_margin_usage {
+                return Err(AppError::RiskRejected(format!(
+                    "下单后保证金占用预计 {}%，超过风控上限 {}%",
+                    next_usage, rules.max_margin_usage
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// 校验不会因为资金划转而改变的风控条件，避免为必然拒绝的订单移动资金。
+fn enforce_pre_funding_risk_rules(
     request: &StrategyRequest,
     contract: &OptionContract,
     account: &OptionAccountSnapshot,
@@ -1348,23 +1652,6 @@ fn enforce_risk_rules(
         )));
     }
 
-    if let Some(usdt) = account.asset("USDT") {
-        let equity = if usdt.adjusted_equity > Decimal::ZERO {
-            usdt.adjusted_equity
-        } else {
-            usdt.equity
-        };
-        if equity > Decimal::ZERO {
-            let next_usage = ((usdt.initial_margin + required) / equity * dec!(100)).round_dp(2);
-            if next_usage > rules.max_margin_usage {
-                return Err(AppError::RiskRejected(format!(
-                    "下单后保证金占用预计 {}%，超过风控上限 {}%",
-                    next_usage, rules.max_margin_usage
-                )));
-            }
-        }
-    }
-
     let consecutive_losses = orders
         .iter()
         .take_while(|order| order.estimated_pnl < Decimal::ZERO)
@@ -1386,33 +1673,106 @@ fn validate_spot_rebalance(order: &StrategyOrder, account: &SpotAccountSnapshot)
             "现货账户不可交易，停止到期补齐".to_string(),
         ));
     }
-    match order.direction {
-        StrategyDirection::SellPut => {
-            let available = account
-                .asset("USDT")
-                .map_or(Decimal::ZERO, |asset| asset.free);
-            let required = order.settlement_price * order.filled_quantity * dec!(1.01);
-            if available < required {
-                return Err(AppError::RiskRejected(format!(
-                    "现货补齐 USDT 不足，预计需要 {}，当前可用 {}",
-                    required.round_dp(2),
-                    available.round_dp(2)
-                )));
-            }
-        }
-        StrategyDirection::SellCall => {
-            let available = account
-                .asset("BTC")
-                .map_or(Decimal::ZERO, |asset| asset.free);
-            if available < order.filled_quantity {
-                return Err(AppError::RiskRejected(format!(
-                    "现货补齐 BTC 不足，预计需要 {}，当前可用 {}",
-                    order.filled_quantity, available
-                )));
-            }
-        }
+    let (asset, required) = spot_rebalance_required_asset(order);
+    let available = spot_asset_free(account, asset);
+    if available < required {
+        return Err(AppError::RiskRejected(format!(
+            "现货补齐 {asset} 不足，预计需要 {}，当前可用 {}",
+            required.round_dp(2),
+            available.round_dp(2)
+        )));
     }
     Ok(())
+}
+
+fn option_funding_shortfall(
+    account: &OptionAccountSnapshot,
+    contract: &OptionContract,
+    request: &StrategyRequest,
+) -> Decimal {
+    let required = strategy::required_margin(contract, request.direction, request.quantity);
+    let available = account
+        .asset("USDT")
+        .map_or(Decimal::ZERO, |asset| asset.available);
+    let margin_shortfall = positive_decimal(required - available);
+
+    let rules = strategy::risk_snapshot_from_account(account).rules;
+    let Some(usdt) = account.asset("USDT") else {
+        return max_decimal(
+            margin_shortfall,
+            risk_equity_target(required, rules.max_margin_usage),
+        );
+    };
+    let equity = option_usdt_equity(usdt);
+    let target_equity = risk_equity_target(usdt.initial_margin + required, rules.max_margin_usage);
+    max_decimal(margin_shortfall, positive_decimal(target_equity - equity))
+}
+
+fn option_idle_usdt_sweep_amount(account: &OptionAccountSnapshot) -> Decimal {
+    let Some(usdt) = account.asset("USDT") else {
+        return Decimal::ZERO;
+    };
+    let rules = strategy::risk_snapshot_from_account(account).rules;
+    let equity = option_usdt_equity(usdt);
+    let min_equity = risk_equity_target(usdt.initial_margin, rules.max_margin_usage);
+    let excess_equity = positive_decimal(equity - min_equity);
+    min_decimal(usdt.available, excess_equity)
+}
+
+fn option_usdt_equity(usdt: &crate::domain::OptionAssetBalance) -> Decimal {
+    if usdt.adjusted_equity > Decimal::ZERO {
+        usdt.adjusted_equity
+    } else {
+        usdt.equity
+    }
+}
+
+fn risk_equity_target(margin: Decimal, max_usage_percent: Decimal) -> Decimal {
+    if margin <= Decimal::ZERO || max_usage_percent <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+    margin * dec!(100) / max_usage_percent
+}
+
+fn spot_rebalance_required_asset(order: &StrategyOrder) -> (&'static str, Decimal) {
+    match order.direction {
+        StrategyDirection::SellPut => (
+            "USDT",
+            order.settlement_price * order.filled_quantity * dec!(1.01),
+        ),
+        StrategyDirection::SellCall => ("BTC", order.filled_quantity),
+    }
+}
+
+fn spot_asset_free(account: &SpotAccountSnapshot, asset: &str) -> Decimal {
+    account.asset(asset).map_or(Decimal::ZERO, |row| row.free)
+}
+
+fn flexible_earn_asset_amount(earn: &SimpleEarnSnapshot, asset: &str) -> Decimal {
+    earn.balances
+        .iter()
+        .filter(|balance| balance.flexible && balance.can_redeem && balance.asset == asset)
+        .map(|balance| balance.amount)
+        .sum()
+}
+
+fn round_up_funding_amount(value: Decimal) -> Decimal {
+    if value <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+    value.round_dp_with_strategy(2, RoundingStrategy::ToPositiveInfinity)
+}
+
+fn positive_decimal(value: Decimal) -> Decimal {
+    max_decimal(value, Decimal::ZERO)
+}
+
+fn max_decimal(left: Decimal, right: Decimal) -> Decimal {
+    if left >= right { left } else { right }
+}
+
+fn min_decimal(left: Decimal, right: Decimal) -> Decimal {
+    if left <= right { left } else { right }
 }
 
 /// 把期权订单回报应用到本地订单。

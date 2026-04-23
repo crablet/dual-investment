@@ -491,7 +491,21 @@ pub struct SimpleEarnSnapshot {
 pub struct SimpleEarnAssetBalance {
     pub asset: String,
     pub source: String,
+    pub product_id: String,
     pub amount: Decimal,
+    pub flexible: bool,
+    pub can_redeem: bool,
+}
+
+/// Binance Simple Earn 活期产品元数据。
+#[derive(Clone, Debug)]
+pub struct SimpleEarnFlexibleProduct {
+    pub asset: String,
+    pub product_id: String,
+    pub can_purchase: bool,
+    pub is_sold_out: bool,
+    pub status: String,
+    pub min_purchase_amount: Decimal,
 }
 
 /// 期权保证金资产余额。
