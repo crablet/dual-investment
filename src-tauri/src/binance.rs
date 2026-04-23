@@ -4,6 +4,7 @@
 //! 上层策略与 Tauri command 只接收已经归一化的领域结构，避免前端或策略层接触
 //! API Secret、签名 query 或交易所原始响应。
 
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -16,8 +17,8 @@ use sha2::Sha256;
 
 use crate::domain::{
     AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot,
-    OptionAssetBalance, OptionContract, OptionMarkPrice, SpotAccountSnapshot, SpotAssetBalance,
-    StrategyDirection, StrategyRequest,
+    OptionAssetBalance, OptionContract, OptionMarkPrice, SimpleEarnAssetBalance,
+    SimpleEarnSnapshot, SpotAccountSnapshot, SpotAssetBalance, StrategyDirection, StrategyRequest,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -148,6 +149,28 @@ impl BinanceClient {
         parse_spot_account(&response)
     }
 
+    /// 查询 Binance Simple Earn 活期和定期持仓。
+    ///
+    /// 现货账户里的 `LD*` 资产只是理财镜像，账户概览应使用这里的真实理财持仓数量。
+    pub async fn simple_earn_snapshot(&self) -> AppResult<SimpleEarnSnapshot> {
+        let mut balances = self
+            .simple_earn_positions(
+                "/sapi/v1/simple-earn/flexible/position",
+                "活期理财",
+                &["totalAmount"],
+            )
+            .await?;
+        balances.extend(
+            self.simple_earn_positions(
+                "/sapi/v1/simple-earn/locked/position",
+                "定期理财",
+                &["amount", "principal", "subscriptionAmount", "totalAmount"],
+            )
+            .await?,
+        );
+        Ok(SimpleEarnSnapshot { balances })
+    }
+
     /// 查询现货价格。当前 v1 固定用于 `BTCUSDT`。
     pub async fn spot_price(&self, symbol: &str) -> AppResult<Decimal> {
         let response = self
@@ -157,6 +180,17 @@ impl BinanceClient {
             )
             .await?;
         decimal_field(&response, "price")
+    }
+
+    /// 查询全部现货交易对价格。
+    ///
+    /// 账户估值需要先知道有哪些真实资产，再按 `XXXUSDT` 或 `XXXBTC * BTCUSDT`
+    /// 路由估值。一次拉取全部 ticker 可以避免对不存在交易对逐个请求并失败。
+    pub async fn spot_price_tickers(&self) -> AppResult<HashMap<String, Decimal>> {
+        let response = self
+            .public_get(&self.spot_base, "/api/v3/ticker/price")
+            .await?;
+        parse_spot_price_tickers(&response)
     }
 
     /// 查询期权行权记录，优先用于确定到期结算参考价。
@@ -246,6 +280,42 @@ impl BinanceClient {
             .await
             .map_err(|error| request_error("GET", path, &error))?;
         Self::decode_response(status, &body)
+    }
+
+    /// 分页查询 Simple Earn 持仓。
+    async fn simple_earn_positions(
+        &self,
+        path: &str,
+        source: &str,
+        amount_keys: &[&str],
+    ) -> AppResult<Vec<SimpleEarnAssetBalance>> {
+        let mut balances = Vec::new();
+        let mut current = 1_u32;
+        let size = 100_u32;
+        loop {
+            let response = self
+                .signed_get(
+                    &self.spot_base,
+                    path,
+                    vec![
+                        ("current".to_string(), current.to_string()),
+                        ("size".to_string(), size.to_string()),
+                    ],
+                )
+                .await?;
+            let page = parse_simple_earn_position_page(&response, source, amount_keys)?;
+            let page_len = page.rows.len();
+            let total = page.total;
+            balances.extend(page.rows);
+            if page_len == 0
+                || page_len < size as usize
+                || total.is_some_and(|total| balances.len() >= total)
+            {
+                break;
+            }
+            current += 1;
+        }
+        Ok(balances)
     }
 
     /// 发送不需要签名的行情/合约查询请求。
@@ -408,6 +478,67 @@ fn parse_spot_asset_balance(value: &Value) -> AppResult<SpotAssetBalance> {
         free: decimal_field(value, "free")?,
         locked: decimal_field(value, "locked")?,
     })
+}
+
+struct SimpleEarnPositionPage {
+    rows: Vec<SimpleEarnAssetBalance>,
+    total: Option<usize>,
+}
+
+/// 解析 Simple Earn 活期/定期持仓分页。
+fn parse_simple_earn_position_page(
+    value: &Value,
+    source: &str,
+    amount_keys: &[&str],
+) -> AppResult<SimpleEarnPositionPage> {
+    let rows = value
+        .get("rows")
+        .and_then(Value::as_array)
+        .ok_or_else(|| AppError::Binance("Binance Simple Earn 响应缺少 rows 字段".to_string()))?
+        .iter()
+        .map(|row| parse_simple_earn_position(row, source, amount_keys))
+        .collect::<AppResult<Vec<_>>>()?;
+    let total = value
+        .get("total")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok());
+    Ok(SimpleEarnPositionPage { rows, total })
+}
+
+/// 解析单条 Simple Earn 持仓。
+fn parse_simple_earn_position(
+    value: &Value,
+    source: &str,
+    amount_keys: &[&str],
+) -> AppResult<SimpleEarnAssetBalance> {
+    let amount = decimal_from_any_field(value, amount_keys)?
+        .ok_or_else(|| AppError::Binance("Binance Simple Earn 持仓响应缺少数量字段".to_string()))?;
+    Ok(SimpleEarnAssetBalance {
+        asset: string_field(value, "asset")?,
+        source: source.to_string(),
+        amount,
+    })
+}
+
+fn decimal_from_any_field(value: &Value, keys: &[&str]) -> AppResult<Option<Decimal>> {
+    for key in keys {
+        if let Some(amount) = optional_decimal_field(value, key)? {
+            return Ok(Some(amount));
+        }
+    }
+    Ok(None)
+}
+
+/// 解析现货交易对价格列表。
+fn parse_spot_price_tickers(value: &Value) -> AppResult<HashMap<String, Decimal>> {
+    let rows = value
+        .as_array()
+        .ok_or_else(|| AppError::Binance("Binance ticker price 响应不是数组".to_string()))?;
+    let mut prices = HashMap::with_capacity(rows.len());
+    for row in rows {
+        prices.insert(string_field(row, "symbol")?, decimal_field(row, "price")?);
+    }
+    Ok(prices)
 }
 
 /// 解析期权合约列表。

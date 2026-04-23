@@ -13,6 +13,7 @@ Rust 后端要求 Rust 1.95 或更新版本。
   - 卖 Call 止盈：卖出 BTC 看涨期权，到期价高于执行价时自动卖出 BTC。
 - 双币赢工作台：低买/高卖方向选择、候选筛选、按张数下单和自动复投设置在同一页面完成。
 - 候选机会：浏览到期 `1-90` 天的 BTC 期权；低买只展示执行价低于现货的 Put，高卖只展示执行价高于现货的 Call。
+- 账户概览：期权保证金、现货和 Binance Simple Earn 持仓在前端按原始 ticker 汇总展示；现货账户里的 `LD*` 镜像资产会被忽略，理财数量来自 Simple Earn 活期/定期持仓接口。估值由后端使用 Binance 现货行情按 `XXXUSDT` 或 `XXXBTC * BTCUSDT` 计算，无法定价时显示“暂无估值”，hover 可查看各来源真实数量。
 - 总览事件日历：从订单、自动复投规则、恢复记录、风险提醒和审计事件派生买入、到期、结算、补齐等日程。
 - 凭据和数据：API 凭据保存在系统 keyring；SQLite 保存策略订单、订单尝试和审计日志。
 
@@ -53,6 +54,7 @@ pnpm tauri:build
 - 导航页切换和重复点击会按页面刷新所需数据；双币赢页扫描候选，其他业务页同步订单/账户状态。
 - 真实期权下单走 Binance 返回的订单号和成交状态；本地保存失败时通过 `order_attempts` 保留恢复线索。
 - 总览指标优先使用 Rust 快照中的事实口径；前端只做轻量展示派生和格式化。
+- 总览账户概览只在展示层合并同 ticker 资产；Simple Earn 使用真实活期/定期持仓，不使用现货账户里的 `LD*` 镜像行。估值来自 Rust 快照中的行情换算结果，原始资产代码、来源和数量仍保留在 hover 明细中。
 - 总览页事件日历只使用当前快照中的真实订单、规则、审计、风控和恢复记录，不新增后端日历接口或浏览器占位数据。
 - 自动策略和手动下单都有确认门禁；自动策略规则可持久化，但应用重启后自动执行保持关闭。
 
@@ -61,6 +63,7 @@ pnpm tauri:build
 ```text
 src/
   components/        Vue 页面和通用组件
+    common/AccountBalanceList.vue   总览账户资产聚合列表
     common/EventCalendarBoard.vue  总览事件日历看板
   composables/       格式化和可复用前端逻辑
     useCalendarEvents.ts           从快照派生日历事件
@@ -69,6 +72,7 @@ src/
   types/             前后端共享数据形状
   utils/             前端纯展示工具
     date.ts          本地日期键、日历时间和计划时间工具
+    decimal.ts       Decimal 字符串展示层求和和符号判断
     labels.ts        状态、方向和恢复记录的展示文案映射
 src-tauri/
   src/app_state.rs   应用状态、订单与规则编排

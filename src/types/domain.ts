@@ -39,6 +39,7 @@ export interface BalanceRow {
   free: DecimalString
   locked: DecimalString
   usdtValue: DecimalString
+  usdtValueKnown: boolean
 }
 
 /** Binance 实盘合约和 mark price 派生出的候选机会。 */

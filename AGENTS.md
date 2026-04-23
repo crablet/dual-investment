@@ -31,6 +31,7 @@
 - 后台轮询同步应使用静默请求，不要清空前台错误提示；按钮 loading 按操作维度展示。
 - 总览指标优先使用后端快照中的事实口径，例如“今日权利金”使用 `pnl.today`；不要在前端按订单日期重复计算事实口径。
 - 前端轻量展示派生保留在 TypeScript；不要为了格式化、标签或小型 UI 聚合新增 IPC command。
+- 总览账户概览按原始 ticker 做展示层聚合；Binance Simple Earn 必须使用活期/定期持仓接口中的真实资产数量，不要用现货账户里的 `LD*` 镜像资产。估值由 Rust 使用 Binance 现货行情按 `XXXUSDT` 或 `XXXBTC * BTCUSDT` 计算，无法定价时前端应显示“暂无估值”，hover 明细保留原始资产代码、来源和真实数量。
 - 日期工具和状态/方向/恢复记录文案映射集中在 `src/utils/date.ts` 和 `src/utils/labels.ts`，不要在组件或 composable 内重复维护。
 - 总览事件日历使用 `src/components/common/EventCalendarBoard.vue` 和 `src/composables/useCalendarEvents.ts`，只从现有快照派生事件；不要新增独立导航入口、浏览器占位日程或手动维护日程。
 - 日历可展示订单、到期、结算、补齐、自动复投、风险、恢复和系统事件；审计事件必须按 allowlist 映射，不要把未知审计消息或敏感上下文原样铺到前端。

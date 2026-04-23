@@ -122,6 +122,7 @@ pub struct BalanceRow {
     pub locked: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub usdt_value: Decimal,
+    pub usdt_value_known: bool,
 }
 
 /// 一条可浏览、可下单的策略候选。
@@ -477,6 +478,20 @@ pub struct SpotAssetBalance {
     pub asset: String,
     pub free: Decimal,
     pub locked: Decimal,
+}
+
+/// Binance Simple Earn 持仓快照。
+#[derive(Clone, Debug)]
+pub struct SimpleEarnSnapshot {
+    pub balances: Vec<SimpleEarnAssetBalance>,
+}
+
+/// Binance Simple Earn 单项持仓。
+#[derive(Clone, Debug)]
+pub struct SimpleEarnAssetBalance {
+    pub asset: String,
+    pub source: String,
+    pub amount: Decimal,
 }
 
 /// 期权保证金资产余额。

@@ -2,13 +2,13 @@
 // 总览视图。
 // 组合账户、收益、待办、事件日历和快捷候选入口；具体数据都来自 Pinia 快照派生。
 import { computed } from 'vue'
+import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import CandidateTable from '@/components/common/CandidateTable.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
 import EventCalendarBoard from '@/components/common/EventCalendarBoard.vue'
 import MetricCard from '@/components/common/MetricCard.vue'
 import MiniLineChart from '@/components/common/MiniLineChart.vue'
 import Panel from '@/components/common/Panel.vue'
-import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import type { AppViewId } from '@/stores/app'
 import type { StrategyCandidate } from '@/types/domain'
@@ -22,7 +22,6 @@ interface PendingTask {
 }
 
 const store = useAppStore()
-const { decimal, money } = useFormat()
 
 const activeStrategies = computed(() => store.orders.slice(0, 4))
 const pnlCenter = computed(() => Number(store.pnl?.cumulative ?? 0).toLocaleString('zh-CN'))
@@ -96,15 +95,7 @@ function placeCandidate(candidate: StrategyCandidate) {
     <MetricCard v-for="metric in store.metrics" :key="metric.id" :metric="metric" />
 
     <Panel title="账户概览" class="span-3">
-      <div class="account-list">
-        <div v-for="balance in store.balances" :key="balance.asset" class="account-row">
-          <span class="account-asset">{{ balance.asset }}</span>
-          <span class="account-values">
-            <strong>{{ decimal(balance.free) }}</strong>
-            <em>{{ money(balance.usdtValue) }}</em>
-          </span>
-        </div>
-      </div>
+      <AccountBalanceList :balances="store.balances" />
     </Panel>
 
     <Panel title="收益趋势" class="span-5">

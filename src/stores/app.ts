@@ -16,6 +16,12 @@ import type {
   ToggleAutoRequest,
 } from '@/types/domain'
 import type { MetricCardModel, PnlBreakdownItem } from '@/types/view'
+import {
+  isNegativeDecimalString,
+  isZeroDecimalString,
+  negateDecimalString,
+  sumDecimalStrings,
+} from '@/utils/decimal'
 
 type RequestKey =
   | 'snapshot'
@@ -439,65 +445,4 @@ function formatMetricMoney(value: string) {
     return `${value} USDT`
   }
   return `${metricMoneyFormatter.format(numeric)} USDT`
-}
-
-/**
- * 汇总 Decimal 字符串。
- *
- * 前端这里只做轻量展示聚合，用 BigInt 对齐小数位，避免把金额先转成 number 再求和。
- */
-function sumDecimalStrings(values: string[]) {
-  const parsed = values.map(parseDecimalString)
-  const scale = Math.max(0, ...parsed.map(value => value.scale))
-  const total = parsed.reduce((sum, value) => {
-    const multiplier = 10n ** BigInt(scale - value.scale)
-    return sum + value.units * multiplier
-  }, 0n)
-  return formatScaledDecimal(total, scale)
-}
-
-/** 把 Decimal 字符串拆成整数单位和小数位数。非法输入按 0 处理，避免 UI 派生中断。 */
-function parseDecimalString(raw: string) {
-  const matched = raw.trim().match(/^([+-])?(\d+)(?:\.(\d+))?$/)
-  if (!matched) {
-    return { units: 0n, scale: 0 }
-  }
-  const [, sign, integer, fraction = ''] = matched
-  const digits = `${integer}${fraction}`.replace(/^0+(?=\d)/, '') || '0'
-  const direction = sign === '-' ? -1n : 1n
-  return {
-    units: BigInt(digits) * direction,
-    scale: fraction.length,
-  }
-}
-
-/** 把对齐后的整数单位格式化回 Decimal 字符串。 */
-function formatScaledDecimal(units: bigint, scale: number) {
-  if (scale === 0) {
-    return units.toString()
-  }
-  const sign = units < 0n ? '-' : ''
-  const digits = (units < 0n ? -units : units).toString().padStart(scale + 1, '0')
-  const integer = digits.slice(0, -scale)
-  const fraction = digits.slice(-scale).replace(/0+$/, '')
-  return fraction ? `${sign}${integer}.${fraction}` : `${sign}${integer}`
-}
-
-/** 判断 Decimal 字符串是否为 0。 */
-function isZeroDecimalString(value: string) {
-  return /^-?0(?:\.0+)?$/.test(value.trim())
-}
-
-/** 判断 Decimal 字符串是否为负数且非 0。 */
-function isNegativeDecimalString(value: string) {
-  return value.trim().startsWith('-') && !isZeroDecimalString(value)
-}
-
-/** 给 Decimal 字符串取反，用于把手续费展示成支出。 */
-function negateDecimalString(value: string) {
-  const normalized = value.trim()
-  if (isZeroDecimalString(normalized)) {
-    return '0'
-  }
-  return normalized.startsWith('-') ? normalized.slice(1) : `-${normalized}`
 }

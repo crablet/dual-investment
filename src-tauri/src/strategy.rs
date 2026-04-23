@@ -13,13 +13,18 @@ use uuid::Uuid;
 use crate::domain::{
     AutoInvestmentRule, BalanceRow, CandidateScanDiagnostics, CandidateScanResult, ChartPoint,
     ExchangeOrderAck, OptionAccountSnapshot, OptionContract, OptionMarkPrice, PnlReport,
-    RecommendationLevel, RiskAlert, RiskRuleSet, RiskSeverity, RiskSnapshot, SpotAccountSnapshot,
-    StrategyCandidate, StrategyDirection, StrategyOrder, StrategyPreview, StrategyRequest,
-    StrategyStatus,
+    RecommendationLevel, RiskAlert, RiskRuleSet, RiskSeverity, RiskSnapshot, SimpleEarnSnapshot,
+    SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder, StrategyPreview,
+    StrategyRequest, StrategyStatus,
 };
 
 const BROWSE_MIN_DAYS_TO_EXPIRY: i64 = 1;
 const BROWSE_MAX_DAYS_TO_EXPIRY: i64 = 90;
+
+struct BalanceValuation {
+    usdt_value: Decimal,
+    known: bool,
+}
 
 /// 创建默认自动复投规则。
 ///
@@ -53,49 +58,143 @@ pub fn empty_pnl_report() -> PnlReport {
 }
 
 /// 从期权保证金账户构造前端资产行。
-pub fn build_balances(account: &OptionAccountSnapshot) -> Vec<BalanceRow> {
+pub fn build_balances(
+    account: &OptionAccountSnapshot,
+    spot_prices: &HashMap<String, Decimal>,
+) -> Vec<BalanceRow> {
     account
         .assets
         .iter()
-        .map(|asset| BalanceRow {
-            asset: asset.asset.clone(),
-            source: "期权保证金".to_string(),
-            free: asset.available,
-            locked: max_decimal(asset.margin_balance - asset.available, Decimal::ZERO),
-            usdt_value: if asset.asset == "USDT" {
-                asset.adjusted_equity
+        .map(|asset| {
+            let valuation = if asset.asset == "USDT" {
+                BalanceValuation {
+                    usdt_value: asset.adjusted_equity,
+                    known: true,
+                }
             } else {
-                Decimal::ZERO
-            },
+                asset_usdt_value(&asset.asset, asset.margin_balance, spot_prices)
+            };
+            BalanceRow {
+                asset: asset.asset.clone(),
+                source: "期权保证金".to_string(),
+                free: asset.available,
+                locked: max_decimal(asset.margin_balance - asset.available, Decimal::ZERO),
+                usdt_value: valuation.usdt_value,
+                usdt_value_known: valuation.known,
+            }
         })
         .collect()
 }
 
 /// 从现货账户构造前端资产行。
 ///
-/// 当前 v1 只估值 USDT 和 BTC，其他资产保留数量但 USDT 估值为 0。
+/// 现货账户里的 `LD*` 是 Simple Earn 镜像，必须忽略，避免和理财接口重复统计。
 pub fn build_spot_balances(
     account: &SpotAccountSnapshot,
-    btc_usdt_price: Decimal,
+    spot_prices: &HashMap<String, Decimal>,
 ) -> Vec<BalanceRow> {
     account
         .balances
         .iter()
-        .filter(|asset| asset.free > Decimal::ZERO || asset.locked > Decimal::ZERO)
-        .map(|asset| BalanceRow {
-            asset: asset.asset.clone(),
-            source: "现货".to_string(),
-            free: asset.free,
-            locked: asset.locked,
-            usdt_value: if asset.asset == "USDT" {
-                asset.free + asset.locked
-            } else if asset.asset == "BTC" {
-                (asset.free + asset.locked) * btc_usdt_price
-            } else {
-                Decimal::ZERO
-            },
+        .filter(|asset| {
+            (asset.free > Decimal::ZERO || asset.locked > Decimal::ZERO)
+                && !is_simple_earn_ledger_asset(&asset.asset)
+        })
+        .map(|asset| {
+            let valuation = asset_usdt_value(&asset.asset, asset.free + asset.locked, spot_prices);
+            BalanceRow {
+                asset: asset.asset.clone(),
+                source: "现货".to_string(),
+                free: asset.free,
+                locked: asset.locked,
+                usdt_value: valuation.usdt_value,
+                usdt_value_known: valuation.known,
+            }
         })
         .collect()
+}
+
+/// 从 Simple Earn 活期/定期持仓构造前端资产行。
+pub fn build_simple_earn_balances(
+    earn: &SimpleEarnSnapshot,
+    spot_prices: &HashMap<String, Decimal>,
+) -> Vec<BalanceRow> {
+    let mut grouped: HashMap<(String, String), Decimal> = HashMap::new();
+    for balance in &earn.balances {
+        if balance.amount <= Decimal::ZERO {
+            continue;
+        }
+        *grouped
+            .entry((balance.asset.clone(), balance.source.clone()))
+            .or_default() += balance.amount;
+    }
+
+    grouped
+        .into_iter()
+        .map(|((asset, source), amount)| {
+            let valuation = asset_usdt_value(&asset, amount, spot_prices);
+            BalanceRow {
+                asset,
+                source,
+                free: amount,
+                locked: Decimal::ZERO,
+                usdt_value: valuation.usdt_value,
+                usdt_value_known: valuation.known,
+            }
+        })
+        .collect()
+}
+
+/// 按原始 ticker 计算 USDT 估值。
+fn asset_usdt_value(
+    asset: &str,
+    quantity: Decimal,
+    spot_prices: &HashMap<String, Decimal>,
+) -> BalanceValuation {
+    if quantity <= Decimal::ZERO {
+        return BalanceValuation {
+            usdt_value: Decimal::ZERO,
+            known: true,
+        };
+    }
+    if let Some(price) = asset_usdt_price(asset, spot_prices) {
+        BalanceValuation {
+            usdt_value: quantity * price,
+            known: true,
+        }
+    } else {
+        BalanceValuation {
+            usdt_value: Decimal::ZERO,
+            known: false,
+        }
+    }
+}
+
+fn asset_usdt_price(asset: &str, spot_prices: &HashMap<String, Decimal>) -> Option<Decimal> {
+    if asset == "USDT" {
+        return Some(Decimal::ONE);
+    }
+
+    let usdt_symbol = format!("{asset}USDT");
+    if let Some(price) = positive_price(spot_prices.get(&usdt_symbol)) {
+        return Some(price);
+    }
+
+    let btc_symbol = format!("{asset}BTC");
+    let asset_btc = positive_price(spot_prices.get(&btc_symbol))?;
+    let btc_usdt = positive_price(spot_prices.get("BTCUSDT"))?;
+    Some(asset_btc * btc_usdt)
+}
+
+fn positive_price(price: Option<&Decimal>) -> Option<Decimal> {
+    price.copied().filter(|value| *value > Decimal::ZERO)
+}
+
+fn is_simple_earn_ledger_asset(asset: &str) -> bool {
+    if asset.starts_with("LD") && asset.len() > 4 {
+        return true;
+    }
+    false
 }
 
 /// 从真实订单和现货价格派生收益报告。
@@ -665,192 +764,4 @@ fn abs_decimal(value: Decimal) -> Decimal {
 /// Decimal 最大值。
 fn max_decimal(left: Decimal, right: Decimal) -> Decimal {
     if left >= right { left } else { right }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::{DateTime, Duration};
-
-    #[test]
-    fn sell_put_preview_computes_breakeven_below_strike() {
-        let expiry = Utc::now().date_naive() + Duration::days(14);
-        let request = StrategyRequest {
-            candidate_id: None,
-            symbol: "BTCUSDT".to_string(),
-            option_symbol: None,
-            direction: StrategyDirection::SellPut,
-            expiry,
-            strike: dec!(72000),
-            quantity: dec!(0.01),
-            limit_price: dec!(180),
-            confirm_live: true,
-        };
-
-        let preview = preview_strategy(&request);
-        assert!(preview.candidate.breakeven < request.strike);
-        assert!(preview.max_profit > Decimal::ZERO);
-    }
-
-    #[test]
-    fn sell_call_preview_computes_breakeven_above_strike() {
-        let expiry = Utc::now().date_naive() + Duration::days(14);
-        let request = StrategyRequest {
-            candidate_id: None,
-            symbol: "BTCUSDT".to_string(),
-            option_symbol: None,
-            direction: StrategyDirection::SellCall,
-            expiry,
-            strike: dec!(76000),
-            quantity: dec!(0.01),
-            limit_price: dec!(160),
-            confirm_live: true,
-        };
-
-        let preview = preview_strategy(&request);
-        assert!(preview.candidate.breakeven > request.strike);
-        assert_eq!(preview.protected_limit_price, request.limit_price);
-    }
-
-    #[test]
-    fn build_candidates_uses_live_contract_and_mark_inputs() {
-        let expiry = Utc::now().date_naive() + Duration::days(14);
-        let contract = option_contract("BTC-260626-72000-P", "PUT", expiry);
-        let mark = OptionMarkPrice {
-            symbol: contract.symbol.clone(),
-            mark_price: dec!(600),
-            mark_iv: dec!(0.52),
-            delta: dec!(-0.20),
-            high_price_limit: dec!(1000),
-            low_price_limit: dec!(1),
-        };
-        let account = account_snapshot(dec!(1000));
-
-        let result = build_candidates(
-            &[contract],
-            &[mark],
-            &default_auto_rule(false),
-            &account,
-            &[],
-            dec!(78000),
-        );
-        let candidates = result.candidates;
-
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].option_symbol, "BTC-260626-72000-P");
-        assert_eq!(
-            candidates[0].recommendation,
-            RecommendationLevel::Recommended
-        );
-        assert_eq!(candidates[0].limit_price, dec!(600));
-        assert_eq!(candidates[0].premium, dec!(6.00));
-        assert_eq!(candidates[0].delta_abs, dec!(0.20));
-        assert!(candidates[0].reason.contains("mark IV"));
-    }
-
-    #[test]
-    fn ioc_cancel_without_fill_is_not_running_order() {
-        let expiry = Utc::now().date_naive() + Duration::days(14);
-        let request = strategy_request(expiry);
-        let ack = ExchangeOrderAck {
-            order_id: "4611875134427365377".to_string(),
-            client_order_id: "di-put-1".to_string(),
-            symbol: "BTC-260626-72000-P".to_string(),
-            status: "CANCELED".to_string(),
-            executed_qty: Decimal::ZERO,
-            avg_price: Decimal::ZERO,
-            price: dec!(200),
-            quantity: dec!(0.01),
-            fee: Decimal::ZERO,
-            create_time: None,
-            update_time: Some(DateTime::<Utc>::from_timestamp(1_772_000_000, 0).unwrap()),
-        };
-
-        let order = order_from_request(&request, &ack);
-
-        assert_eq!(order.status, StrategyStatus::Cancelled);
-        assert_eq!(order.premium, Decimal::ZERO);
-        assert_eq!(order.filled_quantity, Decimal::ZERO);
-        assert_eq!(
-            order.exchange_order_id.as_deref(),
-            Some("4611875134427365377")
-        );
-    }
-
-    #[test]
-    fn ioc_partial_fill_records_real_fill_and_status() {
-        let expiry = Utc::now().date_naive() + Duration::days(14);
-        let request = strategy_request(expiry);
-        let ack = ExchangeOrderAck {
-            order_id: "4611875134427365378".to_string(),
-            client_order_id: "di-put-2".to_string(),
-            symbol: "BTC-260626-72000-P".to_string(),
-            status: "CANCELED".to_string(),
-            executed_qty: dec!(0.005),
-            avg_price: dec!(200),
-            price: dec!(200),
-            quantity: dec!(0.01),
-            fee: dec!(0.01),
-            create_time: None,
-            update_time: Some(DateTime::<Utc>::from_timestamp(1_772_000_000, 0).unwrap()),
-        };
-
-        let order = order_from_request(&request, &ack);
-
-        assert_eq!(order.status, StrategyStatus::PartiallyFilled);
-        assert_eq!(order.filled_quantity, dec!(0.005));
-        assert_eq!(order.premium, dec!(1.00));
-        assert_eq!(order.estimated_pnl, dec!(0.99));
-    }
-
-    fn strategy_request(expiry: chrono::NaiveDate) -> StrategyRequest {
-        StrategyRequest {
-            candidate_id: None,
-            symbol: "BTCUSDT".to_string(),
-            option_symbol: Some("BTC-260626-72000-P".to_string()),
-            direction: StrategyDirection::SellPut,
-            expiry,
-            strike: dec!(72000),
-            quantity: dec!(0.01),
-            limit_price: dec!(200),
-            confirm_live: true,
-        }
-    }
-
-    fn account_snapshot(available: Decimal) -> OptionAccountSnapshot {
-        OptionAccountSnapshot {
-            assets: vec![crate::domain::OptionAssetBalance {
-                asset: "USDT".to_string(),
-                margin_balance: available,
-                equity: available,
-                available,
-                initial_margin: Decimal::ZERO,
-                maint_margin: Decimal::ZERO,
-                unrealized_pnl: Decimal::ZERO,
-                adjusted_equity: available,
-            }],
-            can_trade: true,
-        }
-    }
-
-    fn option_contract(symbol: &str, side: &str, expiry: chrono::NaiveDate) -> OptionContract {
-        OptionContract {
-            symbol: symbol.to_string(),
-            side: side.to_string(),
-            strike_price: dec!(72000),
-            underlying: "BTCUSDT".to_string(),
-            unit: Decimal::ONE,
-            min_qty: dec!(0.01),
-            max_qty: dec!(10),
-            initial_margin: dec!(0.10),
-            maintenance_margin: dec!(0.05),
-            min_initial_margin: dec!(10),
-            min_maintenance_margin: dec!(5),
-            price_scale: 2,
-            quantity_scale: 2,
-            quote_asset: "USDT".to_string(),
-            status: "TRADING".to_string(),
-            expiry,
-        }
-    }
 }

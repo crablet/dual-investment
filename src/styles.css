@@ -330,6 +330,10 @@ input {
   font-variant-numeric: tabular-nums;
 }
 
+.account-values--hover {
+  cursor: help;
+}
+
 .account-values strong {
   max-width: 100%;
   color: var(--text);
@@ -347,6 +351,30 @@ input {
 .obligation-list em,
 .setting-list span {
   color: var(--muted);
+  font-style: normal;
+}
+
+.balance-tooltip {
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.balance-tooltip-row {
+  display: grid;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.balance-tooltip-row strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.balance-tooltip-row span,
+.balance-tooltip-row em {
+  color: var(--muted);
+  font-size: 12px;
   font-style: normal;
 }
 

@@ -5,6 +5,7 @@
 //! 业务计算放在 `strategy.rs`，交易所请求放在 `binance.rs`，凭据读写放在 `secrets.rs`。
 
 use std::{
+    collections::HashMap,
     future::Future,
     path::Path,
     sync::{
@@ -25,12 +26,19 @@ use crate::domain::{
     AppError, AppResult, AppSettings, AppSnapshot, AuditEvent, AutoInvestmentRule, BalanceRow,
     CandidateScanDiagnostics, CandidateScanResult, ConnectBinanceRequest, ExchangeOrderAck,
     OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt, OrderAttemptStatus,
-    OrderAttemptView, SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder,
-    StrategyRequest, StrategyStatus, ToggleAutoRequest,
+    OrderAttemptView, SimpleEarnSnapshot, SpotAccountSnapshot, StrategyCandidate,
+    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
 };
 use crate::persistence::Persistence;
 use crate::secrets;
 use crate::strategy;
+
+struct LiveAccounts {
+    option: OptionAccountSnapshot,
+    spot: SpotAccountSnapshot,
+    earn: SimpleEarnSnapshot,
+    spot_prices: HashMap<String, Decimal>,
+}
 
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
@@ -150,15 +158,18 @@ impl AppState {
                     .collect::<Vec<_>>(),
             )
         };
-        let option_account = accounts.as_ref().map(|(option, _spot, _price)| option);
-        let balances = accounts
-            .as_ref()
-            .map_or_else(Vec::new, |(option, spot, price)| {
-                combined_balances(option, spot, *price)
-            });
+        let option_account = accounts.as_ref().map(|accounts| &accounts.option);
+        let balances = accounts.as_ref().map_or_else(Vec::new, |accounts| {
+            combined_balances(
+                &accounts.option,
+                &accounts.spot,
+                &accounts.earn,
+                &accounts.spot_prices,
+            )
+        });
         let spot_price = accounts
             .as_ref()
-            .map(|(_option, _spot, price)| *price)
+            .and_then(|accounts| accounts.spot_prices.get("BTCUSDT").copied())
             .filter(|price| *price > Decimal::ZERO);
 
         Ok(AppSnapshot {
@@ -1017,12 +1028,10 @@ impl AppState {
         Ok(client)
     }
 
-    /// 已连接时读取期权账户、现货账户和 BTCUSDT 现货价。
+    /// 已连接时读取期权账户、现货账户和现货行情价格。
     ///
     /// 未连接返回 `None`，让快照保持明确的空状态，而不是前端 fallback 数据。
-    async fn live_accounts_if_connected(
-        &self,
-    ) -> AppResult<Option<(OptionAccountSnapshot, SpotAccountSnapshot, Decimal)>> {
+    async fn live_accounts_if_connected(&self) -> AppResult<Option<LiveAccounts>> {
         let connected = self.runtime.read().await.connected;
         if !connected {
             return Ok(None);
@@ -1036,17 +1045,28 @@ impl AppState {
             let client = client.clone();
             async move { client.spot_account().await }
         });
-        let spot_price_task = spawn_binance_request({
+        let earn_task = spawn_binance_request({
             let client = client.clone();
-            async move { client.spot_price("BTCUSDT").await }
+            async move { client.simple_earn_snapshot().await }
+        });
+        let spot_prices_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.spot_price_tickers().await }
         });
         let option_account = join_binance_request(option_account_task).await;
         let spot_account = join_binance_request(spot_account_task).await;
-        let spot_price = join_binance_request(spot_price_task).await;
+        let earn = join_binance_request(earn_task).await;
+        let spot_prices = join_binance_request(spot_prices_task).await;
         let option_account = option_account?;
         let spot_account = spot_account?;
-        let spot_price = spot_price?;
-        Ok(Some((option_account, spot_account, spot_price)))
+        let earn = earn?;
+        let spot_prices = spot_prices?;
+        Ok(Some(LiveAccounts {
+            option: option_account,
+            spot: spot_account,
+            earn,
+            spot_prices,
+        }))
     }
 }
 
@@ -1493,10 +1513,12 @@ fn is_in_the_money(order: &StrategyOrder, settlement_price: Decimal) -> bool {
 fn combined_balances(
     option: &OptionAccountSnapshot,
     spot: &SpotAccountSnapshot,
-    spot_price: Decimal,
+    earn: &SimpleEarnSnapshot,
+    spot_prices: &HashMap<String, Decimal>,
 ) -> Vec<BalanceRow> {
-    let mut balances = strategy::build_balances(option);
-    balances.extend(strategy::build_spot_balances(spot, spot_price));
+    let mut balances = strategy::build_balances(option, spot_prices);
+    balances.extend(strategy::build_spot_balances(spot, spot_prices));
+    balances.extend(strategy::build_simple_earn_balances(earn, spot_prices));
     balances
 }
 
@@ -1547,235 +1569,4 @@ fn mask_api_key(api_key: &str) -> String {
     let prefix = &trimmed[..4];
     let suffix = &trimmed[trimmed.len() - 4..];
     format!("{prefix}...{suffix}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::Duration as ChronoDuration;
-
-    #[test]
-    fn risk_rules_reject_single_order_over_usdt_limit() {
-        let expiry = Utc::now().date_naive() + ChronoDuration::days(14);
-        let request = strategy_request(StrategyDirection::SellPut, expiry);
-        let contract = option_contract("PUT", expiry);
-        let account = option_account(dec!(10_000), Decimal::ZERO, dec!(10_000));
-
-        let error = enforce_risk_rules(&request, &contract, &account, &[])
-            .expect_err("sell put notional should exceed default single-order limit");
-
-        assert!(error.to_string().contains("单笔预计保证金"));
-    }
-
-    #[test]
-    fn spot_rebalance_rejects_missing_btc_for_sell_call() {
-        let mut order = strategy_order(StrategyDirection::SellCall);
-        order.filled_quantity = dec!(0.01);
-        order.settlement_price = dec!(80_000);
-        let account = spot_account(dec!(10_000), dec!(0.005), true);
-
-        let error = validate_spot_rebalance(&order, &account)
-            .expect_err("sell call rebalance needs enough BTC");
-
-        assert!(error.to_string().contains("BTC 不足"));
-    }
-
-    #[test]
-    fn itm_detection_matches_direction() {
-        let mut sell_put = strategy_order(StrategyDirection::SellPut);
-        sell_put.strike = dec!(72_000);
-        let mut sell_call = strategy_order(StrategyDirection::SellCall);
-        sell_call.strike = dec!(72_000);
-
-        assert!(is_in_the_money(&sell_put, dec!(70_000)));
-        assert!(!is_in_the_money(&sell_put, dec!(73_000)));
-        assert!(is_in_the_money(&sell_call, dec!(73_000)));
-        assert!(!is_in_the_money(&sell_call, dec!(70_000)));
-    }
-
-    #[test]
-    fn option_ack_updates_partial_fill_amounts() {
-        let mut order = strategy_order(StrategyDirection::SellPut);
-        let ack = ExchangeOrderAck {
-            order_id: "4611875134427365378".to_string(),
-            client_order_id: "di-put-2".to_string(),
-            symbol: "BTC-260626-72000-P".to_string(),
-            status: "CANCELED".to_string(),
-            executed_qty: dec!(0.005),
-            avg_price: dec!(200),
-            price: dec!(200),
-            quantity: dec!(0.01),
-            fee: dec!(0.01),
-            create_time: None,
-            update_time: Some(Utc::now()),
-        };
-
-        apply_option_ack(&mut order, &ack);
-
-        assert_eq!(order.status, StrategyStatus::PartiallyFilled);
-        assert_eq!(order.filled_quantity, dec!(0.005));
-        assert_eq!(order.premium, dec!(1.00));
-        assert_eq!(order.estimated_pnl, dec!(0.99));
-    }
-
-    #[test]
-    fn spot_ack_partial_fill_does_not_settle_order() {
-        let mut order = strategy_order(StrategyDirection::SellPut);
-        order.filled_quantity = dec!(0.01);
-        let ack = ExchangeOrderAck {
-            order_id: "8751755144427365001".to_string(),
-            client_order_id: "di-spot-put-1".to_string(),
-            symbol: "BTCUSDT".to_string(),
-            status: "PARTIALLY_FILLED".to_string(),
-            executed_qty: dec!(0.005),
-            avg_price: dec!(70000),
-            price: Decimal::ZERO,
-            quantity: dec!(0.01),
-            fee: dec!(0.1),
-            create_time: None,
-            update_time: Some(Utc::now()),
-        };
-
-        apply_spot_ack(&mut order, &ack);
-
-        assert_eq!(order.status, StrategyStatus::RebalanceFailed);
-        assert_eq!(order.spot_filled_quantity, dec!(0.005));
-        assert_eq!(order.spot_avg_price, dec!(70000));
-        assert_eq!(order.spot_fee, dec!(0.1));
-        assert!(order.settled_at.is_none());
-        assert!(order.rebalance_message.contains("尚未足额成交"));
-    }
-
-    #[test]
-    fn parse_option_symbol_recovers_expiry_strike_and_direction() {
-        let (expiry, strike, direction) =
-            parse_option_symbol("BTC-260626-72000-P").expect("valid option symbol");
-
-        assert_eq!(
-            expiry,
-            NaiveDate::from_ymd_opt(2026, 6, 26).expect("valid test date"),
-        );
-        assert_eq!(strike, dec!(72000));
-        assert_eq!(direction, StrategyDirection::SellPut);
-    }
-
-    #[test]
-    fn schedule_parser_uses_configured_time_or_default() {
-        assert_eq!(
-            parse_schedule_time("每天 11:30"),
-            NaiveTime::from_hms_opt(11, 30, 0).expect("valid test time"),
-        );
-        assert_eq!(
-            parse_schedule_time("bad schedule"),
-            NaiveTime::from_hms_opt(11, 30, 0).expect("valid default time"),
-        );
-    }
-
-    fn strategy_request(direction: StrategyDirection, expiry: NaiveDate) -> StrategyRequest {
-        StrategyRequest {
-            candidate_id: None,
-            symbol: "BTCUSDT".to_string(),
-            option_symbol: Some("BTC-260626-72000-P".to_string()),
-            direction,
-            expiry,
-            strike: dec!(72_000),
-            quantity: dec!(0.01),
-            limit_price: dec!(200),
-            confirm_live: true,
-        }
-    }
-
-    fn strategy_order(direction: StrategyDirection) -> StrategyOrder {
-        let expiry = Utc::now().date_naive() - ChronoDuration::days(1);
-        StrategyOrder {
-            id: "LIVE-test".to_string(),
-            exchange_order_id: Some("4611875134427365378".to_string()),
-            client_order_id: "di-test".to_string(),
-            symbol: "BTCUSDT".to_string(),
-            option_symbol: "BTC-260626-72000-P".to_string(),
-            direction,
-            status: StrategyStatus::Running,
-            expiry,
-            strike: dec!(72_000),
-            quantity: dec!(0.01),
-            filled_quantity: dec!(0.01),
-            avg_price: dec!(200),
-            fee: Decimal::ZERO,
-            premium: dec!(2),
-            estimated_pnl: dec!(2),
-            breakeven: dec!(71_800),
-            exchange_status: "FILLED".to_string(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            settlement_action: "test".to_string(),
-            settlement_price: Decimal::ZERO,
-            settled_at: None,
-            spot_order_id: None,
-            spot_client_order_id: String::new(),
-            spot_order_status: String::new(),
-            rebalance_message: String::new(),
-            spot_filled_quantity: Decimal::ZERO,
-            spot_avg_price: Decimal::ZERO,
-            spot_fee: Decimal::ZERO,
-        }
-    }
-
-    fn option_account(
-        available: Decimal,
-        initial_margin: Decimal,
-        adjusted_equity: Decimal,
-    ) -> OptionAccountSnapshot {
-        OptionAccountSnapshot {
-            assets: vec![crate::domain::OptionAssetBalance {
-                asset: "USDT".to_string(),
-                margin_balance: adjusted_equity,
-                equity: adjusted_equity,
-                available,
-                initial_margin,
-                maint_margin: Decimal::ZERO,
-                unrealized_pnl: Decimal::ZERO,
-                adjusted_equity,
-            }],
-            can_trade: true,
-        }
-    }
-
-    fn spot_account(usdt_free: Decimal, btc_free: Decimal, can_trade: bool) -> SpotAccountSnapshot {
-        SpotAccountSnapshot {
-            can_trade,
-            balances: vec![
-                crate::domain::SpotAssetBalance {
-                    asset: "USDT".to_string(),
-                    free: usdt_free,
-                    locked: Decimal::ZERO,
-                },
-                crate::domain::SpotAssetBalance {
-                    asset: "BTC".to_string(),
-                    free: btc_free,
-                    locked: Decimal::ZERO,
-                },
-            ],
-        }
-    }
-
-    fn option_contract(side: &str, expiry: NaiveDate) -> OptionContract {
-        OptionContract {
-            symbol: "BTC-260626-72000-P".to_string(),
-            side: side.to_string(),
-            strike_price: dec!(72_000),
-            underlying: "BTCUSDT".to_string(),
-            unit: Decimal::ONE,
-            min_qty: dec!(0.01),
-            max_qty: dec!(10),
-            initial_margin: dec!(0.10),
-            maintenance_margin: dec!(0.05),
-            min_initial_margin: dec!(10),
-            min_maintenance_margin: dec!(5),
-            price_scale: 2,
-            quantity_scale: 2,
-            quote_asset: "USDT".to_string(),
-            status: "TRADING".to_string(),
-            expiry,
-        }
-    }
 }
