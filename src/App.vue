@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 根组件负责全局 UI provider、异步视图路由和后台静默同步。
+// 业务状态全部放在 Pinia store，视图组件只消费当前快照和触发显式操作。
 import { darkTheme, dateZhCN, NConfigProvider, NDialogProvider, NMessageProvider, zhCN } from 'naive-ui'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue'
@@ -23,6 +25,7 @@ const views = {
 const currentView = computed(() => views[store.activeView] ?? OverviewView)
 let syncTimer: number | undefined
 
+// Naive UI 主题覆盖集中放在根组件，确保所有动态加载视图共享同一套暗色交易终端风格。
 const accentColor = '#f5b625'
 const accentColorHover = '#ffcf55'
 const accentColorPressed = '#c58e14'
@@ -70,6 +73,7 @@ const themeOverrides: GlobalThemeOverrides = {
 
 onMounted(() => {
   void store.bootstrap()
+  // 后台同步使用 silent 请求，不清空前台错误提示，也不会自动开启自动策略。
   syncTimer = window.setInterval(() => {
     if (store.settings?.connected) {
       void store.syncLiveState({ silent: true })

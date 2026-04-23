@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 持仓与现货视图。
+// 展示期权义务仓和现货资产；所有资金事实来自后端快照，前端仅做展示聚合。
 import { computed } from 'vue'
 import DonutChart from '@/components/common/DonutChart.vue'
 import Panel from '@/components/common/Panel.vue'
@@ -11,6 +13,7 @@ const { decimal, money } = useFormat()
 const obligationOrders = computed(() =>
   store.orders.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
 )
+// 这里的义务仓暴露额用于 UI 概览，真实保证金校验仍在 Rust 风控中完成。
 const sellPutMargin = computed(() =>
   obligationOrders.value
     .filter(order => order.direction === 'sellPut')

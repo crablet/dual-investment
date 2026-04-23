@@ -1,6 +1,21 @@
+// 事件日历派生逻辑。
+//
+// 日历只从当前应用快照派生订单、到期、结算、补齐、自动复投、风险、恢复和系统事件。
+// 审计事件通过 allowlist 映射，未知审计消息不会直接铺到前端，避免敏感上下文泄漏。
+
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { useAppStore, type AppViewId } from '@/stores/app'
 import type { AuditEvent, OrderAttemptView, RiskAlert, StrategyOrder } from '@/types/domain'
+import {
+  addDays,
+  formatDateKey,
+  localDateKey,
+  localTimeLabel,
+  parseDateKey,
+  scheduleTimeLabel,
+  startOfDay,
+} from '@/utils/date'
+import { attemptStatusText, strategyStatusText } from '@/utils/labels'
 
 export type CalendarEventType =
   | 'order'
@@ -49,6 +64,11 @@ export const calendarEventTypes: CalendarEventTypeMeta[] = [
   { id: 'system', label: '系统', tone: 'gray' },
 ]
 
+/**
+ * 根据可见日期范围派生日历事件。
+ *
+ * 返回值是 computed，组件只负责筛选和展示，不维护独立日程数据。
+ */
 export function useCalendarEvents(options: UseCalendarEventsOptions) {
   const store = useAppStore()
 
@@ -93,6 +113,7 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
   }
 }
 
+/** 从策略订单派生下单、到期、结算和现货补齐事件。 */
 function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
   const direction = order.direction === 'sellPut' ? '低买 BTC' : '高卖 BTC'
   const rows: CalendarEvent[] = [
@@ -112,7 +133,7 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
       type: 'expiry',
       date: order.expiry,
       title: `${direction} 到期日`,
-      detail: `${order.optionSymbol}，执行价 ${order.strike}，状态 ${orderStatusText(order.status)}`,
+      detail: `${order.optionSymbol}，执行价 ${order.strike}，状态 ${strategyStatusText(order.status)}`,
       tone: 'purple',
       targetView: 'orders',
       priority: 70,
@@ -150,6 +171,7 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
   return rows
 }
 
+/** 从风控提醒派生日历事件。 */
 function eventFromRiskAlert(alert: RiskAlert): CalendarEvent {
   return {
     id: `risk-${alert.id}`,
@@ -164,6 +186,7 @@ function eventFromRiskAlert(alert: RiskAlert): CalendarEvent {
   }
 }
 
+/** 从恢复记录派生日历事件；已持久化成功的记录不再提示待办。 */
 function eventFromOrderAttempt(attempt: OrderAttemptView): CalendarEvent | undefined {
   if (attempt.status === 'persisted' || attempt.status === 'spot_persisted') {
     return undefined
@@ -182,6 +205,7 @@ function eventFromOrderAttempt(attempt: OrderAttemptView): CalendarEvent | undef
   }
 }
 
+/** 审计事件 allowlist 映射。未知 kind 返回 undefined，不展示原始 message。 */
 function eventFromAudit(audit: AuditEvent): CalendarEvent | undefined {
   const base = {
     date: localDateKey(audit.createdAt),
@@ -243,6 +267,7 @@ function eventFromAudit(audit: AuditEvent): CalendarEvent | undefined {
   return undefined
 }
 
+/** 按当前自动规则生成可见日期范围内的计划扫描事件。 */
 function autoEventsBetween(
   start: Date,
   end: Date,
@@ -279,6 +304,7 @@ function hasRebalanceEvent(order: StrategyOrder) {
     || decimalStringHasValue(order.spotFilledQuantity)
 }
 
+/** 同日事件按优先级高的先展示。 */
 function compareEvents(left: CalendarEvent, right: CalendarEvent) {
   const dateCompare = left.date.localeCompare(right.date)
   if (dateCompare !== 0) return dateCompare
@@ -286,87 +312,13 @@ function compareEvents(left: CalendarEvent, right: CalendarEvent) {
   return (left.timeLabel ?? '').localeCompare(right.timeLabel ?? '')
 }
 
+/** 判断日期键是否位于可见范围内。 */
 function isDateInRange(dateKey: string, start: Date, end: Date) {
   const date = parseDateKey(dateKey)
   return date >= start && date <= end
 }
 
-function localDateKey(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value.slice(0, 10)
-  }
-  return formatDateKey(date)
-}
-
-function localTimeLabel(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return undefined
-  }
-  return date.toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-}
-
-function scheduleTimeLabel(schedule: string) {
-  const matched = schedule.match(/([01]?\d|2[0-3]):([0-5]\d)/)
-  if (!matched) {
-    return '计划'
-  }
-  return `${matched[1].padStart(2, '0')}:${matched[2]}`
-}
-
-function formatDateKey(date: Date) {
-  const year = date.getFullYear()
-  const month = `${date.getMonth() + 1}`.padStart(2, '0')
-  const day = `${date.getDate()}`.padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function parseDateKey(dateKey: string) {
-  const [year, month, day] = dateKey.split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
-
-function startOfDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date)
-  next.setDate(next.getDate() + days)
-  return next
-}
-
-function orderStatusText(status: StrategyOrder['status']) {
-  const statusMap: Record<StrategyOrder['status'], string> = {
-    pending: '待成交',
-    running: '进行中',
-    settled: '已结算',
-    cancelled: '已取消',
-    rejected: '已拒绝',
-    expired: '已过期',
-    partiallyFilled: '部分成交',
-    rebalanceFailed: '补齐失败',
-  }
-  return statusMap[status]
-}
-
-function attemptStatusText(status: string) {
-  const statusMap: Record<string, string> = {
-    attempted: '准备发送期权订单',
-    exchange_ack: '交易所已接单',
-    persist_failed: '订单保存失败',
-    spot_attempted: '准备发送现货补齐',
-    spot_exchange_ack: '现货交易所已接单',
-    spot_persist_failed: '现货补齐保存失败',
-  }
-  return statusMap[status] ?? status
-}
-
+/** 判断 Decimal 字符串是否有非零值。 */
 function decimalStringHasValue(value: string) {
   return !/^0(?:\.0+)?$/.test(value)
 }

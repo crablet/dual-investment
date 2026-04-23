@@ -1,3 +1,9 @@
+//! Binance 实盘接口封装。
+//!
+//! 这个模块是唯一允许拼接 Binance 请求、签名参数和解析交易所响应的地方。
+//! 上层策略与 Tauri command 只接收已经归一化的领域结构，避免前端或策略层接触
+//! API Secret、签名 query 或交易所原始响应。
+
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -16,6 +22,9 @@ use crate::domain::{
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Binance HTTP 客户端。
+///
+/// `api_secret` 只保存在 Rust 内存里用于签名，不能进入日志、审计事件或前端状态。
 #[derive(Clone)]
 pub struct BinanceClient {
     http: Client,
@@ -27,6 +36,7 @@ pub struct BinanceClient {
 }
 
 impl BinanceClient {
+    /// 创建带固定超时的 Binance 客户端。
     pub fn new(api_key: String, api_secret: String) -> AppResult<Self> {
         let http = Client::builder()
             .timeout(Duration::from_secs(12))
@@ -42,6 +52,9 @@ impl BinanceClient {
         })
     }
 
+    /// 验证期权账户是否可交易。
+    ///
+    /// 连接阶段会先调用这个方法，避免 UI 显示已连接但后续真实下单被权限拒绝。
     pub async fn verify_account(&self) -> AppResult<OptionAccountSnapshot> {
         let account = self.option_account().await?;
         if !account.can_trade {
@@ -52,6 +65,7 @@ impl BinanceClient {
         Ok(account)
     }
 
+    /// 查询期权保证金账户。
     pub async fn option_account(&self) -> AppResult<OptionAccountSnapshot> {
         let response = self
             .signed_get(&self.eapi_base, "/eapi/v1/marginAccount", Vec::new())
@@ -59,6 +73,7 @@ impl BinanceClient {
         parse_account_snapshot(&response)
     }
 
+    /// 查询期权合约元数据。
     pub async fn exchange_info(&self) -> AppResult<Vec<OptionContract>> {
         let response = self
             .public_get(&self.eapi_base, "/eapi/v1/exchangeInfo")
@@ -66,11 +81,15 @@ impl BinanceClient {
         parse_exchange_info(&response)
     }
 
+    /// 查询期权 mark price，用于候选估算与价格上下限校验。
     pub async fn option_mark_prices(&self) -> AppResult<Vec<OptionMarkPrice>> {
         let response = self.public_get(&self.eapi_base, "/eapi/v1/mark").await?;
         parse_mark_prices(&response)
     }
 
+    /// 发送真实 Binance 期权卖出限价 IOC 订单。
+    ///
+    /// 调用方必须已经完成显式确认、合约匹配和风控校验。
     pub async fn place_option_order(
         &self,
         request: &StrategyRequest,
@@ -99,6 +118,9 @@ impl BinanceClient {
             .await
     }
 
+    /// 按交易所订单号或客户端订单号查询期权订单。
+    ///
+    /// 恢复流程依赖这个方法重新读取 Binance 事实，不能用本地恢复记录直接造订单。
     pub async fn query_option_order(
         &self,
         symbol: &str,
@@ -118,6 +140,7 @@ impl BinanceClient {
         parse_order_ack(&response)
     }
 
+    /// 查询 Binance 现货账户，用于到期 ITM 后补齐前检查可用资产。
     pub async fn spot_account(&self) -> AppResult<SpotAccountSnapshot> {
         let response = self
             .signed_get(&self.spot_base, "/api/v3/account", Vec::new())
@@ -125,6 +148,7 @@ impl BinanceClient {
         parse_spot_account(&response)
     }
 
+    /// 查询现货价格。当前 v1 固定用于 `BTCUSDT`。
     pub async fn spot_price(&self, symbol: &str) -> AppResult<Decimal> {
         let response = self
             .public_get(
@@ -135,6 +159,7 @@ impl BinanceClient {
         decimal_field(&response, "price")
     }
 
+    /// 查询期权行权记录，优先用于确定到期结算参考价。
     pub async fn exercise_records(
         &self,
         symbol: &str,
@@ -155,6 +180,9 @@ impl BinanceClient {
         parse_exercise_records(&response)
     }
 
+    /// 发送真实 Binance 现货市价补齐订单。
+    ///
+    /// 目前入口由结算流程控制；保留 `dead_code` 是因为补齐流程可能受功能开关或测试路径影响。
     #[allow(dead_code)]
     pub async fn place_spot_market_order(
         &self,
@@ -174,6 +202,7 @@ impl BinanceClient {
             .await
     }
 
+    /// 查询现货订单，用于同步和恢复补齐状态。
     pub async fn query_spot_order(
         &self,
         symbol: &str,
@@ -193,6 +222,9 @@ impl BinanceClient {
         parse_order_ack(&response)
     }
 
+    /// 发送带签名的 GET 请求。
+    ///
+    /// 返回值仍是 JSON，只在本模块内继续解析，避免把原始响应扩散到其他层。
     pub async fn signed_get(
         &self,
         base: &str,
@@ -216,6 +248,7 @@ impl BinanceClient {
         Self::decode_response(status, &body)
     }
 
+    /// 发送不需要签名的行情/合约查询请求。
     async fn public_get(&self, base: &str, path: &str) -> AppResult<Value> {
         let response = self
             .http
@@ -231,6 +264,7 @@ impl BinanceClient {
         Self::decode_response(status, &body)
     }
 
+    /// 发送带签名的 POST 请求并归一化订单回报。
     async fn signed_post(
         &self,
         base: &str,
@@ -255,6 +289,9 @@ impl BinanceClient {
         parse_order_ack(&response_json)
     }
 
+    /// 生成 Binance 签名参数。
+    ///
+    /// 签名 query 只在内存中存在；错误消息不能包含 query 或签名值。
     fn signed_params(&self, mut params: Vec<(String, String)>) -> AppResult<Vec<(String, String)>> {
         params.push((
             "timestamp".to_string(),
@@ -270,6 +307,9 @@ impl BinanceClient {
         Ok(params)
     }
 
+    /// 解码 Binance HTTP 响应。
+    ///
+    /// 非 2xx 响应只返回 code/msg 摘要，不把完整响应体带到错误文本里。
     fn decode_response(status: StatusCode, body: &str) -> AppResult<Value> {
         if !status.is_success() {
             if let Ok(value) = serde_json::from_str::<Value>(body) {
@@ -309,6 +349,7 @@ fn request_error(method: &str, path: &str, error: &reqwest::Error) -> AppError {
     AppError::Binance(format!("Binance {method} {path} {reason}"))
 }
 
+/// 解析期权账户快照，字段名保持贴近 Binance EAPI 响应。
 fn parse_account_snapshot(value: &Value) -> AppResult<OptionAccountSnapshot> {
     let assets = value
         .get("asset")
@@ -318,21 +359,16 @@ fn parse_account_snapshot(value: &Value) -> AppResult<OptionAccountSnapshot> {
         .map(parse_asset_balance)
         .collect::<AppResult<Vec<_>>>()?;
 
-    let time = value
-        .get("time")
-        .and_then(Value::as_i64)
-        .and_then(DateTime::<Utc>::from_timestamp_millis);
-
     Ok(OptionAccountSnapshot {
         assets,
         can_trade: value
             .get("canTrade")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        time,
     })
 }
 
+/// 解析单个期权保证金资产。
 fn parse_asset_balance(value: &Value) -> AppResult<OptionAssetBalance> {
     Ok(OptionAssetBalance {
         asset: string_field(value, "asset")?,
@@ -346,6 +382,7 @@ fn parse_asset_balance(value: &Value) -> AppResult<OptionAssetBalance> {
     })
 }
 
+/// 解析现货账户快照。
 fn parse_spot_account(value: &Value) -> AppResult<SpotAccountSnapshot> {
     let balances = value
         .get("balances")
@@ -364,6 +401,7 @@ fn parse_spot_account(value: &Value) -> AppResult<SpotAccountSnapshot> {
     })
 }
 
+/// 解析单个现货资产余额。
 fn parse_spot_asset_balance(value: &Value) -> AppResult<SpotAssetBalance> {
     Ok(SpotAssetBalance {
         asset: string_field(value, "asset")?,
@@ -372,6 +410,7 @@ fn parse_spot_asset_balance(value: &Value) -> AppResult<SpotAssetBalance> {
     })
 }
 
+/// 解析期权合约列表。
 fn parse_exchange_info(value: &Value) -> AppResult<Vec<OptionContract>> {
     value
         .get("optionSymbols")
@@ -384,6 +423,7 @@ fn parse_exchange_info(value: &Value) -> AppResult<Vec<OptionContract>> {
         .collect()
 }
 
+/// 解析单个期权合约，包含精度和保证金参数。
 fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
     let expiry_ms = value
         .get("expiryDate")
@@ -413,6 +453,7 @@ fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
     })
 }
 
+/// 解析 mark price 列表。
 fn parse_mark_prices(value: &Value) -> AppResult<Vec<OptionMarkPrice>> {
     value
         .as_array()
@@ -422,6 +463,7 @@ fn parse_mark_prices(value: &Value) -> AppResult<Vec<OptionMarkPrice>> {
         .collect()
 }
 
+/// 解析单条 mark price。
 fn parse_mark_price(value: &Value) -> AppResult<OptionMarkPrice> {
     Ok(OptionMarkPrice {
         symbol: string_field(value, "symbol")?,
@@ -433,6 +475,9 @@ fn parse_mark_price(value: &Value) -> AppResult<OptionMarkPrice> {
     })
 }
 
+/// 归一化期权/现货订单响应。
+///
+/// Binance 不同接口的成交数量、均价和手续费字段不完全一致，这里集中兼容。
 fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
     let order_id = value
         .get("orderId")
@@ -484,6 +529,7 @@ fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
     })
 }
 
+/// 从现货订单累计成交额反推均价。
 fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> Option<Decimal> {
     if executed_qty <= Decimal::ZERO {
         return None;
@@ -503,6 +549,7 @@ fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> Option<D
     }
 }
 
+/// 从现货 fills 汇总手续费。
 fn fee_from_fills(value: &Value) -> Option<Decimal> {
     value
         .get("fills")
@@ -516,6 +563,9 @@ fn fee_from_fills(value: &Value) -> Option<Decimal> {
         .filter(|fee| *fee > Decimal::ZERO)
 }
 
+/// 解析行权记录。
+///
+/// Binance 历史接口可能返回数组、`data` 或 `rows` 包装，这里只提取结算价相关字段。
 fn parse_exercise_records(value: &Value) -> AppResult<Vec<ExerciseRecord>> {
     let rows = value
         .as_array()
@@ -538,6 +588,7 @@ fn parse_exercise_records(value: &Value) -> AppResult<Vec<ExerciseRecord>> {
         .collect()
 }
 
+/// 读取必填字符串字段，空字符串视为缺失。
 fn string_field(value: &Value, key: &str) -> AppResult<String> {
     value
         .get(key)
@@ -546,6 +597,7 @@ fn string_field(value: &Value, key: &str) -> AppResult<String> {
         .ok_or_else(|| AppError::Binance(format!("Binance 响应缺少 {key} 字段")))
 }
 
+/// 读取必填 u32 字段。
 fn u32_field(value: &Value, key: &str) -> AppResult<u32> {
     let text = value
         .get(key)
@@ -555,11 +607,15 @@ fn u32_field(value: &Value, key: &str) -> AppResult<u32> {
         .map_err(|error| AppError::Binance(format!("Binance 字段 {key} 无法解析：{error}")))
 }
 
+/// 读取必填 Decimal 字段。
 fn decimal_field(value: &Value, key: &str) -> AppResult<Decimal> {
     optional_decimal_field(value, key)?
         .ok_or_else(|| AppError::Binance(format!("Binance 响应缺少 {key} 字段")))
 }
 
+/// 读取可选 Decimal 字段。
+///
+/// Binance 数字字段可能以字符串或数字形式返回，统一先转字符串再解析成 Decimal。
 fn optional_decimal_field(value: &Value, key: &str) -> AppResult<Option<Decimal>> {
     value
         .get(key)
@@ -572,6 +628,7 @@ fn optional_decimal_field(value: &Value, key: &str) -> AppResult<Option<Decimal>
         .transpose()
 }
 
+/// 把 JSON 标量转为字符串；数组和对象不参与金融字段解析。
 fn value_to_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -581,6 +638,7 @@ fn value_to_string(value: &Value) -> String {
     }
 }
 
+/// 构造 Binance 签名原文。
 fn encode_query(params: &[(String, String)]) -> String {
     params
         .iter()
@@ -589,6 +647,7 @@ fn encode_query(params: &[(String, String)]) -> String {
         .join("&")
 }
 
+/// 根据双币赢方向决定现货补齐方向。
 #[allow(dead_code)]
 pub const fn spot_rebalance_side(direction: StrategyDirection) -> &'static str {
     match direction {

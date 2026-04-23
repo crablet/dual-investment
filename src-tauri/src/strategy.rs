@@ -1,3 +1,8 @@
+//! 策略计算与风控派生逻辑。
+//!
+//! 这个模块只处理纯业务计算：候选过滤、收益估算、风险快照、订单状态归一化和
+//! 自动复投默认规则。它不直接访问 Binance、不保存数据，也不读取系统凭据。
+
 use std::collections::HashMap;
 
 use chrono::Utc;
@@ -6,16 +11,19 @@ use rust_decimal_macros::dec;
 use uuid::Uuid;
 
 use crate::domain::{
-    AppSettings, AutoInvestmentRule, BalanceRow, CandidateScanDiagnostics, CandidateScanResult,
-    ChartPoint, ExchangeOrderAck, MetricCard, OptionAccountSnapshot, OptionContract,
-    OptionMarkPrice, PnlBreakdown, PnlReport, RecommendationLevel, RiskAlert, RiskRuleSet,
-    RiskSeverity, RiskSnapshot, SpotAccountSnapshot, StrategyCandidate, StrategyDirection,
-    StrategyOrder, StrategyPreview, StrategyRequest, StrategyStatus,
+    AutoInvestmentRule, BalanceRow, CandidateScanDiagnostics, CandidateScanResult, ChartPoint,
+    ExchangeOrderAck, OptionAccountSnapshot, OptionContract, OptionMarkPrice, PnlReport,
+    RecommendationLevel, RiskAlert, RiskRuleSet, RiskSeverity, RiskSnapshot, SpotAccountSnapshot,
+    StrategyCandidate, StrategyDirection, StrategyOrder, StrategyPreview, StrategyRequest,
+    StrategyStatus,
 };
 
 const BROWSE_MIN_DAYS_TO_EXPIRY: i64 = 1;
 const BROWSE_MAX_DAYS_TO_EXPIRY: i64 = 90;
 
+/// 创建默认自动复投规则。
+///
+/// `enabled` 由调用方传入；应用启动时会强制关闭自动执行，防止重启后直接自动下单。
 pub fn default_auto_rule(enabled: bool) -> AutoInvestmentRule {
     AutoInvestmentRule {
         enabled,
@@ -31,86 +39,7 @@ pub fn default_auto_rule(enabled: bool) -> AutoInvestmentRule {
     }
 }
 
-pub fn build_metrics(
-    settings: &AppSettings,
-    account: Option<&OptionAccountSnapshot>,
-    orders: &[StrategyOrder],
-) -> Vec<MetricCard> {
-    let sync_state = if settings.connected {
-        if let Some(time) = account.and_then(|snapshot| snapshot.time) {
-            format!("Binance {}", time.format("%H:%M:%S UTC"))
-        } else if account.is_some() {
-            "Binance 期权账户".to_string()
-        } else {
-            "等待数据同步".to_string()
-        }
-    } else {
-        "等待 API 连接".to_string()
-    };
-    let usdt = account.and_then(|snapshot| snapshot.asset("USDT"));
-    let total_equity = usdt.map_or(Decimal::ZERO, |asset| {
-        if asset.adjusted_equity > Decimal::ZERO {
-            asset.adjusted_equity
-        } else {
-            asset.equity
-        }
-    });
-    let available_margin = usdt.map_or(Decimal::ZERO, |asset| asset.available);
-    let today_premium = today_option_premium(orders);
-    vec![
-        MetricCard {
-            id: "portfolio".to_string(),
-            title: "总资产估值".to_string(),
-            value: format_money(total_equity),
-            sub_value: sync_state.clone(),
-            change: "Binance".to_string(),
-            icon: "wallet".to_string(),
-            tone: "gold".to_string(),
-        },
-        MetricCard {
-            id: "margin".to_string(),
-            title: "可用保证金".to_string(),
-            value: format_money(available_margin),
-            sub_value: sync_state.clone(),
-            change: "Binance".to_string(),
-            icon: "shield".to_string(),
-            tone: "blue".to_string(),
-        },
-        MetricCard {
-            id: "premium".to_string(),
-            title: "今日权利金".to_string(),
-            value: format_money(today_premium),
-            sub_value: "今日".to_string(),
-            change: "订单".to_string(),
-            icon: "coins".to_string(),
-            tone: "gold".to_string(),
-        },
-        MetricCard {
-            id: "status".to_string(),
-            title: "运行状态".to_string(),
-            value: if settings.auto_enabled {
-                "运行中"
-            } else if settings.connected {
-                "已连接"
-            } else {
-                "未连接"
-            }
-            .to_string(),
-            sub_value: "Tauri 客户端".to_string(),
-            change: sync_state.clone(),
-            icon: "activity".to_string(),
-            tone: if settings.auto_enabled {
-                "green"
-            } else if settings.connected {
-                "gold"
-            } else {
-                "gray"
-            }
-            .to_string(),
-        },
-    ]
-}
-
+/// 构造空收益报告。
 pub fn empty_pnl_report() -> PnlReport {
     PnlReport {
         cumulative: Decimal::ZERO,
@@ -120,10 +49,10 @@ pub fn empty_pnl_report() -> PnlReport {
         floating_spot: Decimal::ZERO,
         fees: Decimal::ZERO,
         points: Vec::new(),
-        breakdown: Vec::new(),
     }
 }
 
+/// 从期权保证金账户构造前端资产行。
 pub fn build_balances(account: &OptionAccountSnapshot) -> Vec<BalanceRow> {
     account
         .assets
@@ -142,6 +71,9 @@ pub fn build_balances(account: &OptionAccountSnapshot) -> Vec<BalanceRow> {
         .collect()
 }
 
+/// 从现货账户构造前端资产行。
+///
+/// 当前 v1 只估值 USDT 和 BTC，其他资产保留数量但 USDT 估值为 0。
 pub fn build_spot_balances(
     account: &SpotAccountSnapshot,
     btc_usdt_price: Decimal,
@@ -166,10 +98,9 @@ pub fn build_spot_balances(
         .collect()
 }
 
-pub fn pnl_report_from_orders(orders: &[StrategyOrder]) -> PnlReport {
-    pnl_report_from_orders_with_spot(orders, None)
-}
-
+/// 从真实订单和现货价格派生收益报告。
+///
+/// 权利金、手续费和现货补齐浮动盈亏都来自已保存订单字段；没有订单时返回空报告。
 pub fn pnl_report_from_orders_with_spot(
     orders: &[StrategyOrder],
     spot_price: Option<Decimal>,
@@ -202,34 +133,10 @@ pub fn pnl_report_from_orders_with_spot(
         floating_spot,
         fees,
         points: Vec::<ChartPoint>::new(),
-        breakdown: if cumulative == Decimal::ZERO && option_premium == Decimal::ZERO {
-            Vec::new()
-        } else {
-            vec![
-                PnlBreakdown {
-                    label: "期权权利金".to_string(),
-                    value: option_premium,
-                    color: "#d89b2b".to_string(),
-                },
-                PnlBreakdown {
-                    label: "手续费".to_string(),
-                    value: -fees,
-                    color: "#cc4b37".to_string(),
-                },
-                PnlBreakdown {
-                    label: "现货补齐浮动盈亏".to_string(),
-                    value: floating_spot,
-                    color: if floating_spot >= Decimal::ZERO {
-                        "#2fa66a".to_string()
-                    } else {
-                        "#cc4b37".to_string()
-                    },
-                },
-            ]
-        },
     }
 }
 
+/// 构造未连接状态下的空风险快照。
 pub fn empty_risk_snapshot() -> RiskSnapshot {
     RiskSnapshot {
         score: 0,
@@ -242,6 +149,7 @@ pub fn empty_risk_snapshot() -> RiskSnapshot {
     }
 }
 
+/// 从期权账户保证金信息派生风险快照。
 pub fn risk_snapshot_from_account(account: &OptionAccountSnapshot) -> RiskSnapshot {
     let rules = default_risk_rules();
     let usdt = account.asset("USDT");
@@ -299,6 +207,10 @@ pub fn risk_snapshot_from_account(account: &OptionAccountSnapshot) -> RiskSnapsh
     }
 }
 
+/// 根据 Binance 合约、mark price、账户和规则构造候选列表。
+///
+/// 候选可见范围固定为到期 1-90 天；自动复投规则只影响推荐等级，不决定候选是否可见。
+/// 方向过滤必须使用 BTCUSDT 现货价：低买只保留现货价下方 Put，高卖只保留现货价上方 Call。
 #[allow(clippy::too_many_lines)]
 pub fn build_candidates(
     contracts: &[OptionContract],
@@ -360,6 +272,7 @@ pub fn build_candidates(
 
         if let Some(candidate) = (|| {
             let direction = direction_from_option_side(&contract.side)?;
+            // 候选方向必须先经过现货价过滤，避免把价外方向错误展示成双币赢机会。
             if !strike_matches_direction(contract.strike_price, direction, spot_price) {
                 return None;
             }
@@ -399,6 +312,7 @@ pub fn build_candidates(
             let available_margin = account
                 .asset("USDT")
                 .map_or(Decimal::ZERO, |asset| asset.available);
+            // 规则命中只影响推荐等级；不命中规则但仍有保证金的候选会保留为 Watch，方便排查。
             let passes_rule = rule.include_btc
                 && (!rule.exclude_same_direction || !has_open_direction(direction))
                 && days_to_expiry >= rule.min_days_to_expiry
@@ -468,6 +382,9 @@ pub fn build_candidates(
     }
 }
 
+/// 基于下单请求构造本地预览。
+///
+/// 预览用于 UI 展示和订单字段初始计算，真实下单仍必须经过合约解析、风控和 Binance 回报。
 pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
     let premium = (request.limit_price * request.quantity).round_dp(2);
     let breakeven = match request.direction {
@@ -533,6 +450,9 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
     }
 }
 
+/// 从下单请求和 Binance 订单回报构造本地订单。
+///
+/// 成交数量、均价、手续费和交易所状态以 `ack` 为准；请求只提供策略方向和用户确认的参数。
 pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> StrategyOrder {
     let preview = preview_strategy(request);
     let now = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
@@ -583,6 +503,7 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
     }
 }
 
+/// 估算年化收益率。
 fn estimate_annualized(
     premium: Decimal,
     strike: Decimal,
@@ -597,6 +518,9 @@ fn estimate_annualized(
     ((premium / reserved) * (dec!(365) / days) * dec!(100)).round_dp(2)
 }
 
+/// 估算下单所需保证金。
+///
+/// 卖 Put 需要覆盖名义本金；卖 Call 按 Binance 合约保证金参数估算。
 pub fn required_margin(
     contract: &OptionContract,
     direction: StrategyDirection,
@@ -621,6 +545,9 @@ pub fn required_margin(
     }
 }
 
+/// 把 Binance 订单状态映射成本地策略状态。
+///
+/// IOC 订单可能返回 `CANCELED` 但已经部分成交，因此需要结合成交数量判断。
 pub fn status_from_exchange(
     status: &str,
     executed_qty: Decimal,
@@ -661,6 +588,7 @@ fn direction_from_option_side(side: &str) -> Option<StrategyDirection> {
     }
 }
 
+/// 校验执行价是否符合双币赢方向。
 fn strike_matches_direction(
     strike: Decimal,
     direction: StrategyDirection,
@@ -672,6 +600,7 @@ fn strike_matches_direction(
     }
 }
 
+/// 计算执行价相对现货价的偏离百分比。
 fn calculate_strike_distance_percent(strike: Decimal, spot_price: Decimal) -> Decimal {
     if spot_price <= Decimal::ZERO {
         return Decimal::ZERO;
@@ -679,6 +608,7 @@ fn calculate_strike_distance_percent(strike: Decimal, spot_price: Decimal) -> De
     (((strike - spot_price) / spot_price) * dec!(100)).round_dp(2)
 }
 
+/// 推荐等级排序权重。
 fn recommendation_rank(level: RecommendationLevel) -> u8 {
     match level {
         RecommendationLevel::Reject => 0,
@@ -687,6 +617,7 @@ fn recommendation_rank(level: RecommendationLevel) -> u8 {
     }
 }
 
+/// 候选排序：推荐优先，其次年化高优先，再按到期日近优先。
 fn sort_candidates(candidates: &mut [StrategyCandidate]) {
     candidates.sort_by(|left, right| {
         recommendation_rank(right.recommendation)
@@ -696,6 +627,7 @@ fn sort_candidates(candidates: &mut [StrategyCandidate]) {
     });
 }
 
+/// 默认风控规则。
 fn default_risk_rules() -> RiskRuleSet {
     RiskRuleSet {
         max_single_order_usdt: dec!(500),
@@ -706,6 +638,7 @@ fn default_risk_rules() -> RiskRuleSet {
     }
 }
 
+/// 统计当天订单权利金。
 fn today_option_premium(orders: &[StrategyOrder]) -> Decimal {
     let today = Utc::now().date_naive();
     orders
@@ -715,6 +648,7 @@ fn today_option_premium(orders: &[StrategyOrder]) -> Decimal {
         .sum::<Decimal>()
 }
 
+/// 计算百分比，分母为 0 时交给调用方决定默认值。
 fn percent_of(part: Decimal, total: Decimal) -> Option<Decimal> {
     if total <= Decimal::ZERO {
         None
@@ -723,14 +657,12 @@ fn percent_of(part: Decimal, total: Decimal) -> Option<Decimal> {
     }
 }
 
-fn format_money(value: Decimal) -> String {
-    format!("{} USDT", value.round_dp(2))
-}
-
+/// Decimal 绝对值，避免为了简单计算把金融字段转成浮点数。
 fn abs_decimal(value: Decimal) -> Decimal {
     if value < Decimal::ZERO { -value } else { value }
 }
 
+/// Decimal 最大值。
 fn max_decimal(left: Decimal, right: Decimal) -> Decimal {
     if left >= right { left } else { right }
 }
@@ -898,7 +830,6 @@ mod tests {
                 adjusted_equity: available,
             }],
             can_trade: true,
-            time: None,
         }
     }
 

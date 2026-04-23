@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 策略订单视图。
+// 展示真实订单、同步/结算操作和恢复记录；恢复动作会回到 Rust 重新查询 Binance。
 import { RefreshCw, ScanLine } from '@lucide/vue'
 import { computed, shallowRef, watchEffect } from 'vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
@@ -11,6 +13,7 @@ const { directionText, directionTone, money, statusText, statusTone } = useForma
 const selectedId = shallowRef<string>()
 
 watchEffect(() => {
+  // 首次进入或订单列表刷新后，默认选中最新订单，保留用户已有选择。
   if (!selectedId.value && store.orders[0]) {
     selectedId.value = store.orders[0].id
   }

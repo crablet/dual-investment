@@ -1,6 +1,15 @@
+// Rust/Tauri IPC 领域类型。
+//
+// 这些接口镜像 `src-tauri/src/domain.rs` 中序列化到前端的 DTO。金额、价格、数量、
+// 权利金、手续费和收益率都以字符串承接，前端只在展示层临时格式化，不能把这些字段
+// 当作 JavaScript number 再回传为交易事实。
+
+/** Decimal 通过 IPC 以字符串传输，避免金融精度被 JS number 截断。 */
 export type DecimalString = string
 
+/** 双币赢策略方向，来自 Rust `StrategyDirection` 的 camelCase 序列化。 */
 export type StrategyDirection = 'sellPut' | 'sellCall'
+/** 本地订单状态，包含交易所状态归一化和现货补齐失败等本地状态。 */
 export type StrategyStatus =
   | 'pending'
   | 'running'
@@ -13,6 +22,7 @@ export type StrategyStatus =
 export type RecommendationLevel = 'recommended' | 'watch' | 'reject'
 export type RiskSeverity = 'low' | 'medium' | 'high'
 
+/** 前端可见运行设置，不包含明文 API Secret。 */
 export interface AppSettings {
   connected: boolean
   apiKeyMasked?: string
@@ -22,16 +32,7 @@ export interface AppSettings {
   defaultSymbol: string
 }
 
-export interface MetricCard {
-  id: string
-  title: string
-  value: string
-  subValue: string
-  change: string
-  icon: string
-  tone: string
-}
-
+/** 账户资产行，可能来自期权保证金账户或现货账户。 */
 export interface BalanceRow {
   asset: string
   source: string
@@ -40,6 +41,7 @@ export interface BalanceRow {
   usdtValue: DecimalString
 }
 
+/** Binance 实盘合约和 mark price 派生出的候选机会。 */
 export interface StrategyCandidate {
   id: string
   symbol: string
@@ -61,6 +63,7 @@ export interface StrategyCandidate {
   reason: string
 }
 
+/** 候选扫描过滤漏斗，用于解释空列表和规则命中情况。 */
 export interface CandidateScanDiagnostics {
   rawContracts: number
   rawMarks: number
@@ -82,6 +85,7 @@ export interface CandidateScanResult {
   diagnostics: CandidateScanDiagnostics
 }
 
+/** 本地保存的真实策略订单。 */
 export interface StrategyOrder {
   id: string
   exchangeOrderId?: string
@@ -114,6 +118,7 @@ export interface StrategyOrder {
   spotFee: DecimalString
 }
 
+/** 自动复投规则；保存规则不代表已经开启自动策略。 */
 export interface AutoInvestmentRule {
   enabled: boolean
   schedule: string
@@ -127,6 +132,7 @@ export interface AutoInvestmentRule {
   excludeSameDirection: boolean
 }
 
+/** 风控规则集合。 */
 export interface RiskRuleSet {
   maxSingleOrderUsdt: DecimalString
   maxDailyOrders: DecimalString
@@ -135,6 +141,7 @@ export interface RiskRuleSet {
   stopAfterConsecutiveLosses: number
 }
 
+/** 可展示的风险提醒；后端负责保证内容脱敏。 */
 export interface RiskAlert {
   id: string
   severity: RiskSeverity
@@ -143,6 +150,7 @@ export interface RiskAlert {
   createdAt: string
 }
 
+/** 当前风险快照。 */
 export interface RiskSnapshot {
   score: number
   level: string
@@ -158,12 +166,7 @@ export interface ChartPoint {
   value: DecimalString
 }
 
-export interface PnlBreakdown {
-  label: string
-  value: DecimalString
-  color: string
-}
-
+/** 收益报告，图表构成由前端再派生。 */
 export interface PnlReport {
   cumulative: DecimalString
   today: DecimalString
@@ -172,9 +175,9 @@ export interface PnlReport {
   floatingSpot: DecimalString
   fees: DecimalString
   points: ChartPoint[]
-  breakdown: PnlBreakdown[]
 }
 
+/** 审计事件只包含脱敏摘要，不应包含 Secret、签名 query 或原始订单响应。 */
 export interface AuditEvent {
   id: string
   kind: string
@@ -182,6 +185,7 @@ export interface AuditEvent {
   createdAt: string
 }
 
+/** 下单/补齐恢复记录视图。 */
 export interface OrderAttemptView {
   id: string
   clientOrderId: string
@@ -195,17 +199,9 @@ export interface OrderAttemptView {
   updatedAt: string
 }
 
-export interface StrategyPreview {
-  candidate: StrategyCandidate
-  maxProfit: DecimalString
-  reservedAsset: DecimalString
-  protectedLimitPrice: DecimalString
-  summary: string[]
-}
-
+/** 前端一次刷新拿到的完整应用快照。 */
 export interface AppSnapshot {
   settings: AppSettings
-  metrics: MetricCard[]
   balances: BalanceRow[]
   candidates: StrategyCandidate[]
   scanDiagnostics: CandidateScanDiagnostics
@@ -217,11 +213,13 @@ export interface AppSnapshot {
   orderAttempts: OrderAttemptView[]
 }
 
+/** 连接 Binance 的表单请求。Secret 只会传给 Rust keyring 写入流程。 */
 export interface ConnectBinanceRequest {
   apiKey: string
   apiSecret: string
 }
 
+/** 策略下单请求。`confirmLive` 是真实下单门禁。 */
 export interface StrategyRequest {
   candidateId?: string
   symbol: string
@@ -234,6 +232,7 @@ export interface StrategyRequest {
   confirmLive: boolean
 }
 
+/** 开关自动复投请求；开启时必须经过二次确认。 */
 export interface ToggleAutoRequest {
   enabled: boolean
   confirmLive: boolean

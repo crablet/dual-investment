@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 风险控制视图。
+// 展示 Rust 风控快照和义务仓暴露概览；下单拦截仍由 Rust 在实盘下单前执行。
 import { computed } from 'vue'
 import { AlertTriangle, ShieldCheck } from '@lucide/vue'
 import { NButton, NIcon, NProgress, NTag } from 'naive-ui'
@@ -22,12 +24,14 @@ const exposureRows = computed(() => {
   }))
 })
 
+/** 计算方向维度的名义暴露，用于 UI 条形图。 */
 function exposureByDirection(direction: 'sellPut' | 'sellCall') {
   return store.orders
     .filter(order => order.direction === direction)
     .reduce((sum, order) => sum + Number(order.strike) * Number(order.quantity), 0)
 }
 
+/** 映射 Naive UI 标签类型。 */
 function tagType(severity: RiskSeverity) {
   if (severity === 'high') return 'error'
   if (severity === 'medium') return 'warning'

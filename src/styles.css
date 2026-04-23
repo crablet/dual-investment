@@ -1,3 +1,10 @@
+/*
+ * 全局样式入口。
+ *
+ * 这里集中放应用级设计 token、布局网格、通用表格/卡片和跨页面组件样式。
+ * Vue 单文件组件仍优先在各自 `<style scoped>` 中维护局部样式。
+ */
+
 :root {
   color-scheme: dark;
   font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -39,6 +46,7 @@ input {
 }
 
 .app-shell {
+  /* 客户端定位为桌面交易工具，左侧导航固定宽度，右侧工作区承载 1180px 级桌面布局。 */
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
   width: 100%;
@@ -124,6 +132,7 @@ input {
 }
 
 .view-grid {
+  /* 12 栅格用于总览/分析/风控等页面复用，具体 span 类控制模块宽度。 */
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 12px;
@@ -272,6 +281,7 @@ input {
 }
 
 .account-row {
+  /* 账户列表固定为“标签左、数字右”的扫描结构，避免多资产行视觉跳动。 */
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(76px, 42%);
   align-items: center;
@@ -449,6 +459,7 @@ input {
 }
 
 .data-table {
+  /* 多列表格保留最小宽度，窄视口下由外层滚动承接，不压缩到不可读。 */
   width: 100%;
   border-collapse: collapse;
   min-width: 720px;
@@ -620,6 +631,7 @@ input {
 }
 
 .event-calendar-board {
+  /* 日历内部使用 container query，方便嵌入不同宽度的面板时自适应。 */
   container-type: inline-size;
   display: grid;
   gap: 14px;
@@ -1055,6 +1067,7 @@ input {
 }
 
 .dual-workbench {
+  /* 双币赢主工作台左侧浏览候选、右侧固定下单卡片，符合重复扫描和下单的工作流。 */
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(340px, 0.48fr);
   gap: 12px;

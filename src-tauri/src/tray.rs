@@ -1,3 +1,8 @@
+//! 系统托盘入口。
+//!
+//! 托盘只提供打开窗口、暂停自动复投和退出应用三个操作。暂停自动复投走同一套
+//! `toggle_auto_strategy` 状态编排，避免出现 UI 与后台状态不一致。
+
 use tauri::{
     AppHandle, Manager,
     menu::{Menu, MenuItem},
@@ -7,6 +12,7 @@ use tauri::{
 use crate::app_state::AppState;
 use crate::domain::ToggleAutoRequest;
 
+/// 构建系统托盘图标和菜单。
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "打开主界面", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "暂停自动定投", true, None::<&str>)?;
@@ -48,6 +54,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// 显示并聚焦主窗口。
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();

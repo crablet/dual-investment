@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 总览视图。
+// 组合账户、收益、待办、事件日历和快捷候选入口；具体数据都来自 Pinia 快照派生。
 import { computed } from 'vue'
 import CandidateTable from '@/components/common/CandidateTable.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
@@ -32,6 +34,7 @@ const expiringOrdersCount = computed(() => {
     return expiry >= today && expiry <= threshold
   }).length
 })
+// 待办只从当前快照派生，不新增独立任务存储，避免和订单/候选状态漂移。
 const pendingTasks = computed<PendingTask[]>(() => {
   const tasks: PendingTask[] = [
     {
@@ -70,6 +73,7 @@ const autoStatusItems = computed(() => [
 ])
 
 function placeCandidate(candidate: StrategyCandidate) {
+  // 总览快捷下单同样必须显式确认，确认后才把 `confirmLive` 传给 Rust。
   if (!window.confirm('确认发送 Binance 期权订单？')) {
     return
   }
@@ -108,7 +112,7 @@ function placeCandidate(candidate: StrategyCandidate) {
     </Panel>
 
     <Panel title="收益构成" class="span-4">
-      <DonutChart v-if="store.pnl" :items="store.pnl.breakdown" :center="pnlCenter" />
+      <DonutChart v-if="store.pnl" :items="store.pnlBreakdown" :center="pnlCenter" />
     </Panel>
 
     <Panel title="待处理事项" class="span-6">

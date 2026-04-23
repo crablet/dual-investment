@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 事件日历看板。
+// 组件只负责月份、类型筛选和详情列表交互；事件本身由 `useCalendarEvents` 从快照派生。
 import {
   ChevronLeft,
   ChevronRight,
@@ -14,6 +16,15 @@ import {
   type CalendarEventType,
 } from '@/composables/useCalendarEvents'
 import { useAppStore } from '@/stores/app'
+import {
+  addDays,
+  addMonths,
+  formatDateKey,
+  isSameMonth,
+  parseDateKey,
+  startOfMonth,
+  startOfWeek,
+} from '@/utils/date'
 
 interface CalendarDay {
   date: string
@@ -57,6 +68,7 @@ const eventsByDate = computed(() => {
 })
 
 const calendarDays = computed<CalendarDay[]>(() => {
+  // 固定 6 周网格，月份切换时尺寸稳定，避免日历区域跳动。
   return Array.from({ length: 42 }, (_unused, index) => {
     const day = addDays(visibleStart.value, index)
     const date = formatDateKey(day)
@@ -119,39 +131,6 @@ function toneClass(tone: CalendarEventTone) {
   return `tone-${tone}`
 }
 
-function formatDateKey(date: Date) {
-  const year = date.getFullYear()
-  const month = `${date.getMonth() + 1}`.padStart(2, '0')
-  const day = `${date.getDate()}`.padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function parseDateKey(dateKey: string) {
-  const [year, month, day] = dateKey.split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
-
-function startOfMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1)
-}
-
-function startOfWeek(date: Date) {
-  return addDays(date, -date.getDay())
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date)
-  next.setDate(next.getDate() + days)
-  return next
-}
-
-function addMonths(date: Date, months: number) {
-  return new Date(date.getFullYear(), date.getMonth() + months, 1)
-}
-
-function isSameMonth(left: Date, right: Date) {
-  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth()
-}
 </script>
 
 <template>

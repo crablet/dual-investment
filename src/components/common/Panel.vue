@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 通用面板容器。
+// 只负责标题、可选说明和右上角操作插槽，具体业务内容由调用方组合。
 defineProps<{
   title: string
   subtitle?: string

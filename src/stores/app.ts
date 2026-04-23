@@ -1,3 +1,8 @@
+// 应用级 Pinia store。
+//
+// 这里是前端唯一的跨页面状态源：保存 Tauri 快照、请求 loading/error、当前视图，以及
+// 从快照派生出的指标和收益构成。真实业务计算仍以 Rust 返回的快照为准，前端只做展示层派生。
+
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
 import { api } from '@/services/api'
@@ -10,6 +15,7 @@ import type {
   StrategyRequest,
   ToggleAutoRequest,
 } from '@/types/domain'
+import type { MetricCardModel, PnlBreakdownItem } from '@/types/view'
 
 type RequestKey =
   | 'snapshot'
@@ -23,10 +29,12 @@ type RequestKey =
   | 'order'
   | 'rule'
 
+/** 请求包装选项。silent 请求用于后台轮询，不清空前台错误提示。 */
 interface RunOptions {
   silent?: boolean
 }
 
+/** 应用内视图 ID；导航切换统一走 `openView`，以触发对应页面刷新。 */
 export type AppViewId =
   | 'overview'
   | 'dual'
@@ -49,7 +57,13 @@ const emptyPending = (): Record<RequestKey, number> => ({
   rule: 0,
 })
 
+const metricMoneyFormatter = new Intl.NumberFormat('zh-CN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
 export const useAppStore = defineStore('app', () => {
+  // 快照使用 shallowRef：后端每次返回完整对象，前端通过替换根引用触发更新。
   const snapshot = shallowRef<AppSnapshot>()
   const pending = shallowRef(emptyPending())
   const foregroundPending = shallowRef(0)
@@ -62,7 +76,6 @@ export const useAppStore = defineStore('app', () => {
   const backgroundLoading = computed(() => backgroundPending.value > 0)
   const busy = computed(() => Object.values(pending.value).some(count => count > 0))
   const settings = computed(() => snapshot.value?.settings)
-  const metrics = computed(() => snapshot.value?.metrics ?? [])
   const balances = computed(() => snapshot.value?.balances ?? [])
   const candidates = computed(() => snapshot.value?.candidates ?? [])
   const scanDiagnostics = computed(() => snapshot.value?.scanDiagnostics)
@@ -75,6 +88,13 @@ export const useAppStore = defineStore('app', () => {
   const runningOrders = computed(() =>
     orders.value.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
   )
+  // 指标卡和收益构成从快照派生，避免再通过 IPC 请求 Rust 做轻量 UI 聚合。
+  const metrics = computed<MetricCardModel[]>(() => buildMetrics(
+    settings.value,
+    balances.value,
+    pnl.value,
+  ))
+  const pnlBreakdown = computed<PnlBreakdownItem[]>(() => buildPnlBreakdown(pnl.value))
 
   async function run<T>(
     key: RequestKey,
@@ -118,6 +138,7 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  /** 增减单个操作维度的 pending 计数，支持同类请求并发时保持 loading 准确。 */
   function setPending(key: RequestKey, delta: number) {
     pending.value = {
       ...pending.value,
@@ -140,6 +161,7 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  /** 应用启动：先读取快照，再尝试用 keyring 凭据自动连接，但不自动开启策略。 */
   async function bootstrap() {
     await refresh()
     if (snapshot.value?.settings.savedCredentials && !snapshot.value.settings.connected) {
@@ -187,6 +209,7 @@ export const useAppStore = defineStore('app', () => {
     await refreshViewData(view)
   }
 
+  /** 根据视图刷新所需数据。重复点击导航只刷新数据，不会自动开启策略或下单。 */
   async function refreshViewData(view: AppViewId = activeView.value, options: RunOptions = {}) {
     if (view === 'dual') {
       if (settings.value?.connected) {
@@ -282,6 +305,7 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  /** 合并后端返回的更新订单，并按更新时间倒序展示。 */
   function mergeOrders(next: StrategyOrder[], current: StrategyOrder[]) {
     const byId = new Map(current.map(order => [order.id, order]))
     for (const order of next) {
@@ -305,6 +329,7 @@ export const useAppStore = defineStore('app', () => {
     scanDiagnostics,
     orders,
     pnl,
+    pnlBreakdown,
     risk,
     autoRule,
     auditRecent,
@@ -329,3 +354,150 @@ export const useAppStore = defineStore('app', () => {
     refreshViewData,
   }
 })
+
+function buildMetrics(
+  settings: AppSettings | undefined,
+  balances: AppSnapshot['balances'],
+  pnl: AppSnapshot['pnl'] | undefined,
+): MetricCardModel[] {
+  const connected = settings?.connected ?? false
+  const syncState = connected ? 'Binance 账户已同步' : '等待 API 连接'
+  const totalEquity = sumDecimalStrings(balances.map(balance => balance.usdtValue))
+  const availableMargin = balances.find(
+    balance => balance.asset === 'USDT' && balance.source === '期权保证金',
+  )?.free ?? '0'
+  const todayPremium = pnl?.today ?? '0'
+
+  return [
+    {
+      id: 'portfolio',
+      title: '总资产估值',
+      value: formatMetricMoney(totalEquity),
+      subValue: syncState,
+      change: 'Binance',
+      icon: 'wallet',
+      tone: 'gold',
+    },
+    {
+      id: 'margin',
+      title: '可用保证金',
+      value: formatMetricMoney(availableMargin),
+      subValue: syncState,
+      change: 'Binance',
+      icon: 'shield',
+      tone: 'blue',
+    },
+    {
+      id: 'premium',
+      title: '今日权利金',
+      value: formatMetricMoney(todayPremium),
+      subValue: '今日',
+      change: '订单',
+      icon: 'coins',
+      tone: 'gold',
+    },
+    {
+      id: 'status',
+      title: '运行状态',
+      value: settings?.autoEnabled ? '运行中' : connected ? '已连接' : '未连接',
+      subValue: 'Tauri 客户端',
+      change: syncState,
+      icon: 'activity',
+      tone: settings?.autoEnabled ? 'green' : connected ? 'gold' : 'gray',
+    },
+  ]
+}
+
+/** 从收益报告派生图表构成。负数手续费在前端作为支出显示。 */
+function buildPnlBreakdown(report: AppSnapshot['pnl'] | undefined): PnlBreakdownItem[] {
+  if (!report || (isZeroDecimalString(report.cumulative) && isZeroDecimalString(report.optionPremium))) {
+    return []
+  }
+
+  return [
+    {
+      label: '期权权利金',
+      value: report.optionPremium,
+      color: '#d89b2b',
+    },
+    {
+      label: '手续费',
+      value: negateDecimalString(report.fees),
+      color: '#cc4b37',
+    },
+    {
+      label: '现货补齐浮动盈亏',
+      value: report.floatingSpot,
+      color: isNegativeDecimalString(report.floatingSpot) ? '#cc4b37' : '#2fa66a',
+    },
+  ]
+}
+
+function formatMetricMoney(value: string) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return `${value} USDT`
+  }
+  return `${metricMoneyFormatter.format(numeric)} USDT`
+}
+
+/**
+ * 汇总 Decimal 字符串。
+ *
+ * 前端这里只做轻量展示聚合，用 BigInt 对齐小数位，避免把金额先转成 number 再求和。
+ */
+function sumDecimalStrings(values: string[]) {
+  const parsed = values.map(parseDecimalString)
+  const scale = Math.max(0, ...parsed.map(value => value.scale))
+  const total = parsed.reduce((sum, value) => {
+    const multiplier = 10n ** BigInt(scale - value.scale)
+    return sum + value.units * multiplier
+  }, 0n)
+  return formatScaledDecimal(total, scale)
+}
+
+/** 把 Decimal 字符串拆成整数单位和小数位数。非法输入按 0 处理，避免 UI 派生中断。 */
+function parseDecimalString(raw: string) {
+  const matched = raw.trim().match(/^([+-])?(\d+)(?:\.(\d+))?$/)
+  if (!matched) {
+    return { units: 0n, scale: 0 }
+  }
+  const [, sign, integer, fraction = ''] = matched
+  const digits = `${integer}${fraction}`.replace(/^0+(?=\d)/, '') || '0'
+  const direction = sign === '-' ? -1n : 1n
+  return {
+    units: BigInt(digits) * direction,
+    scale: fraction.length,
+  }
+}
+
+/** 把对齐后的整数单位格式化回 Decimal 字符串。 */
+function formatScaledDecimal(units: bigint, scale: number) {
+  if (scale === 0) {
+    return units.toString()
+  }
+  const sign = units < 0n ? '-' : ''
+  const digits = (units < 0n ? -units : units).toString().padStart(scale + 1, '0')
+  const integer = digits.slice(0, -scale)
+  const fraction = digits.slice(-scale).replace(/0+$/, '')
+  return fraction ? `${sign}${integer}.${fraction}` : `${sign}${integer}`
+}
+
+/** 判断 Decimal 字符串是否为 0。 */
+function isZeroDecimalString(value: string) {
+  return /^-?0(?:\.0+)?$/.test(value.trim())
+}
+
+/** 判断 Decimal 字符串是否为负数且非 0。 */
+function isNegativeDecimalString(value: string) {
+  return value.trim().startsWith('-') && !isZeroDecimalString(value)
+}
+
+/** 给 Decimal 字符串取反，用于把手续费展示成支出。 */
+function negateDecimalString(value: string) {
+  const normalized = value.trim()
+  if (isZeroDecimalString(normalized)) {
+    return '0'
+  }
+  return normalized.startsWith('-') ? normalized.slice(1) : `-${normalized}`
+}

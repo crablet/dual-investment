@@ -52,6 +52,7 @@ pnpm tauri:build
 - 候选扫描已接入 Binance exchangeInfo、option mark price 和 `BTCUSDT` 现货价；扫描结果保存在运行态快照中。
 - 导航页切换和重复点击会按页面刷新所需数据；双币赢页扫描候选，其他业务页同步订单/账户状态。
 - 真实期权下单走 Binance 返回的订单号和成交状态；本地保存失败时通过 `order_attempts` 保留恢复线索。
+- 总览指标优先使用 Rust 快照中的事实口径；前端只做轻量展示派生和格式化。
 - 总览页事件日历只使用当前快照中的真实订单、规则、审计、风控和恢复记录，不新增后端日历接口或浏览器占位数据。
 - 自动策略和手动下单都有确认门禁；自动策略规则可持久化，但应用重启后自动执行保持关闭。
 
@@ -66,6 +67,9 @@ src/
   services/          Tauri API
   stores/            Pinia 应用状态
   types/             前后端共享数据形状
+  utils/             前端纯展示工具
+    date.ts          本地日期键、日历时间和计划时间工具
+    labels.ts        状态、方向和恢复记录的展示文案映射
 src-tauri/
   src/app_state.rs   应用状态、订单与规则编排
   src/binance.rs     Binance 签名请求和订单接口

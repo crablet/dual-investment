@@ -1,3 +1,8 @@
+//! 本地 SQLite 持久化层。
+//!
+//! 这里只保存业务事件、订单快照、自动规则和恢复记录；API Key/Secret 永远不进入
+//! SQLite。订单和审计以追加/替换业务事实的方式保存，便于应用重启后从真实交易所状态恢复。
+
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
@@ -13,12 +18,14 @@ pub struct Persistence {
 }
 
 impl Persistence {
+    /// 打开应用数据目录中的 SQLite 数据库。
     pub fn open_app_data(data_dir: impl AsRef<Path>) -> AppResult<Self> {
         std::fs::create_dir_all(data_dir.as_ref())
             .map_err(|error| AppError::Storage(error.to_string()))?;
         Self::open(data_dir.as_ref().join("dual-investment.db"))
     }
 
+    /// 打开指定 SQLite 文件并确保表结构存在。
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
         let connection =
             Connection::open(path).map_err(|error| AppError::Storage(error.to_string()))?;
@@ -27,6 +34,10 @@ impl Persistence {
         Ok(store)
     }
 
+    /// 初始化本地表结构。
+    ///
+    /// `strategy_orders` 和 `auto_rule` 使用 JSON payload，是为了让领域结构演进时减少
+    /// 迁移成本；`order_attempts` 单独拆列，是因为恢复流程需要稳定按状态和订单号查询。
     fn init(&self) -> AppResult<()> {
         self.connection
             .execute_batch(
@@ -75,6 +86,9 @@ impl Persistence {
         Ok(())
     }
 
+    /// 写入审计事件。
+    ///
+    /// 调用方必须传入脱敏后的业务摘要，不能把 Secret、签名 query 或原始响应写入 message。
     pub fn append_audit(&self, event: &AuditEvent) -> AppResult<()> {
         self.connection
             .execute(
@@ -90,6 +104,9 @@ impl Persistence {
         Ok(())
     }
 
+    /// 保存本地策略订单快照。
+    ///
+    /// 订单必须已绑定真实交易所订单号或来自恢复查询结果。
     pub fn save_order(&self, order: &StrategyOrder) -> AppResult<()> {
         let payload =
             serde_json::to_string(order).map_err(|error| AppError::Storage(error.to_string()))?;
@@ -102,6 +119,9 @@ impl Persistence {
         Ok(())
     }
 
+    /// 保存下单恢复记录。
+    ///
+    /// 这条记录覆盖“交易所已接单但本地订单保存失败”的高风险窗口。
     pub fn save_order_attempt(&self, attempt: &OrderAttempt) -> AppResult<()> {
         self.connection
             .execute(
@@ -137,6 +157,9 @@ impl Persistence {
         Ok(())
     }
 
+    /// 保存自动复投规则。
+    ///
+    /// 规则可持久化，但应用启动时会强制关闭自动执行状态。
     pub fn save_auto_rule(&self, rule: &AutoInvestmentRule) -> AppResult<()> {
         let payload =
             serde_json::to_string(rule).map_err(|error| AppError::Storage(error.to_string()))?;
@@ -149,6 +172,7 @@ impl Persistence {
         Ok(())
     }
 
+    /// 读取自动复投规则；没有保存过则由策略层提供默认值。
     pub fn load_auto_rule(&self) -> AppResult<Option<AutoInvestmentRule>> {
         let mut statement = self
             .connection
@@ -171,6 +195,7 @@ impl Persistence {
             .map_err(|error| AppError::Storage(error.to_string()))
     }
 
+    /// 按更新时间倒序读取订单。
     pub fn list_orders(&self) -> AppResult<Vec<StrategyOrder>> {
         let mut statement = self
             .connection
@@ -189,6 +214,7 @@ impl Persistence {
         Ok(orders)
     }
 
+    /// 按更新时间倒序读取恢复记录。
     pub fn list_order_attempts(&self, limit: usize) -> AppResult<Vec<OrderAttempt>> {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut statement = self
@@ -247,6 +273,7 @@ impl Persistence {
         Ok(attempts)
     }
 
+    /// 读取近期审计事件。
     pub fn recent_audit(&self, limit: usize) -> AppResult<Vec<AuditEvent>> {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut statement = self
@@ -289,6 +316,7 @@ fn parse_time(value: &str) -> AppResult<DateTime<Utc>> {
         .map(|time| time.with_timezone(&Utc))
 }
 
+/// 解析 SQLite 中持久化的策略方向。
 fn parse_direction(value: &str) -> AppResult<StrategyDirection> {
     match value {
         "sellPut" => Ok(StrategyDirection::SellPut),
@@ -297,6 +325,7 @@ fn parse_direction(value: &str) -> AppResult<StrategyDirection> {
     }
 }
 
+/// 解析 SQLite 中持久化的恢复状态。
 fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
     match value {
         "attempted" => Ok(OrderAttemptStatus::Attempted),

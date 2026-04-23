@@ -1,10 +1,12 @@
 <script setup lang="ts">
+// 总览指标卡。
+// 接收前端派生好的展示模型，组件只处理图标映射和视觉 tone。
 import { Activity, Coins, Shield, Wallet } from '@lucide/vue'
 import { NIcon } from 'naive-ui'
-import type { MetricCard } from '@/types/domain'
+import type { MetricCardModel } from '@/types/view'
 
 defineProps<{
-  metric: MetricCard
+  metric: MetricCardModel
 }>()
 
 const icons = {

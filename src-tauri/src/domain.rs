@@ -1,7 +1,18 @@
+//! 双币赢客户端的领域模型与 IPC 数据契约。
+//!
+//! 这个模块集中定义 Rust 内部策略模型、Binance 响应归一化后的结构，以及
+//! 通过 Tauri IPC 暴露给前端的 DTO。所有金额、价格、数量、收益率都使用
+//! [`Decimal`]，序列化给前端时统一走字符串，避免 JavaScript `number`
+//! 在金融数据上产生隐式精度损失。
+
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+/// 应用内部错误类型。
+///
+/// Tauri command 最终会把这些错误转成 `String` 返回前端；在 Rust 内部保留
+/// 分类是为了区分配置错误、风控拒绝、交易所错误和本地持久化错误。
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("配置错误：{0}")]
@@ -14,8 +25,12 @@ pub enum AppError {
     Storage(String),
 }
 
+/// Rust 内部统一结果类型。
 pub type AppResult<T> = Result<T, AppError>;
 
+/// 双币赢策略方向。
+///
+/// 当前 v1 只做卖出期权：卖 Put 用 USDT 承接低买 BTC，卖 Call 用 BTC 承接高卖。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StrategyDirection {
@@ -24,6 +39,7 @@ pub enum StrategyDirection {
 }
 
 impl StrategyDirection {
+    /// 返回 Binance 合约中的期权方向字符串。
     pub const fn option_type(self) -> &'static str {
         match self {
             Self::SellPut => "PUT",
@@ -31,6 +47,7 @@ impl StrategyDirection {
         }
     }
 
+    /// 返回面向 UI 和审计日志的中文策略名称。
     pub const fn display(self) -> &'static str {
         match self {
             Self::SellPut => "卖 Put 抄底",
@@ -39,6 +56,9 @@ impl StrategyDirection {
     }
 }
 
+/// 本地策略订单状态。
+///
+/// 状态既包含 Binance 期权订单状态的归一化，也包含到期补齐失败这类本地风控状态。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StrategyStatus {
@@ -52,6 +72,7 @@ pub enum StrategyStatus {
     RebalanceFailed,
 }
 
+/// 候选机会的推荐等级。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RecommendationLevel {
@@ -60,6 +81,7 @@ pub enum RecommendationLevel {
     Reject,
 }
 
+/// 风险提醒严重程度。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RiskSeverity {
@@ -68,6 +90,9 @@ pub enum RiskSeverity {
     High,
 }
 
+/// 前端设置页和导航状态需要展示的运行配置。
+///
+/// 这里不包含明文 Secret；`api_key_masked` 只用于显示脱敏连接状态。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[allow(clippy::struct_excessive_bools)]
 #[serde(rename_all = "camelCase")]
@@ -81,18 +106,10 @@ pub struct AppSettings {
     pub default_symbol: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MetricCard {
-    pub id: String,
-    pub title: String,
-    pub value: String,
-    pub sub_value: String,
-    pub change: String,
-    pub icon: String,
-    pub tone: String,
-}
-
+/// 账户资产行。
+///
+/// `free`、`locked` 和 `usdt_value` 以字符串序列化给前端，前端只负责展示或
+/// 派生 UI 指标，不反向作为真实资金事实。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BalanceRow {
@@ -107,6 +124,10 @@ pub struct BalanceRow {
     pub usdt_value: Decimal,
 }
 
+/// 一条可浏览、可下单的策略候选。
+///
+/// 候选来自 Binance 实盘合约与 mark price，再结合当前自动规则计算推荐等级。
+/// 浏览范围和可见性在策略层决定，前端筛选只影响展示。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyCandidate {
@@ -141,6 +162,9 @@ pub struct StrategyCandidate {
     pub reason: String,
 }
 
+/// 候选扫描漏斗诊断。
+///
+/// 前端用这些计数解释为什么没有候选，避免把过滤过程隐藏成一个空列表。
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateScanDiagnostics {
@@ -159,6 +183,7 @@ pub struct CandidateScanDiagnostics {
     pub browse_max_days: i64,
 }
 
+/// 候选扫描结果，包含候选列表和过滤漏斗。
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateScanResult {
@@ -166,6 +191,9 @@ pub struct CandidateScanResult {
     pub diagnostics: CandidateScanDiagnostics,
 }
 
+/// 本地持久化的真实策略订单。
+///
+/// 订单必须来自 Binance 接单结果或恢复查询结果，不能由前端或本地推断凭空创建。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyOrder {
@@ -219,6 +247,9 @@ pub struct StrategyOrder {
     pub spot_fee: Decimal,
 }
 
+/// 自动复投规则。
+///
+/// `enabled` 会在应用启动时强制重置为 false；保存规则不等于开启自动下单。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoInvestmentRule {
@@ -238,6 +269,9 @@ pub struct AutoInvestmentRule {
     pub exclude_same_direction: bool,
 }
 
+/// 风控规则集合。
+///
+/// 规则值使用 Decimal 字符串跨 IPC，Rust 端负责真实风控拦截。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RiskRuleSet {
@@ -252,6 +286,9 @@ pub struct RiskRuleSet {
     pub stop_after_consecutive_losses: u32,
 }
 
+/// 风控提醒。
+///
+/// `message` 应该是可安全展示的中文摘要，不应包含签名请求、Secret 或订单响应原文。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RiskAlert {
@@ -262,6 +299,9 @@ pub struct RiskAlert {
     pub created_at: DateTime<Utc>,
 }
 
+/// 当前风险快照。
+///
+/// 由账户保证金、义务仓和风控规则计算得出，用于 UI 展示和下单前风控判断。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RiskSnapshot {
@@ -277,6 +317,7 @@ pub struct RiskSnapshot {
     pub alerts: Vec<RiskAlert>,
 }
 
+/// 小型图表的数据点。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChartPoint {
@@ -285,15 +326,9 @@ pub struct ChartPoint {
     pub value: Decimal,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PnlBreakdown {
-    pub label: String,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub value: Decimal,
-    pub color: String,
-}
-
+/// 收益汇总。
+///
+/// 这里保留真实订单和现货补齐派生出的收益字段；展示用构成比例由前端从这些字段再派生。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PnlReport {
@@ -310,9 +345,11 @@ pub struct PnlReport {
     #[serde(with = "rust_decimal::serde::str")]
     pub fees: Decimal,
     pub points: Vec<ChartPoint>,
-    pub breakdown: Vec<PnlBreakdown>,
 }
 
+/// 审计事件。
+///
+/// 审计日志记录的是脱敏、可展示的业务摘要，不保存 API Secret、签名 query 或原始订单响应。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditEvent {
@@ -322,6 +359,10 @@ pub struct AuditEvent {
     pub created_at: DateTime<Utc>,
 }
 
+/// 下单恢复记录的状态机。
+///
+/// 当交易所已经接单但本地订单保存失败时，`PersistFailed`/`SpotPersistFailed`
+/// 会留下可恢复记录。恢复时必须重新查询 Binance 真实订单。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OrderAttemptStatus {
     Attempted,
@@ -335,6 +376,7 @@ pub enum OrderAttemptStatus {
 }
 
 impl OrderAttemptStatus {
+    /// 返回持久化到 SQLite 的稳定状态字符串。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Attempted => "attempted",
@@ -349,6 +391,9 @@ impl OrderAttemptStatus {
     }
 }
 
+/// 本地恢复记录。
+///
+/// 这个结构不走前端反序列化，先在 Rust 中保留强类型状态，再转换成前端视图结构。
 #[derive(Clone, Debug)]
 pub struct OrderAttempt {
     pub id: String,
@@ -363,6 +408,7 @@ pub struct OrderAttempt {
     pub updated_at: DateTime<Utc>,
 }
 
+/// 前端可展示的恢复记录。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderAttemptView {
@@ -395,19 +441,23 @@ impl From<OrderAttempt> for OrderAttemptView {
     }
 }
 
+/// Binance 期权账户快照。
+///
+/// 原始响应会在 `binance.rs` 被解析成该结构，其他模块不直接依赖交易所 JSON 字段。
 #[derive(Clone, Debug)]
 pub struct OptionAccountSnapshot {
     pub assets: Vec<OptionAssetBalance>,
     pub can_trade: bool,
-    pub time: Option<DateTime<Utc>>,
 }
 
 impl OptionAccountSnapshot {
+    /// 按资产代码查找保证金资产行。
     pub fn asset(&self, asset: &str) -> Option<&OptionAssetBalance> {
         self.assets.iter().find(|row| row.asset == asset)
     }
 }
 
+/// Binance 现货账户快照，用于到期 ITM 后的现货补齐检查。
 #[derive(Clone, Debug)]
 pub struct SpotAccountSnapshot {
     pub balances: Vec<SpotAssetBalance>,
@@ -415,11 +465,13 @@ pub struct SpotAccountSnapshot {
 }
 
 impl SpotAccountSnapshot {
+    /// 按资产代码查找现货资产行。
     pub fn asset(&self, asset: &str) -> Option<&SpotAssetBalance> {
         self.balances.iter().find(|row| row.asset == asset)
     }
 }
 
+/// 现货资产余额。
 #[derive(Clone, Debug)]
 pub struct SpotAssetBalance {
     pub asset: String,
@@ -427,6 +479,7 @@ pub struct SpotAssetBalance {
     pub locked: Decimal,
 }
 
+/// 期权保证金资产余额。
 #[derive(Clone, Debug)]
 pub struct OptionAssetBalance {
     pub asset: String,
@@ -439,6 +492,9 @@ pub struct OptionAssetBalance {
     pub adjusted_equity: Decimal,
 }
 
+/// Binance 期权合约元数据。
+///
+/// 精度、最小数量和保证金参数会参与候选过滤和下单前风控。
 #[derive(Clone, Debug)]
 pub struct OptionContract {
     pub symbol: String,
@@ -459,6 +515,9 @@ pub struct OptionContract {
     pub expiry: NaiveDate,
 }
 
+/// Binance mark price 行情。
+///
+/// mark price、Delta 和 IV 只作为候选估算输入，真实成交价格以订单回报为准。
 #[derive(Clone, Debug)]
 pub struct OptionMarkPrice {
     pub symbol: String,
@@ -469,6 +528,9 @@ pub struct OptionMarkPrice {
     pub low_price_limit: Decimal,
 }
 
+/// 交易所订单查询或下单响应的归一化结构。
+///
+/// 期权和现货接口字段不完全一致，`binance.rs` 会在解析时补齐均价、手续费等公共字段。
 #[derive(Clone, Debug)]
 pub struct ExchangeOrderAck {
     pub order_id: String,
@@ -484,12 +546,16 @@ pub struct ExchangeOrderAck {
     pub update_time: Option<DateTime<Utc>>,
 }
 
+/// 期权行权记录中的结算价格。
 #[derive(Clone, Debug)]
 pub struct ExerciseRecord {
     pub symbol: String,
     pub settlement_price: Decimal,
 }
 
+/// 策略预览结果。
+///
+/// 预览只用于展示和本地订单字段计算，不能替代下单前的合约校验和风控校验。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyPreview {
@@ -503,11 +569,13 @@ pub struct StrategyPreview {
     pub summary: Vec<String>,
 }
 
+/// 前端一次刷新所需的完整应用快照。
+///
+/// 通过一个快照减少细粒度 IPC 往返；前端再从快照派生指标、日历和列表状态。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSnapshot {
     pub settings: AppSettings,
-    pub metrics: Vec<MetricCard>,
     pub balances: Vec<BalanceRow>,
     pub candidates: Vec<StrategyCandidate>,
     pub scan_diagnostics: CandidateScanDiagnostics,
@@ -519,6 +587,9 @@ pub struct AppSnapshot {
     pub order_attempts: Vec<OrderAttemptView>,
 }
 
+/// 连接 Binance 的请求。
+///
+/// Secret 只会在 Rust 端写入系统 keyring，不会进入 SQLite、审计日志或前端状态。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectBinanceRequest {
@@ -526,6 +597,9 @@ pub struct ConnectBinanceRequest {
     pub api_secret: String,
 }
 
+/// 手动或自动下单请求。
+///
+/// `confirm_live` 是真实下单门禁；手动下单必须由前端显式确认后才传 true。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyRequest {
@@ -543,6 +617,9 @@ pub struct StrategyRequest {
     pub confirm_live: bool,
 }
 
+/// 开关自动复投的请求。
+///
+/// 自动策略开启后，符合规则的自动订单不会逐笔确认，因此开启动作必须二次确认。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToggleAutoRequest {

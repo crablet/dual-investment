@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 设置视图。
+// 负责 Binance 凭据连接、keyring 删除和审计导出；API Secret 提交后立即清空本地表单字段。
 import { Download, KeyRound } from '@lucide/vue'
 import { NButton, NIcon, NInput } from 'naive-ui'
 import { computed, reactive } from 'vue'
@@ -26,6 +28,7 @@ async function connect() {
     apiKey: form.apiKey.trim(),
     apiSecret: form.apiSecret,
   }
+  // Secret 只传给 Rust keyring 写入流程，前端表单随后立即清空。
   form.apiSecret = ''
   await store.connect(request)
 }
@@ -42,6 +45,7 @@ async function forgetCredentials() {
 }
 
 async function exportLogs() {
+  // 导出内容来自后端脱敏审计日志，不包含 Secret 或原始 Binance 响应。
   const payload = await api.exportAuditLogs()
   const blob = new Blob([payload], { type: 'application/json;charset=utf-8' })
   const url = URL.createObjectURL(blob)

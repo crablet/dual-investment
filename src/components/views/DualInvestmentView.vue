@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 双币赢工作台。
+// 统一承载候选浏览、手动下单和自动复投规则；没有独立自动复投页面或 mock 数据路径。
 import {
   ArrowDownCircle,
   ArrowUpDown,
@@ -123,15 +125,17 @@ const selectedCandidate = computed(() =>
   store.candidates.find(candidate => candidate.id === selectedCandidateId.value),
 )
 
-const filteredCandidates = computed(() =>
-  store.candidates
+const filteredCandidates = computed(() => {
+  // 前端筛选只影响展示。候选生成和方向/现货价硬约束已经在 Rust 策略层完成。
+  return store.candidates
     .filter(candidate => candidate.direction === form.direction)
     .filter(matchesExpiryFilter)
-    .filter(matchesCandidateFilters),
-)
+    .filter(matchesCandidateFilters)
+})
 
-const sortedCandidates = computed(() =>
-  filteredCandidates.value
+const sortedCandidates = computed(() => {
+  // 排序保持稳定：字段相同时使用扫描顺序，避免列表在同一批数据中跳动。
+  return filteredCandidates.value
     .map((candidate, index) => ({ candidate, index }))
     .sort((left, right) => {
       const modifier = candidateSortDirection.value === 'asc' ? 1 : -1
@@ -142,8 +146,8 @@ const sortedCandidates = computed(() =>
       )
       return delta === 0 ? left.index - right.index : delta * modifier
     })
-    .map(item => item.candidate),
-)
+    .map(item => item.candidate)
+})
 
 const activeCandidateFilterCount = computed(() =>
   [
@@ -205,6 +209,7 @@ const emptyCandidateHint = computed(() => {
 })
 
 const projectedPremium = computed(() => {
+  // 右侧卡片的预计权利金只是 UI 估算；真实权利金以 Binance 成交回报为准。
   if (!selectedCandidate.value) return 0
   return Number(selectedCandidate.value.limitPrice) * form.quantity
 })
@@ -333,6 +338,7 @@ function signedPercent(value: string | number) {
 }
 
 function saveAutoRule() {
+  // 表单用 number 便于 slider/input 交互，提交前转回 Decimal 字符串契约。
   void store.saveRule({
     ...ruleForm,
     quantity: ruleForm.quantity.toFixed(2),
@@ -343,6 +349,7 @@ function saveAutoRule() {
 }
 
 function toggleAuto(value: boolean) {
+  // 自动复投开启后符合条件的自动单不会逐笔确认，因此开关本身必须二次确认。
   if (value && !window.confirm('确认开启自动定投？后续符合条件的自动单不会逐笔确认。')) {
     return
   }
@@ -353,6 +360,7 @@ function toggleAuto(value: boolean) {
 }
 
 function runAutoNow() {
+  // 立即执行可能直接下真实订单，必须显式确认。
   if (!window.confirm('确认立即执行一次自动扫描？若存在推荐候选，将直接发送 Binance 订单。')) {
     return
   }
@@ -364,6 +372,7 @@ function submit() {
   if (!candidate) {
     return
   }
+  // 手动下单也走真实 Binance 订单，确认后才传 `confirmLive: true`。
   if (!window.confirm('确认发送 Binance 期权订单？')) {
     return
   }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 候选机会表格。
+// 用于总览页的快捷候选展示；真实下单仍由父组件弹窗确认后调用 store。
 import { NButton, NTag } from 'naive-ui'
 import { useFormat } from '@/composables/useFormat'
 import type { StrategyCandidate } from '@/types/domain'

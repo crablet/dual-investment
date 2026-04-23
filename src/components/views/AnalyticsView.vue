@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 收益分析视图。
+// 使用订单和收益快照做展示维度拆分，不在前端重算真实 PnL 事实。
 import { computed } from 'vue'
 import DonutChart from '@/components/common/DonutChart.vue'
 import MiniLineChart from '@/components/common/MiniLineChart.vue'
@@ -21,6 +23,7 @@ const strategyPerformance = computed(() => {
   }))
 })
 
+/** 按策略方向汇总权利金，用于图形展示。 */
 function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
   return store.orders
     .filter(order => order.direction === direction)
@@ -37,7 +40,7 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
     <Panel title="收益构成" class="span-4">
       <DonutChart
         v-if="store.pnl"
-        :items="store.pnl.breakdown"
+        :items="store.pnlBreakdown"
         :center="Number(store.pnl.cumulative).toLocaleString('zh-CN')"
       />
     </Panel>

@@ -1,3 +1,9 @@
+//! 应用状态编排层。
+//!
+//! 这个模块连接 Tauri command、Binance 客户端、策略计算和 SQLite 持久化。
+//! 它负责实盘连接、快照聚合、下单门禁、订单恢复、到期结算、现货补齐和后台轮询。
+//! 业务计算放在 `strategy.rs`，交易所请求放在 `binance.rs`，凭据读写放在 `secrets.rs`。
+
 use std::{
     future::Future,
     path::Path,
@@ -19,8 +25,8 @@ use crate::domain::{
     AppError, AppResult, AppSettings, AppSnapshot, AuditEvent, AutoInvestmentRule, BalanceRow,
     CandidateScanDiagnostics, CandidateScanResult, ConnectBinanceRequest, ExchangeOrderAck,
     OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt, OrderAttemptStatus,
-    OrderAttemptView, PnlReport, RiskSnapshot, SpotAccountSnapshot, StrategyCandidate,
-    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
+    OrderAttemptView, SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder,
+    StrategyRequest, StrategyStatus, ToggleAutoRequest,
 };
 use crate::persistence::Persistence;
 use crate::secrets;
@@ -55,6 +61,7 @@ impl Default for RuntimeConfig {
 }
 
 impl RuntimeConfig {
+    /// 转成前端可见设置，过滤掉明文 API Key 和 Secret。
     pub fn settings(&self) -> AppSettings {
         AppSettings {
             connected: self.connected,
@@ -67,6 +74,10 @@ impl RuntimeConfig {
     }
 }
 
+/// 运行期共享状态。
+///
+/// 多数数据放在 `RwLock` 中便于 Tauri command 并发读取；SQLite 连接本身不可并发共享，
+/// 因此用 `Mutex<Persistence>` 串行化本地持久化操作。
 #[derive(Clone)]
 pub struct AppState {
     runtime: Arc<RwLock<RuntimeConfig>>,
@@ -81,10 +92,14 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// 从 Tauri 应用数据目录创建状态。
     pub fn new_in(data_dir: impl AsRef<Path>) -> AppResult<Self> {
         Self::from_persistence(Persistence::open_app_data(data_dir)?)
     }
 
+    /// 从持久化层恢复状态。
+    ///
+    /// 启动时只加载已经绑定交易所订单号的订单，并强制关闭自动策略，避免应用重启后自动下单。
     fn from_persistence(persistence: Persistence) -> AppResult<Self> {
         let orders = persistence
             .list_orders()?
@@ -111,6 +126,9 @@ impl AppState {
         Ok(state)
     }
 
+    /// 聚合前端所需完整快照。
+    ///
+    /// 已连接时会实时读取 Binance 账户和现货价格；未连接时返回本地缓存和明确的空风险/收益状态。
     pub async fn snapshot(&self) -> AppResult<AppSnapshot> {
         let settings = self.runtime.read().await.settings();
         let auto_rule = self.auto_rule.read().await.clone();
@@ -144,7 +162,6 @@ impl AppState {
             .filter(|price| *price > Decimal::ZERO);
 
         Ok(AppSnapshot {
-            metrics: strategy::build_metrics(&settings, option_account, &orders),
             balances,
             candidates,
             scan_diagnostics,
@@ -161,6 +178,9 @@ impl AppState {
         })
     }
 
+    /// 使用用户输入凭据连接 Binance，并保存到系统 keyring。
+    ///
+    /// 连接阶段同时验证期权和现货账户权限，因为到期 ITM 后需要真实现货补齐能力。
     pub async fn connect_binance(&self, request: ConnectBinanceRequest) -> AppResult<AppSettings> {
         if request.api_key.trim().is_empty() || request.api_secret.trim().is_empty() {
             return Err(AppError::Config("API Key 和 Secret 不能为空".to_string()));
@@ -206,6 +226,7 @@ impl AppState {
         Ok(settings)
     }
 
+    /// 使用系统 keyring 中的凭据连接 Binance。
     pub async fn connect_saved_binance(&self) -> AppResult<AppSettings> {
         let Some((api_key, api_secret)) = secrets::load_binance_credentials()? else {
             return Err(AppError::Config(
@@ -252,6 +273,7 @@ impl AppState {
         Ok(settings)
     }
 
+    /// 删除系统 keyring 凭据并清空运行期连接状态。
     pub async fn forget_binance_credentials(&self) -> AppResult<AppSettings> {
         secrets::delete_binance_credentials()?;
         let mut runtime = self.runtime.write().await;
@@ -286,6 +308,9 @@ impl AppState {
         Ok(settings)
     }
 
+    /// 从 Binance 实盘数据扫描候选，并缓存给前端快照使用。
+    ///
+    /// 账户、合约、mark price 和现货价格并发读取，减少一次刷新候选的等待时间。
     pub async fn scan_candidates(&self) -> AppResult<CandidateScanResult> {
         let client = self.live_client().await?;
         let account_task = spawn_binance_request({
@@ -328,13 +353,9 @@ impl AppState {
         Ok(result)
     }
 
-    pub fn preview_strategy(
-        request: &StrategyRequest,
-    ) -> AppResult<crate::domain::StrategyPreview> {
-        validate_request(request)?;
-        Ok(strategy::preview_strategy(request))
-    }
-
+    /// 手动发送真实期权策略订单。
+    ///
+    /// `confirm_live` 必须为 true；前端的确认弹窗和 Rust 的门禁缺一不可。
     pub async fn place_manual_strategy(
         &self,
         request: StrategyRequest,
@@ -346,6 +367,9 @@ impl AppState {
         self.place_live_strategy(request, "manual").await
     }
 
+    /// 保存自动复投规则。
+    ///
+    /// 保存规则不改变自动策略开启状态；开启/关闭必须走 `toggle_auto_strategy`。
     pub async fn save_auto_rule(&self, rule: AutoInvestmentRule) -> AppResult<AutoInvestmentRule> {
         let mut rule = rule;
         validate_auto_rule(&rule)?;
@@ -362,6 +386,9 @@ impl AppState {
         Ok(rule)
     }
 
+    /// 开启或暂停自动复投。
+    ///
+    /// 开启时必须已连接 Binance，并且请求里带有二次确认。
     pub async fn toggle_auto_strategy(&self, request: ToggleAutoRequest) -> AppResult<AppSettings> {
         let mut runtime = self.runtime.write().await;
         if request.enabled && !runtime.connected {
@@ -398,21 +425,9 @@ impl AppState {
         Ok(settings)
     }
 
-    pub async fn list_orders(&self) -> AppResult<Vec<StrategyOrder>> {
-        Ok(self.orders.read().await.clone())
-    }
-
-    pub fn list_order_attempts(&self) -> AppResult<Vec<OrderAttemptView>> {
-        Ok(self
-            .persistence
-            .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
-            .list_order_attempts(100)?
-            .into_iter()
-            .map(OrderAttemptView::from)
-            .collect())
-    }
-
+    /// 根据恢复记录重新查询 Binance 并恢复本地订单状态。
+    ///
+    /// 这里不会信任恢复记录里的本地状态来创建订单，必须重新查询交易所事实。
     pub async fn recover_order_attempt(&self, attempt_id: String) -> AppResult<StrategyOrder> {
         let attempt = self
             .persistence
@@ -430,54 +445,22 @@ impl AppState {
         }
     }
 
-    pub async fn balances(&self) -> AppResult<Vec<BalanceRow>> {
-        let client = self.live_client().await?;
-        let option_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.option_account().await }
-        });
-        let spot_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.spot_account().await }
-        });
-        let spot_price_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.spot_price("BTCUSDT").await }
-        });
-        let option = join_binance_request(option_task).await;
-        let spot = join_binance_request(spot_task).await;
-        let spot_price = join_binance_request(spot_price_task).await;
-        let option = option?;
-        let spot = spot?;
-        let spot_price = spot_price?;
-        Ok(combined_balances(&option, &spot, spot_price))
-    }
-
-    pub fn pnl_report(&self) -> PnlReport {
-        let orders = self
-            .orders
-            .try_read()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
-        strategy::pnl_report_from_orders(&orders)
-    }
-
-    pub async fn risk_snapshot(&self) -> AppResult<RiskSnapshot> {
-        let account = self.live_client().await?.option_account().await?;
-        Ok(strategy::risk_snapshot_from_account(&account))
-    }
-
+    /// 同步订单、执行到期结算，然后返回完整快照。
     pub async fn sync_live_state(&self) -> AppResult<AppSnapshot> {
         self.sync_live_orders().await?;
         self.settle_due_orders().await?;
         self.snapshot().await
     }
 
+    /// 手动触发到期结算扫描。
     pub async fn run_settlement_scan(&self) -> AppResult<Vec<StrategyOrder>> {
         self.sync_live_orders().await?;
         self.settle_due_orders().await
     }
 
+    /// 手动执行一次自动策略。
+    ///
+    /// 如果存在推荐候选，会直接发送 Binance 订单，因此必须要求自动策略已启用。
     pub async fn run_auto_once(&self) -> AppResult<Option<StrategyOrder>> {
         let runtime = self.runtime.read().await.clone();
         if !runtime.connected {
@@ -489,6 +472,9 @@ impl AppState {
         self.execute_auto_strategy().await
     }
 
+    /// 导出审计日志 JSON。
+    ///
+    /// 审计内容在写入时已经脱敏，导出不包含 Secret 或原始交易所响应。
     pub fn export_audit_logs(&self) -> AppResult<String> {
         let events = self
             .persistence
@@ -498,6 +484,10 @@ impl AppState {
         serde_json::to_string_pretty(&events).map_err(|error| AppError::Storage(error.to_string()))
     }
 
+    /// 执行真实期权下单的核心流程。
+    ///
+    /// 顺序是：请求校验、读取实盘数据、合约匹配、风控校验、写入恢复记录、发送 Binance 订单、
+    /// 保存本地订单。交易所接单后如果本地保存失败，会保留恢复记录并返回明确错误。
     #[allow(clippy::too_many_lines)]
     async fn place_live_strategy(
         &self,
@@ -532,6 +522,7 @@ impl AppState {
 
         let client_order_id = make_client_order_id(request.direction);
         let now = Utc::now();
+        // 先落恢复记录，再发送真实订单；这样即使本地订单保存失败，也能用客户端订单号恢复。
         let mut attempt = OrderAttempt {
             id: Uuid::new_v4().to_string(),
             client_order_id: client_order_id.clone(),
@@ -596,6 +587,9 @@ impl AppState {
         Ok(order)
     }
 
+    /// 恢复期权订单尝试记录。
+    ///
+    /// 用交易所订单号或客户端订单号查询 Binance 后，再重建本地订单。
     async fn recover_option_attempt(&self, mut attempt: OrderAttempt) -> AppResult<StrategyOrder> {
         let client = self.live_client().await?;
         let ack = client
@@ -620,6 +614,9 @@ impl AppState {
         Ok(order)
     }
 
+    /// 恢复现货补齐尝试记录。
+    ///
+    /// 现货补齐必须找到对应期权订单，不能单独生成一条脱离策略的现货记录。
     async fn recover_spot_attempt(&self, mut attempt: OrderAttempt) -> AppResult<StrategyOrder> {
         let client = self.live_client().await?;
         let ack = client
@@ -659,6 +656,7 @@ impl AppState {
         Ok(order)
     }
 
+    /// 同步所有仍可能变化的期权订单状态。
     async fn sync_live_orders(&self) -> AppResult<Vec<StrategyOrder>> {
         let client = self.live_client().await?;
         let orders = self.orders.read().await.clone();
@@ -678,6 +676,7 @@ impl AppState {
         Ok(updated)
     }
 
+    /// 同步单个期权订单并保存结果。
     async fn sync_single_order(
         &self,
         client: &BinanceClient,
@@ -695,6 +694,9 @@ impl AppState {
         Ok(order)
     }
 
+    /// 扫描已经到期的订单并执行结算/补齐。
+    ///
+    /// 未成交订单会直接过期；OTM 订单结算完成；ITM 订单进入现货补齐流程。
     async fn settle_due_orders(&self) -> AppResult<Vec<StrategyOrder>> {
         let client = self.live_client().await?;
         let orders = self.orders.read().await.clone();
@@ -749,6 +751,7 @@ impl AppState {
             .and_time(NaiveTime::MIN)
             .and_utc()
             .timestamp_millis();
+        // 优先使用 Binance 行权记录；接口短暂不可用时退回现货价作为人工可见的参考价。
         if let Ok(records) = client
             .exercise_records(&order.option_symbol, start, end)
             .await
@@ -761,6 +764,9 @@ impl AppState {
         client.spot_price("BTCUSDT").await
     }
 
+    /// 对 ITM 到期订单执行现货补齐。
+    ///
+    /// 补齐失败会把订单置为失败状态，阻止后续自动动作继续假设该订单已完成。
     async fn rebalance_spot_if_needed(
         &self,
         client: &BinanceClient,
@@ -787,6 +793,7 @@ impl AppState {
         let side = crate::binance::spot_rebalance_side(order.direction);
         let client_order_id = make_spot_client_order_id(order.direction);
         let now = Utc::now();
+        // 现货补齐也是实盘订单，同样先保存恢复记录再发送交易所请求。
         let mut attempt = OrderAttempt {
             id: Uuid::new_v4().to_string(),
             client_order_id: client_order_id.clone(),
@@ -865,6 +872,7 @@ impl AppState {
         Ok(())
     }
 
+    /// 执行一次自动策略：扫描候选并选择第一条推荐机会下单。
     async fn execute_auto_strategy(&self) -> AppResult<Option<StrategyOrder>> {
         let result = self.scan_candidates().await?;
         let Some(candidate) = result.candidates.into_iter().find(|candidate| {
@@ -893,6 +901,9 @@ impl AppState {
         Ok(Some(order))
     }
 
+    /// 后台轮询任务的一次 tick。
+    ///
+    /// 只做同步、结算和按计划自动扫描，不会在未启用自动策略时下单。
     async fn background_tick(&self) -> AppResult<()> {
         if !self.runtime.read().await.connected {
             return Ok(());
@@ -905,6 +916,9 @@ impl AppState {
         Ok(())
     }
 
+    /// 判断当前是否到了当天自动策略执行时间。
+    ///
+    /// `last_auto_scan_day` 确保每天最多自动执行一次。
     async fn should_run_auto_now(&self) -> bool {
         let runtime = self.runtime.read().await.clone();
         if !runtime.connected || !runtime.auto_enabled {
@@ -928,6 +942,9 @@ impl AppState {
         true
     }
 
+    /// 启动后台轮询任务。
+    ///
+    /// `worker_started` 防止多次连接或重复调用时启动多个轮询器。
     fn ensure_background_worker(&self) {
         if self.worker_started.swap(true, Ordering::SeqCst) {
             return;
@@ -944,6 +961,7 @@ impl AppState {
         });
     }
 
+    /// 保存订单到 SQLite，并同步更新内存缓存。
     async fn save_order(&self, order: &StrategyOrder) -> AppResult<()> {
         {
             let persistence = self
@@ -961,6 +979,9 @@ impl AppState {
         Ok(())
     }
 
+    /// 写审计事件。
+    ///
+    /// 调用方传入的 message 必须是脱敏摘要，不应包含原始 Binance 响应。
     fn record_audit(&self, kind: &str, message: &str) -> AppResult<()> {
         let event = AuditEvent {
             id: Uuid::new_v4().to_string(),
@@ -974,6 +995,7 @@ impl AppState {
             .append_audit(&event)
     }
 
+    /// 保存下单/补齐恢复记录。
     fn save_order_attempt(&self, attempt: &OrderAttempt) -> AppResult<()> {
         self.persistence
             .lock()
@@ -981,6 +1003,7 @@ impl AppState {
             .save_order_attempt(attempt)
     }
 
+    /// 获取可用 Binance 客户端；缓存缺失时从运行期凭据重建。
     async fn live_client(&self) -> AppResult<BinanceClient> {
         if let Some(client) = self.client.read().await.as_ref().cloned() {
             return Ok(client);
@@ -994,6 +1017,9 @@ impl AppState {
         Ok(client)
     }
 
+    /// 已连接时读取期权账户、现货账户和 BTCUSDT 现货价。
+    ///
+    /// 未连接返回 `None`，让快照保持明确的空状态，而不是前端 fallback 数据。
     async fn live_accounts_if_connected(
         &self,
     ) -> AppResult<Option<(OptionAccountSnapshot, SpotAccountSnapshot, Decimal)>> {
@@ -1032,6 +1058,7 @@ where
     tauri::async_runtime::spawn(future)
 }
 
+/// 等待 Binance 子任务并把 join 错误转换成业务错误。
 async fn join_binance_request<T>(
     handle: tauri::async_runtime::JoinHandle<AppResult<T>>,
 ) -> AppResult<T> {
@@ -1040,6 +1067,7 @@ async fn join_binance_request<T>(
         .map_err(|error| AppError::Binance(format!("Binance 异步请求任务失败：{error}")))?
 }
 
+/// 校验下单请求的基础业务边界。
 fn validate_request(request: &StrategyRequest) -> AppResult<()> {
     if request.symbol != "BTCUSDT" {
         return Err(AppError::RiskRejected(
@@ -1060,6 +1088,7 @@ fn validate_request(request: &StrategyRequest) -> AppResult<()> {
     Ok(())
 }
 
+/// 校验自动复投规则边界。
 fn validate_auto_rule(rule: &AutoInvestmentRule) -> AppResult<()> {
     if rule.quantity < dec!(0.01) {
         return Err(AppError::RiskRejected(
@@ -1072,6 +1101,9 @@ fn validate_auto_rule(rule: &AutoInvestmentRule) -> AppResult<()> {
     Ok(())
 }
 
+/// 从运行期配置重建 Binance 客户端。
+///
+/// 这里读取的是内存凭据；持久化凭据只允许通过 `secrets.rs` 从 keyring 读取。
 fn client_from_runtime(runtime: &RuntimeConfig) -> AppResult<BinanceClient> {
     if !runtime.connected {
         return Err(AppError::Config("请先连接 Binance API".to_string()));
@@ -1087,6 +1119,7 @@ fn client_from_runtime(runtime: &RuntimeConfig) -> AppResult<BinanceClient> {
     BinanceClient::new(api_key, api_secret)
 }
 
+/// 从期权恢复记录和交易所回报重建下单请求。
 fn request_from_option_attempt(
     attempt: &OrderAttempt,
     ack: &ExchangeOrderAck,
@@ -1115,6 +1148,7 @@ fn request_from_option_attempt(
     })
 }
 
+/// 解析 Binance 期权合约代码中的到期日、执行价和方向。
 fn parse_option_symbol(value: &str) -> AppResult<(NaiveDate, Decimal, StrategyDirection)> {
     let parts = value.split('-').collect::<Vec<_>>();
     if parts.len() != 4 {
@@ -1135,6 +1169,9 @@ fn parse_option_symbol(value: &str) -> AppResult<(NaiveDate, Decimal, StrategyDi
     Ok((expiry, strike, direction))
 }
 
+/// 找到与下单请求匹配的 Binance 合约。
+///
+/// 优先使用请求里的 option symbol；没有时才按方向、到期日和执行价搜索。
 fn resolve_contract<'a>(
     request: &StrategyRequest,
     contracts: &'a [OptionContract],
@@ -1166,6 +1203,7 @@ fn resolve_contract<'a>(
         })
 }
 
+/// 确认前端传来的合约代码与请求参数一致。
 fn ensure_contract_matches_request(
     request: &StrategyRequest,
     contract: &OptionContract,
@@ -1193,6 +1231,9 @@ fn ensure_contract_matches_request(
     Ok(())
 }
 
+/// 下单前合约与交易所约束校验。
+///
+/// 包含交易状态、v1 标的限制、数量精度、价格精度、价格上下限和保证金检查。
 fn validate_contract_order(
     request: &StrategyRequest,
     contract: &OptionContract,
@@ -1258,6 +1299,7 @@ fn validate_contract_order(
     Ok(())
 }
 
+/// 执行本地风控规则。
 fn enforce_risk_rules(
     request: &StrategyRequest,
     contract: &OptionContract,
@@ -1317,6 +1359,7 @@ fn enforce_risk_rules(
     Ok(())
 }
 
+/// 校验到期 ITM 后的现货补齐能力。
 fn validate_spot_rebalance(order: &StrategyOrder, account: &SpotAccountSnapshot) -> AppResult<()> {
     if !account.can_trade {
         return Err(AppError::RiskRejected(
@@ -1352,6 +1395,7 @@ fn validate_spot_rebalance(order: &StrategyOrder, account: &SpotAccountSnapshot)
     Ok(())
 }
 
+/// 把期权订单回报应用到本地订单。
 fn apply_option_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) {
     let requested_qty = if ack.quantity > Decimal::ZERO {
         ack.quantity
@@ -1370,6 +1414,9 @@ fn apply_option_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) {
     order.updated_at = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
 }
 
+/// 把现货补齐订单回报应用到本地订单。
+///
+/// 现货没有足额成交时，订单进入 `RebalanceFailed`，避免系统继续自动执行相关动作。
 fn apply_spot_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) {
     order.spot_order_status.clone_from(&ack.status);
     order.spot_filled_quantity = ack.executed_qty;
@@ -1412,6 +1459,7 @@ fn is_spot_attempt(status: OrderAttemptStatus) -> bool {
     )
 }
 
+/// 判断期权订单是否仍需要向交易所同步。
 fn should_sync_option_order(order: &StrategyOrder) -> bool {
     order.exchange_order_id.is_some()
         && !matches!(
@@ -1424,6 +1472,7 @@ fn should_sync_option_order(order: &StrategyOrder) -> bool {
         )
 }
 
+/// 判断订单是否已经过期并需要结算处理。
 fn should_settle_order(order: &StrategyOrder) -> bool {
     Utc::now().date_naive() > order.expiry
         && matches!(
@@ -1432,6 +1481,7 @@ fn should_settle_order(order: &StrategyOrder) -> bool {
         )
 }
 
+/// 判断订单到期是否 ITM。
 fn is_in_the_money(order: &StrategyOrder, settlement_price: Decimal) -> bool {
     match order.direction {
         StrategyDirection::SellPut => settlement_price < order.strike,
@@ -1439,6 +1489,7 @@ fn is_in_the_money(order: &StrategyOrder, settlement_price: Decimal) -> bool {
     }
 }
 
+/// 合并期权保证金和现货资产行。
 fn combined_balances(
     option: &OptionAccountSnapshot,
     spot: &SpotAccountSnapshot,
@@ -1449,6 +1500,7 @@ fn combined_balances(
     balances
 }
 
+/// 从中文计划字符串中提取执行时间，无法解析时使用默认时间。
 fn parse_schedule_time(schedule: &str) -> NaiveTime {
     for segment in schedule
         .split(|character: char| character.is_whitespace() || character == ',' || character == '，')
@@ -1463,10 +1515,12 @@ fn parse_schedule_time(schedule: &str) -> NaiveTime {
     NaiveTime::from_hms_opt(11, 30, 0).expect("default auto schedule time is valid")
 }
 
+/// 返回 Decimal 规范化后的精度，用于匹配 Binance 合约精度限制。
 fn decimal_scale(value: Decimal) -> u32 {
     value.normalize().scale()
 }
 
+/// 生成期权订单客户端订单号。
 fn make_client_order_id(direction: StrategyDirection) -> String {
     format!(
         "di-{}-{}",
@@ -1475,6 +1529,7 @@ fn make_client_order_id(direction: StrategyDirection) -> String {
     )
 }
 
+/// 生成现货补齐订单客户端订单号。
 fn make_spot_client_order_id(direction: StrategyDirection) -> String {
     format!(
         "di-spot-{}-{}",
@@ -1483,6 +1538,7 @@ fn make_spot_client_order_id(direction: StrategyDirection) -> String {
     )
 }
 
+/// 脱敏 API Key，只保留首尾少量字符用于确认连接身份。
 fn mask_api_key(api_key: &str) -> String {
     let trimmed = api_key.trim();
     if trimmed.len() <= 8 {
@@ -1681,7 +1737,6 @@ mod tests {
                 adjusted_equity,
             }],
             can_trade: true,
-            time: None,
         }
     }
 

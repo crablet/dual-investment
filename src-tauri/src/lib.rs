@@ -1,3 +1,8 @@
+//! Tauri 应用入口库。
+//!
+//! 这里组装插件、IPC command、应用状态和系统托盘。具体业务逻辑分散在状态、
+//! Binance、策略和持久化模块中，入口只负责 wiring。
+
 mod app_state;
 mod binance;
 mod commands;
@@ -10,8 +15,7 @@ mod tray;
 use app_state::AppState;
 use commands::{
     connect_binance, connect_saved_binance, export_audit_logs, forget_binance_credentials,
-    get_app_snapshot, get_pnl_report, get_positions, get_risk_snapshot, list_order_attempts,
-    list_orders, place_manual_strategy, preview_strategy, recover_order_attempt, run_auto_once,
+    get_app_snapshot, place_manual_strategy, recover_order_attempt, run_auto_once,
     run_settlement_scan, save_auto_rule, scan_candidates, sync_live_state, toggle_auto_strategy,
 };
 use tauri::Manager;
@@ -33,19 +37,13 @@ pub fn run() {
             connect_saved_binance,
             forget_binance_credentials,
             scan_candidates,
-            preview_strategy,
             place_manual_strategy,
             save_auto_rule,
             toggle_auto_strategy,
-            list_orders,
-            list_order_attempts,
             recover_order_attempt,
             sync_live_state,
             run_settlement_scan,
             run_auto_once,
-            get_positions,
-            get_pnl_report,
-            get_risk_snapshot,
             export_audit_logs
         ])
         .setup(|app| {

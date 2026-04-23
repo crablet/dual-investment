@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 轻量收益折线图。
+// 不引入图表库，直接把后端/前端派生点位归一化成 SVG polyline，适合小面积趋势展示。
 import { computed } from 'vue'
 import type { ChartPoint } from '@/types/domain'
 
@@ -15,6 +17,7 @@ const polyline = computed(() => {
   }
   const min = Math.min(...values)
   const max = Math.max(...values)
+  // span 为 0 时保留一条水平线，避免所有值相同导致除以 0。
   const span = max - min || 1
   return values
     .map((value, index) => {

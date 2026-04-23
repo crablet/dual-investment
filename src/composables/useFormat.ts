@@ -1,4 +1,15 @@
+// 展示格式化工具。
+//
+// 这些函数只用于 UI 格式化；真实金融计算不在这里做，金额和数量仍由 Rust Decimal
+// 或前端 BigInt 辅助函数处理。
+
 import type { StrategyDirection, StrategyStatus } from '@/types/domain'
+import {
+  directionTextMap,
+  directionToneMap,
+  statusTextMap,
+  statusToneMap,
+} from '@/utils/labels'
 
 const moneyFormatter = new Intl.NumberFormat('zh-CN', {
   minimumFractionDigits: 2,
@@ -12,38 +23,7 @@ const decimalFormatter = new Intl.NumberFormat('zh-CN', {
 
 const percentFormatters = new Map<number, Intl.NumberFormat>()
 
-const directionTextMap: Record<StrategyDirection, string> = {
-  sellPut: '卖 Put 抄底',
-  sellCall: '卖 Call 止盈',
-}
-
-const directionToneMap: Record<StrategyDirection, 'success' | 'error'> = {
-  sellPut: 'success',
-  sellCall: 'error',
-}
-
-const statusTextMap: Record<StrategyStatus, string> = {
-  pending: '待成交',
-  running: '进行中',
-  settled: '已结算',
-  cancelled: '已取消',
-  rejected: '已拒绝',
-  expired: '已过期',
-  partiallyFilled: '部分成交',
-  rebalanceFailed: '补齐失败',
-}
-
-const statusToneMap: Record<StrategyStatus, 'default' | 'error' | 'info' | 'success' | 'warning'> = {
-  pending: 'warning',
-  running: 'success',
-  settled: 'info',
-  cancelled: 'default',
-  rejected: 'error',
-  expired: 'default',
-  partiallyFilled: 'warning',
-  rebalanceFailed: 'error',
-}
-
+/** 按小数位数缓存百分比 formatter，避免组件重复创建 Intl 对象。 */
 function percentFormatter(digits: number) {
   const cached = percentFormatters.get(digits)
   if (cached) {
@@ -57,6 +37,7 @@ function percentFormatter(digits: number) {
   return formatter
 }
 
+/** 返回组件常用的格式化函数和状态映射。 */
 export function useFormat() {
   const money = (value: string | number, currency = 'USDT') =>
     `${moneyFormatter.format(Number(value))} ${currency}`
