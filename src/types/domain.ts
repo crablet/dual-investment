@@ -24,6 +24,7 @@ export type RiskSeverity = 'low' | 'medium' | 'high'
 export type LogLevel = 'info' | 'warn' | 'error'
 export type OrderProgressStage = 'validate' | 'funding' | 'risk' | 'submit' | 'persist'
 export type OrderProgressStatus = 'pending' | 'running' | 'success' | 'error'
+export type RuntimeHealthStatus = 'idle' | 'healthy' | 'degraded' | 'attention'
 
 /** 前端可见运行设置，不包含明文 API Secret。 */
 export interface AppSettings {
@@ -182,6 +183,17 @@ export interface PnlReport {
   points: ChartPoint[]
 }
 
+/** 后台调度器和恢复记录的运行健康快照。 */
+export interface RuntimeHealth {
+  status: RuntimeHealthStatus
+  lastTickAt?: string
+  lastSuccessAt?: string
+  consecutiveFailures: number
+  skippedTicks: number
+  lastError?: string
+  pendingRecoveryCount: number
+}
+
 /** 文件日志记录，只展示后端写入的脱敏摘要。 */
 export interface LogEntry {
   id: string
@@ -238,6 +250,7 @@ export interface OrderProgressEvent {
 /** 前端一次刷新拿到的完整应用快照。 */
 export interface AppSnapshot {
   settings: AppSettings
+  health: RuntimeHealth
   balances: BalanceRow[]
   candidates: StrategyCandidate[]
   scanDiagnostics: CandidateScanDiagnostics

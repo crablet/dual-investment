@@ -245,6 +245,21 @@ impl Persistence {
         }
         Ok(attempts)
     }
+
+    /// 统计仍需要人工确认或恢复的下单记录。
+    pub fn count_pending_order_attempts(&self) -> AppResult<usize> {
+        let count = self
+            .connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM order_attempts
+                 WHERE status NOT IN ('persisted', 'spot_persisted')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        usize::try_from(count).map_err(|error| AppError::Storage(error.to_string()))
+    }
 }
 
 fn parse_time(value: &str) -> AppResult<DateTime<Utc>> {

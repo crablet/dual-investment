@@ -5,7 +5,12 @@
 //! API Secret、签名 query 或交易所原始响应。
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::str::FromStr;
+use std::sync::{
+    Arc,
+    atomic::{AtomicI64, Ordering},
+};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -14,6 +19,7 @@ use reqwest::{Client, StatusCode};
 use rust_decimal::Decimal;
 use serde_json::Value;
 use sha2::Sha256;
+use tokio::time::sleep;
 
 use crate::domain::{
     AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot,
@@ -23,6 +29,7 @@ use crate::domain::{
 };
 
 type HmacSha256 = Hmac<Sha256>;
+const QUERY_RETRY_DELAYS: [Duration; 2] = [Duration::from_millis(500), Duration::from_millis(1500)];
 
 /// Binance HTTP 客户端。
 ///
@@ -35,6 +42,7 @@ pub struct BinanceClient {
     eapi_base: String,
     #[allow(dead_code)]
     spot_base: String,
+    timestamp_offset_ms: Arc<AtomicI64>,
 }
 
 impl BinanceClient {
@@ -51,6 +59,7 @@ impl BinanceClient {
             api_secret,
             eapi_base: "https://eapi.binance.com".to_string(),
             spot_base: "https://api.binance.com".to_string(),
+            timestamp_offset_ms: Arc::new(AtomicI64::new(0)),
         })
     }
 
@@ -354,21 +363,8 @@ impl BinanceClient {
         path: &str,
         params: Vec<(String, String)>,
     ) -> AppResult<Value> {
-        let signed = self.signed_params(params)?;
-        let response = self
-            .http
-            .get(format!("{base}{path}"))
-            .header("X-MBX-APIKEY", &self.api_key)
-            .query(&signed)
-            .send()
+        self.query_with_retry(|| self.signed_get_once(base, path, &params))
             .await
-            .map_err(|error| request_error("GET", path, &error))?;
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|error| request_error("GET", path, &error))?;
-        Self::decode_response(status, &body)
     }
 
     /// 分页查询 Simple Earn 持仓。
@@ -410,6 +406,34 @@ impl BinanceClient {
 
     /// 发送不需要签名的行情/合约查询请求。
     async fn public_get(&self, base: &str, path: &str) -> AppResult<Value> {
+        self.query_with_retry(|| self.public_get_once(base, path))
+            .await
+    }
+
+    async fn signed_get_once(
+        &self,
+        base: &str,
+        path: &str,
+        params: &[(String, String)],
+    ) -> AppResult<Value> {
+        let signed = self.signed_params(params.to_vec())?;
+        let response = self
+            .http
+            .get(format!("{base}{path}"))
+            .header("X-MBX-APIKEY", &self.api_key)
+            .query(&signed)
+            .send()
+            .await
+            .map_err(|error| request_error("GET", path, &error))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| request_error("GET", path, &error))?;
+        Self::decode_response(status, &body)
+    }
+
+    async fn public_get_once(&self, base: &str, path: &str) -> AppResult<Value> {
         let response = self
             .http
             .get(format!("{base}{path}"))
@@ -424,6 +448,45 @@ impl BinanceClient {
         Self::decode_response(status, &body)
     }
 
+    async fn query_with_retry<T, F, Fut>(&self, mut request: F) -> AppResult<T>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = AppResult<T>>,
+    {
+        let mut synced_time = false;
+        let mut transient_failures = 0_usize;
+        loop {
+            match request().await {
+                Ok(value) => return Ok(value),
+                Err(error) if !synced_time && is_timestamp_error(&error) => {
+                    self.sync_server_time().await?;
+                    synced_time = true;
+                }
+                Err(error) if is_transient_query_error(&error) => {
+                    let Some(delay) = QUERY_RETRY_DELAYS.get(transient_failures).copied() else {
+                        return Err(error);
+                    };
+                    transient_failures += 1;
+                    sleep(delay).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn sync_server_time(&self) -> AppResult<()> {
+        let response = self
+            .public_get_once(&self.spot_base, "/api/v3/time")
+            .await?;
+        let server_time = response
+            .get("serverTime")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| AppError::Binance("Binance serverTime 字段缺失".to_string()))?;
+        let offset = server_time - Utc::now().timestamp_millis();
+        self.timestamp_offset_ms.store(offset, Ordering::SeqCst);
+        Ok(())
+    }
+
     /// 发送带签名的 POST 请求并归一化订单回报。
     async fn signed_post(
         &self,
@@ -431,7 +494,23 @@ impl BinanceClient {
         path: &str,
         params: Vec<(String, String)>,
     ) -> AppResult<ExchangeOrderAck> {
-        let signed = self.signed_params(params)?;
+        match self.signed_post_once(base, path, &params).await {
+            Ok(value) => Ok(value),
+            Err(error) if is_timestamp_error(&error) => {
+                self.sync_server_time().await?;
+                self.signed_post_once(base, path, &params).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn signed_post_once(
+        &self,
+        base: &str,
+        path: &str,
+        params: &[(String, String)],
+    ) -> AppResult<ExchangeOrderAck> {
+        let signed = self.signed_params(params.to_vec())?;
         let response = self
             .http
             .post(format!("{base}{path}"))
@@ -458,7 +537,23 @@ impl BinanceClient {
         path: &str,
         params: Vec<(String, String)>,
     ) -> AppResult<Value> {
-        let signed = self.signed_params(params)?;
+        match self.signed_post_value_once(base, path, &params).await {
+            Ok(value) => Ok(value),
+            Err(error) if is_timestamp_error(&error) => {
+                self.sync_server_time().await?;
+                self.signed_post_value_once(base, path, &params).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn signed_post_value_once(
+        &self,
+        base: &str,
+        path: &str,
+        params: &[(String, String)],
+    ) -> AppResult<Value> {
+        let signed = self.signed_params(params.to_vec())?;
         let response = self
             .http
             .post(format!("{base}{path}"))
@@ -481,7 +576,8 @@ impl BinanceClient {
     fn signed_params(&self, mut params: Vec<(String, String)>) -> AppResult<Vec<(String, String)>> {
         params.push((
             "timestamp".to_string(),
-            Utc::now().timestamp_millis().to_string(),
+            (Utc::now().timestamp_millis() + self.timestamp_offset_ms.load(Ordering::SeqCst))
+                .to_string(),
         ));
         params.push(("recvWindow".to_string(), "5000".to_string()));
         let query = encode_query(&params);
@@ -533,6 +629,27 @@ fn request_error(method: &str, path: &str, error: &reqwest::Error) -> AppError {
         "网络请求失败"
     };
     AppError::Binance(format!("Binance {method} {path} {reason}"))
+}
+
+fn is_timestamp_error(error: &AppError) -> bool {
+    matches!(
+        error,
+        AppError::Binance(message)
+            if message.contains("code -1021")
+                || message.contains("timestamp")
+                || message.contains("Timestamp")
+    )
+}
+
+fn is_transient_query_error(error: &AppError) -> bool {
+    matches!(
+        error,
+        AppError::Binance(message)
+            if message.contains("请求超时")
+                || message.contains("连接失败")
+                || message.contains("响应体读取失败")
+                || message.contains("网络请求失败")
+    )
 }
 
 /// 解析期权账户快照，字段名保持贴近 Binance EAPI 响应。

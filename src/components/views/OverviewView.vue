@@ -37,6 +37,20 @@ const expiringOrdersCount = computed(() => {
 const pendingTasks = computed<PendingTask[]>(() => {
   const tasks: PendingTask[] = [
     {
+      id: 'pending-recovery',
+      tone: 'warning',
+      text: `${store.pendingRecoveryCount} 条下单恢复记录待确认`,
+      view: 'orders',
+      visible: store.pendingRecoveryCount > 0,
+    },
+    {
+      id: 'runtime-health',
+      tone: 'warning',
+      text: runtimeHealthText.value,
+      view: 'risk',
+      visible: runtimeHealthAttention.value,
+    },
+    {
       id: 'expiring-orders',
       tone: '',
       text: `${expiringOrdersCount.value} 个订单将在 7 天内到期`,
@@ -53,7 +67,37 @@ const pendingTasks = computed<PendingTask[]>(() => {
   ]
   return tasks.filter(item => item.visible)
 })
+const runtimeHealthAttention = computed(() => {
+  const health = store.health
+  return Boolean(
+    health
+    && (health.consecutiveFailures > 0 || health.skippedTicks > 0)
+    && (health.status === 'degraded' || health.status === 'attention'),
+  )
+})
+const runtimeHealthText = computed(() => {
+  const health = store.health
+  if (!health) {
+    return '后台同步状态未知'
+  }
+  if (health.consecutiveFailures > 0) {
+    return `后台同步连续失败 ${health.consecutiveFailures} 次`
+  }
+  return `后台同步已跳过 ${health.skippedTicks} 轮`
+})
+const runtimeHealthLabel = computed(() => {
+  const health = store.health
+  if (!health || health.status === 'idle') return '等待连接'
+  if (health.status === 'healthy') return '运行正常'
+  if (health.status === 'degraded') return '需要关注'
+  return '待处理'
+})
 const autoStatusItems = computed(() => [
+  {
+    label: '后台同步',
+    value: runtimeHealthLabel.value,
+    tone: store.health?.status === 'healthy' ? 'active' : store.health?.status === 'idle' ? 'neutral' : 'paused',
+  },
   {
     label: '自动扫描',
     value: store.autoRule?.enabled ? '已启用' : '已暂停',

@@ -19,7 +19,7 @@ use chrono::{Duration, Local, NaiveDate, NaiveTime, Utc};
 use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex as AsyncMutex, RwLock};
 use uuid::Uuid;
 
 use crate::binance::BinanceClient;
@@ -28,8 +28,9 @@ use crate::domain::{
     CandidateScanDiagnostics, CandidateScanResult, ConnectBinanceRequest, ExchangeOrderAck,
     LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
     OrderAttemptStatus, OrderAttemptView, OrderProgressEvent, OrderProgressStage,
-    OrderProgressStatus, SimpleEarnSnapshot, SpotAccountSnapshot, StrategyCandidate,
-    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
+    OrderProgressStatus, RuntimeHealth, RuntimeHealthStatus, SimpleEarnSnapshot,
+    SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder, StrategyRequest,
+    StrategyStatus, ToggleAutoRequest,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -43,7 +44,17 @@ struct LiveAccounts {
     spot_prices: HashMap<String, Decimal>,
 }
 
+#[derive(Clone, Debug, Default)]
+struct RuntimeHealthState {
+    last_tick_at: Option<chrono::DateTime<Utc>>,
+    last_success_at: Option<chrono::DateTime<Utc>>,
+    consecutive_failures: u32,
+    skipped_ticks: u32,
+    last_error: Option<String>,
+}
+
 const ORDER_PROGRESS_EVENT: &str = "order-progress";
+const SELL_PUT_REBALANCE_USDT_BUFFER: Decimal = dec!(1.10);
 
 struct OrderProgressEmitter {
     app: Option<AppHandle>,
@@ -151,6 +162,9 @@ pub struct AppState {
     logs: Arc<LogStore>,
     worker_started: Arc<AtomicBool>,
     last_auto_scan_day: Arc<RwLock<Option<NaiveDate>>>,
+    health: Arc<RwLock<RuntimeHealthState>>,
+    maintenance_lock: Arc<AsyncMutex<()>>,
+    trade_lock: Arc<AsyncMutex<()>>,
 }
 
 impl AppState {
@@ -188,6 +202,9 @@ impl AppState {
             logs: Arc::new(logs),
             worker_started: Arc::new(AtomicBool::new(false)),
             last_auto_scan_day: Arc::new(RwLock::new(None)),
+            health: Arc::new(RwLock::new(RuntimeHealthState::default())),
+            maintenance_lock: Arc::new(AsyncMutex::new(())),
+            trade_lock: Arc::new(AsyncMutex::new(())),
         };
         state.record_log("app.started", "应用已启动，等待 Binance API 连接")?;
         Ok(state)
@@ -203,17 +220,22 @@ impl AppState {
         let scan_diagnostics = self.scan_diagnostics.read().await.clone();
         let orders = self.orders.read().await.clone();
         let accounts = self.live_accounts_if_connected().await?;
-        let order_attempts = {
+        let (order_attempts, pending_recovery_count) = {
             let persistence = self
                 .persistence
                 .lock()
                 .map_err(|error| AppError::Storage(error.to_string()))?;
-            persistence
+            let attempts = persistence
                 .list_order_attempts(20)?
                 .into_iter()
                 .map(OrderAttemptView::from)
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let pending_recovery_count = persistence.count_pending_order_attempts()?;
+            (attempts, pending_recovery_count)
         };
+        let health = self
+            .health_snapshot(settings.connected, pending_recovery_count)
+            .await;
         let option_account = accounts.as_ref().map(|accounts| &accounts.option);
         let balances = accounts.as_ref().map_or_else(Vec::new, |accounts| {
             combined_balances(
@@ -232,6 +254,7 @@ impl AppState {
             balances,
             candidates,
             scan_diagnostics,
+            health,
             pnl: strategy::pnl_report_from_orders_with_spot(&orders, spot_price),
             risk: option_account.map_or_else(
                 strategy::empty_risk_snapshot,
@@ -447,6 +470,7 @@ impl AppState {
         request: StrategyRequest,
         app: AppHandle,
     ) -> AppResult<StrategyOrder> {
+        let _trade_guard = self.trade_lock.lock().await;
         let progress = OrderProgressEmitter::manual(app, &request);
         if !request.confirm_live {
             progress.emit(
@@ -523,6 +547,7 @@ impl AppState {
     ///
     /// 这里不会信任恢复记录里的本地状态来创建订单，必须重新查询交易所事实。
     pub async fn recover_order_attempt(&self, attempt_id: String) -> AppResult<StrategyOrder> {
+        let _trade_guard = self.trade_lock.lock().await;
         let attempt = self
             .persistence
             .lock()
@@ -541,6 +566,7 @@ impl AppState {
 
     /// 同步订单、执行到期结算，然后返回完整快照。
     pub async fn sync_live_state(&self) -> AppResult<AppSnapshot> {
+        let _maintenance_guard = self.maintenance_lock.lock().await;
         self.sync_live_orders().await?;
         self.settle_due_orders().await?;
         self.snapshot().await
@@ -548,6 +574,7 @@ impl AppState {
 
     /// 手动触发到期结算扫描。
     pub async fn run_settlement_scan(&self) -> AppResult<Vec<StrategyOrder>> {
+        let _maintenance_guard = self.maintenance_lock.lock().await;
         self.sync_live_orders().await?;
         self.settle_due_orders().await
     }
@@ -563,6 +590,7 @@ impl AppState {
         if !runtime.auto_enabled {
             return Err(AppError::RiskRejected("自动定投未启用".to_string()));
         }
+        let _maintenance_guard = self.maintenance_lock.lock().await;
         self.execute_auto_strategy().await
     }
 
@@ -585,6 +613,63 @@ impl AppState {
     pub fn clear_log_files(&self) -> AppResult<LogSnapshot> {
         self.logs.clear()?;
         self.logs.snapshot()
+    }
+
+    async fn health_snapshot(
+        &self,
+        connected: bool,
+        pending_recovery_count: usize,
+    ) -> RuntimeHealth {
+        let health = self.health.read().await.clone();
+        let status = if !connected {
+            RuntimeHealthStatus::Idle
+        } else if pending_recovery_count > 0 || health.consecutive_failures >= 3 {
+            RuntimeHealthStatus::Attention
+        } else if health.consecutive_failures > 0 || health.skipped_ticks > 0 {
+            RuntimeHealthStatus::Degraded
+        } else {
+            RuntimeHealthStatus::Healthy
+        };
+        RuntimeHealth {
+            status,
+            last_tick_at: health.last_tick_at,
+            last_success_at: health.last_success_at,
+            consecutive_failures: health.consecutive_failures,
+            skipped_ticks: health.skipped_ticks,
+            last_error: health.last_error,
+            pending_recovery_count,
+        }
+    }
+
+    async fn record_background_tick_started(&self) {
+        let mut health = self.health.write().await;
+        health.last_tick_at = Some(Utc::now());
+    }
+
+    async fn record_background_tick_success(&self) {
+        let mut health = self.health.write().await;
+        health.last_success_at = Some(Utc::now());
+        health.consecutive_failures = 0;
+        health.skipped_ticks = 0;
+        health.last_error = None;
+    }
+
+    async fn record_background_tick_failure(&self, error: &AppError) {
+        let mut health = self.health.write().await;
+        health.consecutive_failures = health.consecutive_failures.saturating_add(1);
+        health.last_error = Some(error.to_string());
+    }
+
+    async fn record_background_tick_skipped(&self) -> AppResult<()> {
+        let skipped_ticks = {
+            let mut health = self.health.write().await;
+            health.skipped_ticks = health.skipped_ticks.saturating_add(1);
+            health.skipped_ticks
+        };
+        self.record_warning(
+            "background.tick_skipped",
+            &format!("上一轮后台同步仍在运行，本轮跳过，连续跳过 {skipped_ticks} 次"),
+        )
     }
 
     /// 执行真实期权下单的核心流程。
@@ -862,14 +947,47 @@ impl AppState {
         let ack = match client.place_option_order(&request, &client_order_id).await {
             Ok(ack) => ack,
             Err(error) => {
-                progress.emit(
-                    OrderProgressStage::Submit,
-                    OrderProgressStatus::Error,
-                    error.to_string(),
-                    Some(&contract.symbol),
-                    None,
-                );
-                return Err(error);
+                if is_uncertain_submit_error(&error) {
+                    self.record_warning(
+                        &format!("strategy.order.{source}.submit_uncertain"),
+                        &format!(
+                            "{} 下单请求结果不确定，正在按客户端订单号查询 Binance",
+                            contract.symbol
+                        ),
+                    )?;
+                    match client
+                        .query_option_order(&contract.symbol, None, Some(&client_order_id))
+                        .await
+                    {
+                        Ok(ack) => ack,
+                        Err(query_error) => {
+                            attempt.message = format!(
+                                "Binance 下单结果不确定，按客户端订单号查询失败：{query_error}"
+                            );
+                            attempt.updated_at = Utc::now();
+                            self.save_order_attempt(&attempt)?;
+                            progress.emit(
+                                OrderProgressStage::Submit,
+                                OrderProgressStatus::Error,
+                                "Binance 下单结果不确定，请查看恢复记录并按客户端订单号恢复",
+                                Some(&contract.symbol),
+                                None,
+                            );
+                            return Err(AppError::Binance(format!(
+                                "Binance 下单结果不确定，clientOrderId={client_order_id}。请先查看恢复记录并重新查询 Binance。原始错误：{error}；查询错误：{query_error}"
+                            )));
+                        }
+                    }
+                } else {
+                    progress.emit(
+                        OrderProgressStage::Submit,
+                        OrderProgressStatus::Error,
+                        error.to_string(),
+                        Some(&contract.symbol),
+                        None,
+                    );
+                    return Err(error);
+                }
             }
         };
         progress.emit(
@@ -1100,8 +1218,16 @@ impl AppState {
                 continue;
             }
 
-            let Some(settlement_price) = self.settlement_price(&client, &order).await? else {
-                continue;
+            let settlement_price = match self.settlement_price(&client, &order).await {
+                Ok(Some(price)) => price,
+                Ok(None) => continue,
+                Err(error) => {
+                    self.record_warning(
+                        "strategy.settlement.price_failed",
+                        &format!("{} 结算价读取失败：{}", order.option_symbol, error),
+                    )?;
+                    continue;
+                }
             };
             order.settlement_price = settlement_price;
             if !is_in_the_money(&order, settlement_price) {
@@ -1117,16 +1243,27 @@ impl AppState {
                     "strategy.settlement.otm",
                     &format!("{} 到期 OTM，无需现货补齐", order.option_symbol),
                 )?;
+                let _trade_guard = self.trade_lock.lock().await;
                 self.sweep_option_idle_usdt_best_effort(&client, "期权到期结算后归集")
                     .await;
                 updated.push(order);
                 continue;
             }
 
-            let order = self.rebalance_spot_if_needed(&client, order).await?;
-            self.sweep_option_idle_usdt_best_effort(&client, "期权到期补齐后归集")
-                .await;
-            updated.push(order);
+            match self.rebalance_spot_if_needed(&client, order).await {
+                Ok(order) => {
+                    let _trade_guard = self.trade_lock.lock().await;
+                    self.sweep_option_idle_usdt_best_effort(&client, "期权到期补齐后归集")
+                        .await;
+                    updated.push(order);
+                }
+                Err(error) => {
+                    self.record_warning(
+                        "strategy.rebalance.scan_failed",
+                        &format!("到期补齐流程失败：{error}"),
+                    )?;
+                }
+            }
         }
         Ok(updated)
     }
@@ -1153,11 +1290,13 @@ impl AppState {
     /// 对 ITM 到期订单执行现货补齐。
     ///
     /// 补齐失败会把订单置为失败状态，阻止后续自动动作继续假设该订单已完成。
+    #[allow(clippy::too_many_lines)]
     async fn rebalance_spot_if_needed(
         &self,
         client: &BinanceClient,
         mut order: StrategyOrder,
     ) -> AppResult<StrategyOrder> {
+        let _trade_guard = self.trade_lock.lock().await;
         if order.spot_order_id.is_some() {
             self.sync_spot_rebalance(client, &mut order).await?;
             self.save_order(&order).await?;
@@ -1215,15 +1354,49 @@ impl AppState {
         {
             Ok(ack) => ack,
             Err(error) => {
-                order.status = StrategyStatus::RebalanceFailed;
-                order.updated_at = Utc::now();
-                order.rebalance_message = format!("现货补齐下单失败：{error}");
-                self.save_order(&order).await?;
-                self.record_warning(
-                    "strategy.rebalance.failed",
-                    &format!("{} {}", order.option_symbol, order.rebalance_message),
-                )?;
-                return Ok(order);
+                if is_uncertain_submit_error(&error) {
+                    self.record_warning(
+                        "strategy.rebalance.submit_uncertain",
+                        &format!(
+                            "{} 现货补齐请求结果不确定，正在按客户端订单号查询 Binance",
+                            order.option_symbol
+                        ),
+                    )?;
+                    match client
+                        .query_spot_order("BTCUSDT", None, Some(&client_order_id))
+                        .await
+                    {
+                        Ok(ack) => ack,
+                        Err(query_error) => {
+                            attempt.message = format!(
+                                "Binance 现货补齐结果不确定，按客户端订单号查询失败：{query_error}"
+                            );
+                            attempt.updated_at = Utc::now();
+                            self.save_order_attempt(&attempt)?;
+                            order.status = StrategyStatus::RebalanceFailed;
+                            order.updated_at = Utc::now();
+                            order.rebalance_message = format!(
+                                "现货补齐结果不确定，请按恢复记录重新查询 Binance：{query_error}"
+                            );
+                            self.save_order(&order).await?;
+                            self.record_warning(
+                                "strategy.rebalance.failed",
+                                &format!("{} {}", order.option_symbol, order.rebalance_message),
+                            )?;
+                            return Ok(order);
+                        }
+                    }
+                } else {
+                    order.status = StrategyStatus::RebalanceFailed;
+                    order.updated_at = Utc::now();
+                    order.rebalance_message = format!("现货补齐下单失败：{error}");
+                    self.save_order(&order).await?;
+                    self.record_warning(
+                        "strategy.rebalance.failed",
+                        &format!("{} {}", order.option_symbol, order.rebalance_message),
+                    )?;
+                    return Ok(order);
+                }
             }
         };
         attempt.status = OrderAttemptStatus::SpotExchangeAck;
@@ -1288,6 +1461,7 @@ impl AppState {
             return Ok(None);
         };
 
+        let _trade_guard = self.trade_lock.lock().await;
         let order = self
             .place_live_strategy(
                 StrategyRequest {
@@ -1320,7 +1494,15 @@ impl AppState {
         self.sync_live_orders().await?;
         self.settle_due_orders().await?;
         if self.should_run_auto_now().await {
-            let _ = self.execute_auto_strategy().await?;
+            match self.execute_auto_strategy().await {
+                Ok(_) => self.mark_auto_scan_day().await,
+                Err(error) => {
+                    if should_consume_auto_day_after_error(&error) {
+                        self.mark_auto_scan_day().await;
+                    }
+                    return Err(error);
+                }
+            }
         }
         Ok(())
     }
@@ -1337,18 +1519,22 @@ impl AppState {
         if !rule.enabled {
             return false;
         }
+        if self.pending_recovery_count().unwrap_or(1) > 0 {
+            return false;
+        }
         let now = Local::now();
         let scheduled = parse_schedule_time(&rule.schedule);
         if now.time() < scheduled {
             return false;
         }
         let today = now.date_naive();
+        *self.last_auto_scan_day.read().await != Some(today)
+    }
+
+    async fn mark_auto_scan_day(&self) {
+        let today = Local::now().date_naive();
         let mut last = self.last_auto_scan_day.write().await;
-        if *last == Some(today) {
-            return false;
-        }
         *last = Some(today);
-        true
     }
 
     /// 启动后台轮询任务。
@@ -1363,8 +1549,20 @@ impl AppState {
             let mut interval = tokio::time::interval(StdDuration::from_mins(1));
             loop {
                 interval.tick().await;
-                if let Err(error) = state.background_tick().await {
-                    let _ = state.record_error("background.tick_failed", &error.to_string());
+                let Ok(_maintenance_guard) = state.maintenance_lock.try_lock() else {
+                    if let Err(error) = state.record_background_tick_skipped().await {
+                        let _ = state
+                            .record_error("background.tick_skip_log_failed", &error.to_string());
+                    }
+                    continue;
+                };
+                state.record_background_tick_started().await;
+                match state.background_tick().await {
+                    Ok(()) => state.record_background_tick_success().await,
+                    Err(error) => {
+                        state.record_background_tick_failure(&error).await;
+                        let _ = state.record_error("background.tick_failed", &error.to_string());
+                    }
                 }
             }
         });
@@ -1403,6 +1601,13 @@ impl AppState {
     /// 写错误日志。
     fn record_error(&self, event: &str, message: &str) -> AppResult<()> {
         self.logs.append(LogLevel::Error, event, message)
+    }
+
+    fn pending_recovery_count(&self) -> AppResult<usize> {
+        self.persistence
+            .lock()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+            .count_pending_order_attempts()
     }
 
     /// 保存下单/补齐恢复记录。
@@ -2095,7 +2300,7 @@ fn spot_rebalance_required_asset(order: &StrategyOrder) -> (&'static str, Decima
     match order.direction {
         StrategyDirection::SellPut => (
             "USDT",
-            order.settlement_price * order.filled_quantity * dec!(1.01),
+            order.settlement_price * order.filled_quantity * SELL_PUT_REBALANCE_USDT_BUFFER,
         ),
         StrategyDirection::SellCall => ("BTC", order.filled_quantity),
     }
@@ -2193,6 +2398,21 @@ fn is_spot_attempt(status: OrderAttemptStatus) -> bool {
             | OrderAttemptStatus::SpotExchangeAck
             | OrderAttemptStatus::SpotPersisted
             | OrderAttemptStatus::SpotPersistFailed
+    )
+}
+
+fn should_consume_auto_day_after_error(error: &AppError) -> bool {
+    !matches!(error, AppError::Binance(_))
+}
+
+fn is_uncertain_submit_error(error: &AppError) -> bool {
+    matches!(
+        error,
+        AppError::Binance(message)
+            if message.contains("请求超时")
+                || message.contains("连接失败")
+                || message.contains("响应体读取失败")
+                || message.contains("网络请求失败")
     )
 }
 

@@ -24,6 +24,10 @@ const views = {
 
 const currentView = computed(() => views[store.activeView] ?? OverviewView)
 let syncTimer: number | undefined
+let syncDelay = 60_000
+let syncDisposed = false
+const baseSyncDelay = 60_000
+const maxSyncDelay = 300_000
 
 // Naive UI 主题覆盖集中放在根组件，确保所有动态加载视图共享同一套暗色交易终端风格。
 const accentColor = '#f5b625'
@@ -72,22 +76,42 @@ const themeOverrides: GlobalThemeOverrides = {
 }
 
 onMounted(() => {
+  syncDisposed = false
   void store.bindOrderProgressEvents()
   void store.bootstrap()
-  // 后台同步使用 silent 请求，不清空前台错误提示，也不会自动开启自动策略。
-  syncTimer = window.setInterval(() => {
-    if (store.settings?.connected) {
-      void store.syncLiveState({ silent: true })
-    }
-  }, 60_000)
+  scheduleBackgroundSync()
 })
 
 onBeforeUnmount(() => {
+  syncDisposed = true
   store.disposeOrderProgressEvents()
   if (syncTimer !== undefined) {
-    window.clearInterval(syncTimer)
+    window.clearTimeout(syncTimer)
   }
 })
+
+function scheduleBackgroundSync(delay = syncDelay) {
+  if (syncDisposed) {
+    return
+  }
+  syncTimer = window.setTimeout(() => {
+    void runBackgroundSync()
+  }, delay)
+}
+
+async function runBackgroundSync() {
+  syncTimer = undefined
+  if (store.settings?.connected && !store.isLoading('sync')) {
+    await store.syncLiveState({ silent: true })
+    syncDelay = store.backgroundError
+      ? Math.min(syncDelay * 2, maxSyncDelay)
+      : baseSyncDelay
+  }
+  else if (!store.settings?.connected) {
+    syncDelay = baseSyncDelay
+  }
+  scheduleBackgroundSync()
+}
 </script>
 
 <template>

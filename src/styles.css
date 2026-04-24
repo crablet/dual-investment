@@ -267,14 +267,6 @@ input {
 
 .detail-status-tag {
   justify-self: start;
-  min-width: 58px;
-}
-
-.detail-status-tag .n-tag__content {
-  display: flex;
-  width: 100%;
-  justify-content: center;
-  text-align: center;
 }
 
 .account-row,
@@ -358,7 +350,7 @@ input {
 }
 
 .account-values em,
-.detail-list span,
+.detail-list p > span,
 .calendar-list em,
 .obligation-list em,
 .setting-list span {

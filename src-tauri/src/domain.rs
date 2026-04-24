@@ -28,6 +28,18 @@ pub enum AppError {
 /// Rust 内部统一结果类型。
 pub type AppResult<T> = Result<T, AppError>;
 
+/// 后台运行健康状态。
+///
+/// 这个状态只用于前端观测长期运行质量，不作为订单、结算或资金事实来源。
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeHealthStatus {
+    Idle,
+    Healthy,
+    Degraded,
+    Attention,
+}
+
 /// 双币赢策略方向。
 ///
 /// 当前 v1 只做卖出期权：卖 Put 用 USDT 承接低买 BTC，卖 Call 用 BTC 承接高卖。
@@ -393,6 +405,19 @@ pub struct PnlReport {
     pub points: Vec<ChartPoint>,
 }
 
+/// 后台调度器和恢复记录的运行健康快照。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeHealth {
+    pub status: RuntimeHealthStatus,
+    pub last_tick_at: Option<DateTime<Utc>>,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub consecutive_failures: u32,
+    pub skipped_ticks: u32,
+    pub last_error: Option<String>,
+    pub pending_recovery_count: usize,
+}
+
 /// 下单恢复记录的状态机。
 ///
 /// 当交易所已经接单但本地订单保存失败时，`PersistFailed`/`SpotPersistFailed`
@@ -682,6 +707,7 @@ pub struct StrategyPreview {
 #[serde(rename_all = "camelCase")]
 pub struct AppSnapshot {
     pub settings: AppSettings,
+    pub health: RuntimeHealth,
     pub balances: Vec<BalanceRow>,
     pub candidates: Vec<StrategyCandidate>,
     pub scan_diagnostics: CandidateScanDiagnostics,
