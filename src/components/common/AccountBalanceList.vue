@@ -26,9 +26,12 @@ interface AggregatedBalance {
   details: BalanceDetail[]
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   balances: BalanceRow[]
-}>()
+  emptyText?: string
+}>(), {
+  emptyText: '暂无资产',
+})
 
 const { decimal, money } = useFormat()
 
@@ -73,7 +76,7 @@ function valuationText(usdtValue: DecimalString, known: boolean): string {
 
 <template>
   <div class="account-list">
-    <p v-if="aggregatedBalances.length === 0" class="empty-state">暂无资产</p>
+    <p v-if="aggregatedBalances.length === 0" class="empty-state">{{ props.emptyText }}</p>
     <div v-for="balance in aggregatedBalances" :key="balance.asset" class="account-row">
       <span class="account-asset">
         <strong>{{ balance.asset }}</strong>

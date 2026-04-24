@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 use uuid::Uuid;
 
@@ -339,7 +339,6 @@ pub fn build_candidates(
         .iter()
         .map(|mark| (mark.symbol.as_str(), mark))
         .collect::<HashMap<_, _>>();
-    let today = Utc::now().date_naive();
     let has_open_direction = |direction| {
         orders.iter().any(|order| {
             order.direction == direction
@@ -378,7 +377,7 @@ pub fn build_candidates(
             }
             diagnostics.direction_matched += 1;
 
-            let days_to_expiry = (contract.expiry - today).num_days();
+            let days_to_expiry = days_until_expiry(contract.expiry_at);
             if !(BROWSE_MIN_DAYS_TO_EXPIRY..=BROWSE_MAX_DAYS_TO_EXPIRY).contains(&days_to_expiry) {
                 return None;
             }
@@ -393,6 +392,7 @@ pub fn build_candidates(
             let delta_abs = abs_decimal(mark.delta);
             let iv_rank = (mark.mark_iv * dec!(100)).round_dp(2);
             let quantity = rule.quantity;
+            // 候选展示使用 Binance mark price；真实下单会在编排层按 tick size 对齐。
             let limit_price = mark.mark_price.round_dp(contract.price_scale);
             let premium = (limit_price * quantity).round_dp(contract.price_scale);
             let annualized = estimate_annualized(
@@ -405,8 +405,8 @@ pub fn build_candidates(
             let strike_distance_percent =
                 calculate_strike_distance_percent(contract.strike_price, spot_price);
             let breakeven = match direction {
-                StrategyDirection::SellPut => contract.strike_price - mark.mark_price,
-                StrategyDirection::SellCall => contract.strike_price + mark.mark_price,
+                StrategyDirection::SellPut => contract.strike_price - limit_price,
+                StrategyDirection::SellCall => contract.strike_price + limit_price,
             };
             let required_margin = required_margin(contract, direction, quantity);
             let available_margin = account
@@ -447,6 +447,7 @@ pub fn build_candidates(
                 option_symbol: contract.symbol.clone(),
                 direction,
                 expiry: contract.expiry,
+                expiry_at: contract.expiry_at,
                 strike: contract.strike_price,
                 quantity,
                 limit_price,
@@ -492,7 +493,8 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
         StrategyDirection::SellPut => request.strike - request.limit_price,
         StrategyDirection::SellCall => request.strike + request.limit_price,
     };
-    let expiry_days = (request.expiry - Utc::now().date_naive()).num_days().max(1);
+    let expiry_at = request.expiry_at;
+    let expiry_days = days_until_expiry(expiry_at).max(1);
     let annualized = estimate_annualized(premium, request.strike, request.quantity, expiry_days);
     let candidate = StrategyCandidate {
         id: request
@@ -513,6 +515,7 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
         }),
         direction: request.direction,
         expiry: request.expiry,
+        expiry_at,
         strike: request.strike,
         quantity: request.quantity,
         limit_price: request.limit_price,
@@ -577,6 +580,7 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         direction: request.direction,
         status,
         expiry: request.expiry,
+        expiry_at: request.expiry_at,
         strike: request.strike,
         quantity: request.quantity,
         filled_quantity: ack.executed_qty,
@@ -602,6 +606,18 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         spot_avg_price: Decimal::ZERO,
         spot_fee: Decimal::ZERO,
     }
+}
+
+/// 按精确 UTC 到期时间计算剩余天数。
+///
+/// 候选筛选仍按“天”展示和配置，但不能只看日期。这里向上取整：不足一天仍按 1 天
+/// 处理，既保留现有候选浏览语义，也避免低估临近到期风险。
+fn days_until_expiry(expiry_at: chrono::DateTime<Utc>) -> i64 {
+    let seconds = (expiry_at - Utc::now()).num_seconds();
+    if seconds <= 0 {
+        return 0;
+    }
+    (seconds + 86_399) / 86_400
 }
 
 /// 估算年化收益率。
@@ -644,6 +660,32 @@ pub fn required_margin(
             max_decimal(maintenance_margin, max_decimal(ratio_margin, min_margin))
         }
     }
+}
+
+/// 把期权卖单限价对齐到 Binance PRICE_FILTER tick。
+///
+/// 期权下单始终是卖出限价 IOC。向下对齐不会把最低可接受权利金抬高到 mark price 之上，
+/// 同时避免把不在 tick size 网格上的价格发给 Binance。
+pub fn option_sell_limit_price(price: Decimal, contract: &OptionContract) -> Decimal {
+    let tick_aligned = align_decimal_down_to_step(price, contract.price_tick_size);
+    let min_aligned = if contract.min_price > Decimal::ZERO {
+        max_decimal(tick_aligned, contract.min_price)
+    } else {
+        tick_aligned
+    };
+    if contract.max_price > Decimal::ZERO {
+        min_decimal(min_aligned, contract.max_price)
+    } else {
+        min_aligned
+    }
+}
+
+/// 判断数值是否落在交易所 step/tick 网格上。
+pub fn decimal_matches_step(value: Decimal, step: Decimal) -> bool {
+    if step <= Decimal::ZERO {
+        return true;
+    }
+    (value / step).normalize().scale() == 0
 }
 
 /// 把 Binance 订单状态映射成本地策略状态。
@@ -718,20 +760,19 @@ fn recommendation_rank(level: RecommendationLevel) -> u8 {
     }
 }
 
-/// 候选排序：推荐优先，其次年化高优先，再按到期日近优先。
+/// 候选排序：推荐优先，其次年化高优先，再按精确到期时间近优先。
 fn sort_candidates(candidates: &mut [StrategyCandidate]) {
     candidates.sort_by(|left, right| {
         recommendation_rank(right.recommendation)
             .cmp(&recommendation_rank(left.recommendation))
             .then_with(|| right.annualized.cmp(&left.annualized))
-            .then_with(|| left.expiry.cmp(&right.expiry))
+            .then_with(|| left.expiry_at.cmp(&right.expiry_at))
     });
 }
 
 /// 默认风控规则。
 fn default_risk_rules() -> RiskRuleSet {
     RiskRuleSet {
-        max_single_order_usdt: dec!(500),
         max_daily_orders: dec!(20),
         max_margin_usage: dec!(50),
         max_drawdown: dec!(5),
@@ -766,4 +807,15 @@ fn abs_decimal(value: Decimal) -> Decimal {
 /// Decimal 最大值。
 fn max_decimal(left: Decimal, right: Decimal) -> Decimal {
     if left >= right { left } else { right }
+}
+
+fn min_decimal(left: Decimal, right: Decimal) -> Decimal {
+    if left <= right { left } else { right }
+}
+
+fn align_decimal_down_to_step(value: Decimal, step: Decimal) -> Decimal {
+    if step <= Decimal::ZERO {
+        return value;
+    }
+    (value / step).round_dp_with_strategy(0, RoundingStrategy::ToNegativeInfinity) * step
 }

@@ -29,7 +29,7 @@ const expiringOrdersCount = computed(() => {
   const today = new Date()
   const threshold = new Date(today.getTime() + 7 * 86400_000)
   return store.orders.filter((order) => {
-    const expiry = new Date(order.expiry)
+    const expiry = new Date(order.expiryAt)
     return expiry >= today && expiry <= threshold
   }).length
 })
@@ -82,6 +82,7 @@ function placeCandidate(candidate: StrategyCandidate) {
     optionSymbol: candidate.optionSymbol,
     direction: candidate.direction,
     expiry: candidate.expiry,
+    expiryAt: candidate.expiryAt,
     strike: candidate.strike,
     quantity: candidate.quantity,
     limitPrice: candidate.limitPrice,

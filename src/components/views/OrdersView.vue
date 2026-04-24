@@ -7,6 +7,7 @@ import { NButton, NIcon, NTag } from 'naive-ui'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
+import { localDateKey, localDateTimeLabel } from '@/utils/date'
 
 const store = useAppStore()
 const { directionText, directionTone, money, statusText, statusTone } = useFormat()
@@ -24,10 +25,14 @@ const totalPremium = computed(() =>
   store.orders.reduce((sum, order) => sum + Number(order.premium), 0),
 )
 const todayExpiryCount = computed(() => {
-  const today = new Date().toISOString().slice(0, 10)
-  return store.orders.filter(order => order.expiry === today).length
+  const today = localDateKey(new Date().toISOString())
+  return store.orders.filter(order => localDateKey(order.expiryAt) === today).length
 })
 const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
+
+function expiryLabel(order: { expiryAt: string }) {
+  return localDateTimeLabel(order.expiryAt)
+}
 </script>
 
 <template>
@@ -79,7 +84,7 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
               <td><NTag :type="directionTone(order.direction)" size="small">{{ directionText(order.direction) }}</NTag></td>
               <td>{{ order.symbol }}</td>
               <td>{{ money(order.strike) }}</td>
-              <td>{{ order.expiry }}</td>
+              <td>{{ expiryLabel(order) }}</td>
               <td>{{ order.filledQuantity }} / {{ order.quantity }}</td>
               <td>{{ money(order.premium) }}</td>
               <td><NTag :type="statusTone(order.status)" size="small">{{ statusText(order.status) }}</NTag></td>
@@ -93,12 +98,15 @@ const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
     <Panel title="订单详情" class="span-4">
       <div v-if="selected" class="detail-list">
         <h3>{{ selected.id }}</h3>
-        <NTag :type="statusTone(selected.status)">{{ statusText(selected.status) }}</NTag>
+        <NTag :type="statusTone(selected.status)" size="small" class="detail-status-tag">
+          {{ statusText(selected.status) }}
+        </NTag>
         <p><span>方向</span><strong>{{ directionText(selected.direction) }}</strong></p>
         <p><span>标的</span><strong>{{ selected.symbol }}</strong></p>
         <p><span>期权合约</span><strong>{{ selected.optionSymbol }}</strong></p>
         <p><span>交易所状态</span><strong>{{ selected.exchangeStatus }}</strong></p>
         <p><span>客户端订单号</span><strong>{{ selected.clientOrderId }}</strong></p>
+        <p><span>到期时间</span><strong>{{ expiryLabel(selected) }}</strong></p>
         <p><span>执行价</span><strong>{{ money(selected.strike) }}</strong></p>
         <p><span>成交数量</span><strong>{{ selected.filledQuantity }} / {{ selected.quantity }} 张</strong></p>
         <p><span>成交均价</span><strong>{{ money(selected.avgPrice) }}</strong></p>

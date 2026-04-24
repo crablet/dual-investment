@@ -182,6 +182,7 @@ pub struct StrategyCandidate {
     pub option_symbol: String,
     pub direction: StrategyDirection,
     pub expiry: NaiveDate,
+    pub expiry_at: DateTime<Utc>,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
@@ -252,6 +253,7 @@ pub struct StrategyOrder {
     pub direction: StrategyDirection,
     pub status: StrategyStatus,
     pub expiry: NaiveDate,
+    pub expiry_at: DateTime<Utc>,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
@@ -321,8 +323,6 @@ pub struct AutoInvestmentRule {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RiskRuleSet {
-    #[serde(with = "rust_decimal::serde::str")]
-    pub max_single_order_usdt: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub max_daily_orders: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
@@ -475,6 +475,45 @@ impl From<OrderAttempt> for OrderAttemptView {
     }
 }
 
+/// 手动下单进度阶段。
+///
+/// 这些事件只用于前端展示当前流程，不作为交易事实来源。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OrderProgressStage {
+    Validate,
+    Funding,
+    Risk,
+    Submit,
+    Persist,
+}
+
+/// 手动下单进度状态。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OrderProgressStatus {
+    Pending,
+    Running,
+    Success,
+    Error,
+}
+
+/// 手动下单进度事件。
+///
+/// `message` 只能是脱敏摘要，不应包含签名请求、Secret 或 Binance 原始响应。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderProgressEvent {
+    pub flow_id: String,
+    pub source: String,
+    pub stage: OrderProgressStage,
+    pub status: OrderProgressStatus,
+    pub message: String,
+    pub timestamp: DateTime<Utc>,
+    pub option_symbol: Option<String>,
+    pub exchange_order_id: Option<String>,
+}
+
 /// Binance 期权账户快照。
 ///
 /// 原始响应会在 `binance.rs` 被解析成该结构，其他模块不直接依赖交易所 JSON 字段。
@@ -566,15 +605,20 @@ pub struct OptionContract {
     pub unit: Decimal,
     pub min_qty: Decimal,
     pub max_qty: Decimal,
+    pub quantity_step_size: Decimal,
     pub initial_margin: Decimal,
     pub maintenance_margin: Decimal,
     pub min_initial_margin: Decimal,
     pub min_maintenance_margin: Decimal,
+    pub min_price: Decimal,
+    pub max_price: Decimal,
+    pub price_tick_size: Decimal,
     pub price_scale: u32,
     pub quantity_scale: u32,
     pub quote_asset: String,
     pub status: String,
     pub expiry: NaiveDate,
+    pub expiry_at: DateTime<Utc>,
 }
 
 /// Binance mark price 行情。
@@ -665,10 +709,12 @@ pub struct ConnectBinanceRequest {
 #[serde(rename_all = "camelCase")]
 pub struct StrategyRequest {
     pub candidate_id: Option<String>,
+    pub client_flow_id: Option<String>,
     pub symbol: String,
     pub option_symbol: Option<String>,
     pub direction: StrategyDirection,
     pub expiry: NaiveDate,
+    pub expiry_at: DateTime<Utc>,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike: Decimal,
     #[serde(with = "rust_decimal::serde::str")]

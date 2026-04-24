@@ -2,10 +2,12 @@
 // 持仓与现货视图。
 // 展示期权义务仓和现货资产；所有资金事实来自后端快照，前端仅做展示聚合。
 import { computed } from 'vue'
+import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
+import { localDateTimeLabel } from '@/utils/date'
 
 const store = useAppStore()
 const { decimal, money } = useFormat()
@@ -31,24 +33,16 @@ const balanceBreakdown = computed(() =>
     color: ['#f5b625', '#5f8ff5', '#52c66f'][index % 3],
   })),
 )
+
+function expiryLabel(order: { expiryAt: string }) {
+  return localDateTimeLabel(order.expiryAt)
+}
 </script>
 
 <template>
   <div class="view-grid">
-    <Panel title="现货持仓" class="span-4">
-      <div class="account-list large">
-        <p v-if="store.balances.length === 0" class="empty-state">暂无持仓</p>
-        <div v-for="balance in store.balances" :key="balance.asset" class="account-row">
-          <span class="account-asset">
-            <strong>{{ balance.asset }}</strong>
-            <small>{{ balance.source }}</small>
-          </span>
-          <span class="account-values">
-            <strong>{{ decimal(balance.free) }}</strong>
-            <em>{{ money(balance.usdtValue) }}</em>
-          </span>
-        </div>
-      </div>
+    <Panel title="账户概览" class="span-4">
+      <AccountBalanceList :balances="store.balances" class="large" empty-text="暂无持仓" />
     </Panel>
 
     <Panel title="义务仓概览" class="span-4">
@@ -93,7 +87,7 @@ const balanceBreakdown = computed(() =>
               <td>{{ order.direction === 'sellPut' ? '卖出看跌（义务）' : '卖出看涨（义务）' }}</td>
               <td>{{ decimal(order.quantity) }} BTC</td>
               <td>{{ money(order.strike) }}</td>
-              <td>{{ order.expiry }}</td>
+              <td>{{ expiryLabel(order) }}</td>
               <td class="positive">{{ money(order.estimatedPnl) }}</td>
               <td>{{ order.status === 'partiallyFilled' ? '部分成交' : '运行中' }}</td>
             </tr>
@@ -116,7 +110,7 @@ const balanceBreakdown = computed(() =>
       <div class="calendar-list">
         <p v-if="store.orders.length === 0" class="empty-state">暂无到期订单</p>
         <article v-for="order in store.orders" :key="order.id">
-          <strong>{{ order.expiry }}</strong>
+          <strong>{{ expiryLabel(order) }}</strong>
           <span>{{ order.direction === 'sellPut' ? '卖出看跌' : '卖出看涨' }}</span>
           <em>{{ order.quantity }} BTC</em>
         </article>

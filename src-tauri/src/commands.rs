@@ -57,11 +57,12 @@ pub async fn scan_candidates(state: State<'_, AppState>) -> Result<CandidateScan
 /// 发送手动真实策略订单。
 #[tauri::command]
 pub async fn place_manual_strategy(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: StrategyRequest,
 ) -> Result<StrategyOrder, String> {
     state
-        .place_manual_strategy(request)
+        .place_manual_strategy(request, app)
         .await
         .map_err(to_command_error)
 }

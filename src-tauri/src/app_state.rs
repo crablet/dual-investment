@@ -18,6 +18,7 @@ use std::{
 use chrono::{Duration, Local, NaiveDate, NaiveTime, Utc};
 use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -26,9 +27,9 @@ use crate::domain::{
     AppError, AppResult, AppSettings, AppSnapshot, AutoInvestmentRule, BalanceRow,
     CandidateScanDiagnostics, CandidateScanResult, ConnectBinanceRequest, ExchangeOrderAck,
     LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
-    OrderAttemptStatus, OrderAttemptView, SimpleEarnSnapshot, SpotAccountSnapshot,
-    StrategyCandidate, StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus,
-    ToggleAutoRequest,
+    OrderAttemptStatus, OrderAttemptView, OrderProgressEvent, OrderProgressStage,
+    OrderProgressStatus, SimpleEarnSnapshot, SpotAccountSnapshot, StrategyCandidate,
+    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -40,6 +41,56 @@ struct LiveAccounts {
     spot: SpotAccountSnapshot,
     earn: SimpleEarnSnapshot,
     spot_prices: HashMap<String, Decimal>,
+}
+
+const ORDER_PROGRESS_EVENT: &str = "order-progress";
+
+struct OrderProgressEmitter {
+    app: Option<AppHandle>,
+    flow_id: Option<String>,
+    source: String,
+}
+
+impl OrderProgressEmitter {
+    fn manual(app: AppHandle, request: &StrategyRequest) -> Self {
+        Self {
+            app: Some(app),
+            flow_id: request.client_flow_id.clone(),
+            source: "manual".to_string(),
+        }
+    }
+
+    fn disabled(source: &str) -> Self {
+        Self {
+            app: None,
+            flow_id: None,
+            source: source.to_string(),
+        }
+    }
+
+    fn emit(
+        &self,
+        stage: OrderProgressStage,
+        status: OrderProgressStatus,
+        message: impl Into<String>,
+        option_symbol: Option<&str>,
+        exchange_order_id: Option<&str>,
+    ) {
+        let (Some(app), Some(flow_id)) = (&self.app, &self.flow_id) else {
+            return;
+        };
+        let event = OrderProgressEvent {
+            flow_id: flow_id.clone(),
+            source: self.source.clone(),
+            stage,
+            status,
+            message: message.into(),
+            timestamp: Utc::now(),
+            option_symbol: option_symbol.map(str::to_string),
+            exchange_order_id: exchange_order_id.map(str::to_string),
+        };
+        let _ = app.emit(ORDER_PROGRESS_EVENT, event);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -394,12 +445,20 @@ impl AppState {
     pub async fn place_manual_strategy(
         &self,
         request: StrategyRequest,
+        app: AppHandle,
     ) -> AppResult<StrategyOrder> {
-        validate_request(&request)?;
+        let progress = OrderProgressEmitter::manual(app, &request);
         if !request.confirm_live {
+            progress.emit(
+                OrderProgressStage::Validate,
+                OrderProgressStatus::Error,
+                "手动下单需要显式确认",
+                request.option_symbol.as_deref(),
+                None,
+            );
             return Err(AppError::RiskRejected("手动下单需要显式确认".to_string()));
         }
-        self.place_live_strategy(request, "manual").await
+        self.place_live_strategy(request, "manual", &progress).await
     }
 
     /// 保存自动复投规则。
@@ -537,9 +596,45 @@ impl AppState {
         &self,
         mut request: StrategyRequest,
         source: &str,
+        progress: &OrderProgressEmitter,
     ) -> AppResult<StrategyOrder> {
-        validate_request(&request)?;
-        let client = self.live_client().await?;
+        progress.emit(
+            OrderProgressStage::Validate,
+            OrderProgressStatus::Running,
+            "正在校验下单参数",
+            request.option_symbol.as_deref(),
+            None,
+        );
+        if let Err(error) = validate_request(&request) {
+            progress.emit(
+                OrderProgressStage::Validate,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                request.option_symbol.as_deref(),
+                None,
+            );
+            return Err(error);
+        }
+        let client = match self.live_client().await {
+            Ok(client) => client,
+            Err(error) => {
+                progress.emit(
+                    OrderProgressStage::Validate,
+                    OrderProgressStatus::Error,
+                    error.to_string(),
+                    request.option_symbol.as_deref(),
+                    None,
+                );
+                return Err(error);
+            }
+        };
+        progress.emit(
+            OrderProgressStage::Validate,
+            OrderProgressStatus::Running,
+            "正在读取 Binance 账户、合约和行情",
+            request.option_symbol.as_deref(),
+            None,
+        );
         let account_task = spawn_binance_request({
             let client = client.clone();
             async move { client.option_account().await }
@@ -555,27 +650,161 @@ impl AppState {
         let account = join_binance_request(account_task).await;
         let contracts = join_binance_request(contracts_task).await;
         let marks = join_binance_request(marks_task).await;
-        let mut account = account?;
-        let contracts = contracts?;
-        let marks = marks?;
+        let mut account = match account {
+            Ok(account) => account,
+            Err(error) => {
+                progress.emit(
+                    OrderProgressStage::Validate,
+                    OrderProgressStatus::Error,
+                    error.to_string(),
+                    request.option_symbol.as_deref(),
+                    None,
+                );
+                return Err(error);
+            }
+        };
+        let contracts = match contracts {
+            Ok(contracts) => contracts,
+            Err(error) => {
+                progress.emit(
+                    OrderProgressStage::Validate,
+                    OrderProgressStatus::Error,
+                    error.to_string(),
+                    request.option_symbol.as_deref(),
+                    None,
+                );
+                return Err(error);
+            }
+        };
+        let marks = match marks {
+            Ok(marks) => marks,
+            Err(error) => {
+                progress.emit(
+                    OrderProgressStage::Validate,
+                    OrderProgressStatus::Error,
+                    error.to_string(),
+                    request.option_symbol.as_deref(),
+                    None,
+                );
+                return Err(error);
+            }
+        };
         let orders = self.orders.read().await.clone();
-        let contract = resolve_contract(&request, &contracts)?;
+        let contract = match resolve_contract(&request, &contracts) {
+            Ok(contract) => contract,
+            Err(error) => {
+                progress.emit(
+                    OrderProgressStage::Validate,
+                    OrderProgressStatus::Error,
+                    error.to_string(),
+                    request.option_symbol.as_deref(),
+                    None,
+                );
+                return Err(error);
+            }
+        };
         request.option_symbol = Some(contract.symbol.clone());
-        validate_contract_terms(&request, contract, &marks)?;
-        enforce_pre_funding_risk_rules(&request, contract, &account, &orders)?;
-        account = self
+        request.expiry_at = contract.expiry_at;
+        request.limit_price = strategy::option_sell_limit_price(request.limit_price, contract);
+        if let Err(error) = validate_contract_terms(&request, contract, &marks) {
+            progress.emit(
+                OrderProgressStage::Validate,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                None,
+            );
+            return Err(error);
+        }
+        progress.emit(
+            OrderProgressStage::Validate,
+            OrderProgressStatus::Success,
+            "合约、数量和价格约束已通过",
+            Some(&contract.symbol),
+            None,
+        );
+
+        if let Err(error) = enforce_pre_funding_risk_rules(&account, &orders) {
+            progress.emit(
+                OrderProgressStage::Risk,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                None,
+            );
+            return Err(error);
+        }
+
+        progress.emit(
+            OrderProgressStage::Funding,
+            OrderProgressStatus::Running,
+            "正在检查并准备期权保证金资金",
+            Some(&contract.symbol),
+            None,
+        );
+        account = match self
             .prepare_option_margin_funding(&client, &account, contract, &request)
-            .await?;
+            .await
+        {
+            Ok(account) => {
+                progress.emit(
+                    OrderProgressStage::Funding,
+                    OrderProgressStatus::Success,
+                    "期权保证金资金已准备完成",
+                    Some(&contract.symbol),
+                    None,
+                );
+                account
+            }
+            Err(error) => {
+                progress.emit(
+                    OrderProgressStage::Funding,
+                    OrderProgressStatus::Error,
+                    error.to_string(),
+                    Some(&contract.symbol),
+                    None,
+                );
+                return Err(error);
+            }
+        };
         if let Err(error) = validate_contract_order(&request, contract, &account, &marks) {
             self.sweep_option_idle_usdt_best_effort(&client, "期权下单校验失败后归集")
                 .await;
+            progress.emit(
+                OrderProgressStage::Funding,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                None,
+            );
             return Err(error);
         }
+        progress.emit(
+            OrderProgressStage::Risk,
+            OrderProgressStatus::Running,
+            "正在执行本地下单风控",
+            Some(&contract.symbol),
+            None,
+        );
         if let Err(error) = enforce_risk_rules(&request, contract, &account, &orders) {
             self.sweep_option_idle_usdt_best_effort(&client, "期权风控拒绝后归集")
                 .await;
+            progress.emit(
+                OrderProgressStage::Risk,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                None,
+            );
             return Err(error);
         }
+        progress.emit(
+            OrderProgressStage::Risk,
+            OrderProgressStatus::Success,
+            "本地下单风控已通过",
+            Some(&contract.symbol),
+            None,
+        );
 
         let client_order_id = make_client_order_id(request.direction);
         let now = Utc::now();
@@ -592,8 +821,24 @@ impl AppState {
             created_at: now,
             updated_at: now,
         };
-        self.save_order_attempt(&attempt)?;
-        self.record_log(
+        progress.emit(
+            OrderProgressStage::Submit,
+            OrderProgressStatus::Running,
+            "正在写入恢复记录并发送 Binance 订单",
+            Some(&contract.symbol),
+            None,
+        );
+        if let Err(error) = self.save_order_attempt(&attempt) {
+            progress.emit(
+                OrderProgressStage::Submit,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                None,
+            );
+            return Err(error);
+        }
+        if let Err(error) = self.record_log(
             &format!("strategy.order.{source}.attempted"),
             &format!(
                 "{} {} {} 张，合约 {}，价格 {}",
@@ -603,16 +848,58 @@ impl AppState {
                 contract.symbol,
                 request.limit_price
             ),
-        )?;
+        ) {
+            progress.emit(
+                OrderProgressStage::Submit,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                None,
+            );
+            return Err(error);
+        }
 
-        let ack = client
-            .place_option_order(&request, &client_order_id)
-            .await?;
+        let ack = match client.place_option_order(&request, &client_order_id).await {
+            Ok(ack) => ack,
+            Err(error) => {
+                progress.emit(
+                    OrderProgressStage::Submit,
+                    OrderProgressStatus::Error,
+                    error.to_string(),
+                    Some(&contract.symbol),
+                    None,
+                );
+                return Err(error);
+            }
+        };
+        progress.emit(
+            OrderProgressStage::Submit,
+            OrderProgressStatus::Success,
+            format!("Binance 已返回订单号，状态 {}", ack.status),
+            Some(&contract.symbol),
+            Some(&ack.order_id),
+        );
         attempt.status = OrderAttemptStatus::ExchangeAck;
         attempt.exchange_order_id = Some(ack.order_id.clone());
         attempt.message = format!("Binance 已返回订单号，状态 {}", ack.status);
         attempt.updated_at = Utc::now();
-        self.save_order_attempt(&attempt)?;
+        progress.emit(
+            OrderProgressStage::Persist,
+            OrderProgressStatus::Running,
+            "正在保存本地订单记录",
+            Some(&contract.symbol),
+            Some(&ack.order_id),
+        );
+        if let Err(error) = self.save_order_attempt(&attempt) {
+            progress.emit(
+                OrderProgressStage::Persist,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                Some(&ack.order_id),
+            );
+            return Err(error);
+        }
 
         let order = strategy::order_from_request(&request, &ack);
         if let Err(error) = self.save_order(&order).await {
@@ -620,6 +907,13 @@ impl AppState {
             attempt.message = "交易所订单已创建，但订单记录保存失败".to_string();
             attempt.updated_at = Utc::now();
             self.save_order_attempt(&attempt)?;
+            progress.emit(
+                OrderProgressStage::Persist,
+                OrderProgressStatus::Error,
+                "交易所订单已创建，但订单记录保存失败，请查看恢复记录",
+                Some(&contract.symbol),
+                Some(&ack.order_id),
+            );
             return Err(AppError::Storage(format!(
                 "交易所订单已创建但订单记录保存失败，exchangeOrderId={}，clientOrderId={}。请先用 Binance 后台核对后再继续操作。原始错误：{}",
                 ack.order_id, client_order_id, error
@@ -629,8 +923,17 @@ impl AppState {
         attempt.status = OrderAttemptStatus::Persisted;
         attempt.message = "交易所订单和订单记录均已保存".to_string();
         attempt.updated_at = Utc::now();
-        self.save_order_attempt(&attempt)?;
-        self.record_log(
+        if let Err(error) = self.save_order_attempt(&attempt) {
+            progress.emit(
+                OrderProgressStage::Persist,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                Some(&ack.order_id),
+            );
+            return Err(error);
+        }
+        if let Err(error) = self.record_log(
             &format!("strategy.order.{source}.created"),
             &format!(
                 "{} {} {} 张，执行价 {}，交易所状态 {}",
@@ -640,7 +943,23 @@ impl AppState {
                 order.strike,
                 order.exchange_status
             ),
-        )?;
+        ) {
+            progress.emit(
+                OrderProgressStage::Persist,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                Some(&ack.order_id),
+            );
+            return Err(error);
+        }
+        progress.emit(
+            OrderProgressStage::Persist,
+            OrderProgressStatus::Success,
+            format!("订单已保存，交易所状态 {}", order.exchange_status),
+            Some(&contract.symbol),
+            Some(&ack.order_id),
+        );
         self.sweep_option_idle_usdt_best_effort(&client, "期权下单后归集")
             .await;
         Ok(order)
@@ -658,7 +977,17 @@ impl AppState {
                 Some(&attempt.client_order_id),
             )
             .await?;
-        let request = request_from_option_attempt(&attempt, &ack)?;
+        let contracts = client.exchange_info().await?;
+        let contract = contracts
+            .iter()
+            .find(|contract| contract.symbol == attempt.option_symbol)
+            .ok_or_else(|| {
+                AppError::RiskRejected(
+                    "恢复记录中的 Binance 期权合约已不在 exchangeInfo 中，无法精确恢复到期时间"
+                        .to_string(),
+                )
+            })?;
+        let request = request_from_option_attempt(&attempt, &ack, contract)?;
         let order = strategy::order_from_request(&request, &ack);
         self.save_order(&order).await?;
         attempt.status = OrderAttemptStatus::Persisted;
@@ -771,7 +1100,9 @@ impl AppState {
                 continue;
             }
 
-            let settlement_price = self.settlement_price(&client, &order).await?;
+            let Some(settlement_price) = self.settlement_price(&client, &order).await? else {
+                continue;
+            };
             order.settlement_price = settlement_price;
             if !is_in_the_money(&order, settlement_price) {
                 order.status = StrategyStatus::Settled;
@@ -804,27 +1135,19 @@ impl AppState {
         &self,
         client: &BinanceClient,
         order: &StrategyOrder,
-    ) -> AppResult<Decimal> {
-        let start = order
-            .expiry
-            .and_time(NaiveTime::MIN)
-            .and_utc()
-            .timestamp_millis();
-        let end = (order.expiry + Duration::days(2))
-            .and_time(NaiveTime::MIN)
-            .and_utc()
-            .timestamp_millis();
-        // 优先使用 Binance 行权记录；接口短暂不可用时退回现货价作为人工可见的参考价。
-        if let Ok(records) = client
+    ) -> AppResult<Option<Decimal>> {
+        let expiry_at = order.expiry_at;
+        let start = (expiry_at - Duration::hours(1)).timestamp_millis();
+        let end = (expiry_at + Duration::days(2)).timestamp_millis();
+        let records = client
             .exercise_records(&order.option_symbol, start, end)
-            .await
-            && let Some(record) = records.into_iter().find(|record| {
+            .await?;
+        Ok(records
+            .into_iter()
+            .find(|record| {
                 record.symbol == order.option_symbol && record.settlement_price > Decimal::ZERO
             })
-        {
-            return Ok(record.settlement_price);
-        }
-        client.spot_price("BTCUSDT").await
+            .map(|record| record.settlement_price))
     }
 
     /// 对 ITM 到期订单执行现货补齐。
@@ -969,16 +1292,19 @@ impl AppState {
             .place_live_strategy(
                 StrategyRequest {
                     candidate_id: Some(candidate.id),
+                    client_flow_id: None,
                     symbol: candidate.symbol,
                     option_symbol: Some(candidate.option_symbol),
                     direction: candidate.direction,
                     expiry: candidate.expiry,
+                    expiry_at: candidate.expiry_at,
                     strike: candidate.strike,
                     quantity: candidate.quantity,
                     limit_price: candidate.limit_price,
                     confirm_live: true,
                 },
                 "auto",
+                &OrderProgressEmitter::disabled("auto"),
             )
             .await?;
         Ok(Some(order))
@@ -1421,8 +1747,9 @@ fn client_from_runtime(runtime: &RuntimeConfig) -> AppResult<BinanceClient> {
 fn request_from_option_attempt(
     attempt: &OrderAttempt,
     ack: &ExchangeOrderAck,
+    contract: &OptionContract,
 ) -> AppResult<StrategyRequest> {
-    let (expiry, strike, direction) = parse_option_symbol(&attempt.option_symbol)?;
+    let (_expiry, strike, direction) = parse_option_symbol(&attempt.option_symbol)?;
     let quantity = if ack.quantity > Decimal::ZERO {
         ack.quantity
     } else {
@@ -1435,10 +1762,12 @@ fn request_from_option_attempt(
     };
     Ok(StrategyRequest {
         candidate_id: None,
+        client_flow_id: None,
         symbol: attempt.symbol.clone(),
         option_symbol: Some(attempt.option_symbol.clone()),
         direction,
-        expiry,
+        expiry: contract.expiry,
+        expiry_at: contract.expiry_at,
         strike,
         quantity,
         limit_price,
@@ -1582,10 +1911,34 @@ fn validate_contract_terms(
             contract.quantity_scale
         )));
     }
+    if !strategy::decimal_matches_step(request.quantity, contract.quantity_step_size) {
+        return Err(AppError::RiskRejected(format!(
+            "下单数量必须按 Binance step size {} 递增",
+            contract.quantity_step_size
+        )));
+    }
+    if contract.min_price > Decimal::ZERO && request.limit_price < contract.min_price {
+        return Err(AppError::RiskRejected(format!(
+            "限价低于 Binance 合约最小价格 {}",
+            contract.min_price
+        )));
+    }
+    if contract.max_price > Decimal::ZERO && request.limit_price > contract.max_price {
+        return Err(AppError::RiskRejected(format!(
+            "限价高于 Binance 合约最大价格 {}",
+            contract.max_price
+        )));
+    }
     if decimal_scale(request.limit_price) > contract.price_scale {
         return Err(AppError::RiskRejected(format!(
             "限价精度超过 Binance 合约限制 {} 位",
             contract.price_scale
+        )));
+    }
+    if !strategy::decimal_matches_step(request.limit_price, contract.price_tick_size) {
+        return Err(AppError::RiskRejected(format!(
+            "限价必须按 Binance tick size {} 递增",
+            contract.price_tick_size
         )));
     }
 
@@ -1615,7 +1968,7 @@ fn enforce_risk_rules(
 ) -> AppResult<()> {
     let rules = strategy::risk_snapshot_from_account(account).rules;
     let required = strategy::required_margin(contract, request.direction, request.quantity);
-    enforce_pre_funding_risk_rules(request, contract, account, orders)?;
+    enforce_pre_funding_risk_rules(account, orders)?;
 
     if let Some(usdt) = account.asset("USDT") {
         let equity = if usdt.adjusted_equity > Decimal::ZERO {
@@ -1639,20 +1992,10 @@ fn enforce_risk_rules(
 
 /// 校验不会因为资金划转而改变的风控条件，避免为必然拒绝的订单移动资金。
 fn enforce_pre_funding_risk_rules(
-    request: &StrategyRequest,
-    contract: &OptionContract,
     account: &OptionAccountSnapshot,
     orders: &[StrategyOrder],
 ) -> AppResult<()> {
     let rules = strategy::risk_snapshot_from_account(account).rules;
-    let required = strategy::required_margin(contract, request.direction, request.quantity);
-    if required > rules.max_single_order_usdt {
-        return Err(AppError::RiskRejected(format!(
-            "单笔预计保证金 {} 超过风控上限 {}",
-            required.round_dp(2),
-            rules.max_single_order_usdt.round_dp(2)
-        )));
-    }
 
     let today = Utc::now().date_naive();
     let daily_orders = orders
@@ -1868,7 +2211,7 @@ fn should_sync_option_order(order: &StrategyOrder) -> bool {
 
 /// 判断订单是否已经过期并需要结算处理。
 fn should_settle_order(order: &StrategyOrder) -> bool {
-    Utc::now().date_naive() > order.expiry
+    Utc::now() >= order.expiry_at
         && matches!(
             order.status,
             StrategyStatus::Running | StrategyStatus::PartiallyFilled | StrategyStatus::Pending

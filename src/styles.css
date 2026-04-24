@@ -265,6 +265,18 @@ input {
   grid-column: 1 / -1;
 }
 
+.detail-status-tag {
+  justify-self: start;
+  min-width: 58px;
+}
+
+.detail-status-tag .n-tag__content {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+}
+
 .account-row,
 .task-row,
 .detail-list p,
@@ -1264,11 +1276,11 @@ input {
 
 .opportunity-row {
   display: grid;
-  grid-template-columns: minmax(116px, 1.2fr) minmax(62px, 0.65fr) minmax(92px, 0.9fr) minmax(78px, 0.75fr) minmax(78px, 0.8fr);
+  grid-template-columns: minmax(104px, 1fr) minmax(52px, 0.5fr) minmax(128px, 1.2fr) minmax(64px, 0.65fr) minmax(88px, 0.85fr);
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-width: 520px;
+  min-width: 100%;
   min-height: 72px;
   padding: 0 8px;
   border: 0;
@@ -1434,6 +1446,100 @@ button.opportunity-row.selected:hover {
   display: grid;
   gap: 7px;
   color: var(--muted);
+}
+
+.order-progress-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(245, 182, 37, 0.28);
+  border-radius: 8px;
+  background: rgba(245, 182, 37, 0.06);
+}
+
+.order-progress-panel header,
+.order-progress-actions,
+.order-progress-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.order-progress-panel header span,
+.order-progress-footer span {
+  color: var(--muted);
+}
+
+.order-progress-panel header strong {
+  display: block;
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-progress-steps {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.order-progress-steps li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--muted);
+}
+
+.order-progress-steps .n-icon {
+  margin-top: 2px;
+}
+
+.order-progress-steps li.status-running .n-icon {
+  color: var(--gold);
+}
+
+.order-progress-steps li.status-success .n-icon {
+  color: var(--green);
+}
+
+.order-progress-steps li.status-error .n-icon {
+  color: var(--red);
+}
+
+.order-progress-steps strong,
+.order-progress-steps span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.order-progress-steps strong {
+  color: var(--text);
+}
+
+.order-progress-result {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.order-progress-result.success {
+  background: rgba(82, 198, 111, 0.08);
+  color: var(--green);
+}
+
+.order-progress-result.error {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  background: rgba(239, 91, 76, 0.08);
+  color: var(--red);
 }
 
 .advanced-toggle {
@@ -1618,12 +1724,25 @@ button.opportunity-row.selected:hover {
 
 .alert-list article {
   display: grid;
-  grid-template-columns: 56px 1fr auto;
-  gap: 12px;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+
+.alert-severity-tag {
+  justify-self: start;
+  width: 44px;
+  min-width: 44px;
+}
+
+.alert-severity-tag .n-tag__content {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  text-align: center;
 }
 
 .alert-list span {

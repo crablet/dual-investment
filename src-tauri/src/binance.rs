@@ -727,9 +727,11 @@ fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
         .get("expiryDate")
         .and_then(Value::as_i64)
         .ok_or_else(|| AppError::Binance("期权合约缺少 expiryDate".to_string()))?;
-    let expiry = DateTime::<Utc>::from_timestamp_millis(expiry_ms)
-        .ok_or_else(|| AppError::Binance("期权合约 expiryDate 无效".to_string()))?
-        .date_naive();
+    let expiry_at = DateTime::<Utc>::from_timestamp_millis(expiry_ms)
+        .ok_or_else(|| AppError::Binance("期权合约 expiryDate 无效".to_string()))?;
+    let expiry = expiry_at.date_naive();
+    let price_filter = exchange_info_filter(value, "PRICE_FILTER")?;
+    let lot_filter = exchange_info_filter(value, "LOT_SIZE")?;
 
     Ok(OptionContract {
         symbol: string_field(value, "symbol")?,
@@ -739,16 +741,36 @@ fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
         unit: decimal_field(value, "unit")?,
         min_qty: decimal_field(value, "minQty")?,
         max_qty: decimal_field(value, "maxQty")?,
+        quantity_step_size: decimal_field(lot_filter, "stepSize")?,
         initial_margin: decimal_field(value, "initialMargin")?,
         maintenance_margin: decimal_field(value, "maintenanceMargin")?,
         min_initial_margin: decimal_field(value, "minInitialMargin")?,
         min_maintenance_margin: decimal_field(value, "minMaintenanceMargin")?,
+        min_price: decimal_field(price_filter, "minPrice")?,
+        max_price: decimal_field(price_filter, "maxPrice")?,
+        price_tick_size: decimal_field(price_filter, "tickSize")?,
         price_scale: u32_field(value, "priceScale")?,
         quantity_scale: u32_field(value, "quantityScale")?,
         quote_asset: string_field(value, "quoteAsset")?,
         status: string_field(value, "status")?,
         expiry,
+        expiry_at,
     })
+}
+
+fn exchange_info_filter<'a>(value: &'a Value, filter_type: &str) -> AppResult<&'a Value> {
+    value
+        .get("filters")
+        .and_then(Value::as_array)
+        .and_then(|filters| {
+            filters.iter().find(|filter| {
+                filter
+                    .get("filterType")
+                    .map(value_to_string)
+                    .is_some_and(|current| current == filter_type)
+            })
+        })
+        .ok_or_else(|| AppError::Binance(format!("Binance 期权合约缺少 {filter_type} 过滤器")))
 }
 
 /// 解析 mark price 列表。
@@ -775,7 +797,7 @@ fn parse_mark_price(value: &Value) -> AppResult<OptionMarkPrice> {
 
 /// 归一化期权/现货订单响应。
 ///
-/// Binance 不同接口的成交数量、均价和手续费字段不完全一致，这里集中兼容。
+/// Binance 不同接口的成交数量、均价和手续费字段不完全一致，这里集中归一化。
 fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
     let order_id = value
         .get("orderId")

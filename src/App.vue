@@ -72,6 +72,7 @@ const themeOverrides: GlobalThemeOverrides = {
 }
 
 onMounted(() => {
+  void store.bindOrderProgressEvents()
   void store.bootstrap()
   // 后台同步使用 silent 请求，不清空前台错误提示，也不会自动开启自动策略。
   syncTimer = window.setInterval(() => {
@@ -82,6 +83,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  store.disposeOrderProgressEvents()
   if (syncTimer !== undefined) {
     window.clearInterval(syncTimer)
   }

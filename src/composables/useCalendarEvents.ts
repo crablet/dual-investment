@@ -123,7 +123,8 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
     {
       id: `expiry-${order.id}`,
       type: 'expiry',
-      date: order.expiry,
+      date: localDateKey(order.expiryAt),
+      timeLabel: localTimeLabel(order.expiryAt),
       title: `${direction} 到期日`,
       detail: `${order.optionSymbol}，执行价 ${order.strike}，状态 ${strategyStatusText(order.status)}`,
       tone: 'purple',

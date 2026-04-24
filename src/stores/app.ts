@@ -11,11 +11,20 @@ import type {
   AppSnapshot,
   AutoInvestmentRule,
   ConnectBinanceRequest,
+  OrderProgressEvent,
+  OrderProgressStage,
+  OrderProgressStatus,
   StrategyOrder,
   StrategyRequest,
   ToggleAutoRequest,
 } from '@/types/domain'
-import type { MetricCardModel, PnlBreakdownItem } from '@/types/view'
+import type {
+  MetricCardModel,
+  OrderProgressNotice,
+  OrderProgressStepView,
+  OrderProgressView,
+  PnlBreakdownItem,
+} from '@/types/view'
 import {
   isNegativeDecimalString,
   isZeroDecimalString,
@@ -68,6 +77,22 @@ const metricMoneyFormatter = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 2,
 })
 
+const orderProgressStages: Array<{ id: OrderProgressStage, label: string }> = [
+  { id: 'validate', label: '校验' },
+  { id: 'funding', label: '资金准备' },
+  { id: 'risk', label: '风控' },
+  { id: 'submit', label: '发送 Binance' },
+  { id: 'persist', label: '保存订单' },
+]
+
+const orderProgressSuccessMessages: Record<OrderProgressStage, string> = {
+  validate: '下单参数已通过校验',
+  funding: '资金准备已完成',
+  risk: '本地下单风控已通过',
+  submit: 'Binance 已返回订单状态',
+  persist: '订单已保存',
+}
+
 export const useAppStore = defineStore('app', () => {
   // 快照使用 shallowRef：后端每次返回完整对象，前端通过替换根引用触发更新。
   const snapshot = shallowRef<AppSnapshot>()
@@ -77,6 +102,9 @@ export const useAppStore = defineStore('app', () => {
   const error = shallowRef<string>()
   const backgroundError = shallowRef<string>()
   const activeView = shallowRef<AppViewId>('overview')
+  const orderProgress = shallowRef<OrderProgressView>()
+  const orderNotice = shallowRef<OrderProgressNotice>()
+  const unlistenOrderProgress = shallowRef<(() => void)>()
 
   const loading = computed(() => foregroundPending.value > 0)
   const backgroundLoading = computed(() => backgroundPending.value > 0)
@@ -157,6 +185,150 @@ export const useAppStore = defineStore('app', () => {
 
   function isBusy() {
     return busy.value
+  }
+
+  async function bindOrderProgressEvents() {
+    if (unlistenOrderProgress.value) {
+      return
+    }
+    try {
+      unlistenOrderProgress.value = await api.listenOrderProgress(applyOrderProgressEvent)
+    }
+    catch (caught) {
+      backgroundError.value = caught instanceof Error ? caught.message : String(caught)
+    }
+  }
+
+  function disposeOrderProgressEvents() {
+    unlistenOrderProgress.value?.()
+    unlistenOrderProgress.value = undefined
+  }
+
+  function clearOrderProgress() {
+    orderProgress.value = undefined
+  }
+
+  function startOrderProgress(flowId: string, request: StrategyRequest): OrderProgressView {
+    const now = new Date().toISOString()
+    const progress: OrderProgressView = {
+      flowId,
+      source: 'manual',
+      status: 'running',
+      optionSymbol: request.optionSymbol,
+      startedAt: now,
+      updatedAt: now,
+      steps: createOrderProgressSteps('validate', 'running', '正在提交下单请求', now),
+    }
+    orderProgress.value = progress
+    return progress
+  }
+
+  function applyOrderProgressEvent(event: OrderProgressEvent) {
+    const current = orderProgress.value?.flowId === event.flowId
+      ? orderProgress.value
+      : {
+          flowId: event.flowId,
+          source: event.source,
+          status: 'running' as OrderProgressStatus,
+          startedAt: event.timestamp,
+          updatedAt: event.timestamp,
+          steps: createOrderProgressSteps(),
+        }
+
+    const steps = current.steps.map(step =>
+      step.id === event.stage
+        ? {
+            ...step,
+            status: event.status,
+            message: event.message,
+            timestamp: event.timestamp,
+          }
+        : step,
+    )
+    orderProgress.value = {
+      ...current,
+      status: progressStatusFromSteps(steps),
+      steps,
+      optionSymbol: event.optionSymbol ?? current.optionSymbol,
+      exchangeOrderId: event.exchangeOrderId ?? current.exchangeOrderId,
+      error: event.status === 'error' ? event.message : current.error,
+      updatedAt: event.timestamp,
+    }
+  }
+
+  function finishOrderProgressSuccess(flowId: string, order: StrategyOrder) {
+    const now = new Date().toISOString()
+    const current = orderProgress.value?.flowId === flowId
+      ? orderProgress.value
+      : startOrderProgress(flowId, {
+          candidateId: undefined,
+          clientFlowId: flowId,
+          symbol: order.symbol,
+          optionSymbol: order.optionSymbol,
+          direction: order.direction,
+          expiry: order.expiry,
+          expiryAt: order.expiryAt,
+          strike: order.strike,
+          quantity: order.quantity,
+          limitPrice: order.avgPrice,
+          confirmLive: true,
+        })
+    const steps = current.steps.map((step) => {
+      const status: OrderProgressStatus = step.status === 'error' ? 'error' : 'success'
+      return {
+        ...step,
+        status,
+        message: step.id === 'persist'
+          ? `订单已保存，交易所状态 ${order.exchangeStatus}`
+          : step.message ?? orderProgressSuccessMessages[step.id],
+        timestamp: step.timestamp ?? now,
+      }
+    })
+    orderProgress.value = {
+      ...current,
+      status: 'success',
+      steps,
+      optionSymbol: order.optionSymbol,
+      exchangeOrderId: order.exchangeOrderId ?? current.exchangeOrderId,
+      order,
+      error: undefined,
+      updatedAt: now,
+    }
+    orderNotice.value = {
+      id: `${flowId}-success-${Date.now()}`,
+      type: 'success',
+      message: `订单已创建，交易所状态 ${order.exchangeStatus}`,
+    }
+  }
+
+  function finishOrderProgressError(flowId: string, message: string) {
+    const now = new Date().toISOString()
+    const current = orderProgress.value?.flowId === flowId
+      ? orderProgress.value
+      : {
+          flowId,
+          source: 'manual',
+          status: 'running' as OrderProgressStatus,
+          startedAt: now,
+          updatedAt: now,
+          steps: createOrderProgressSteps('validate', 'running', '正在提交下单请求', now),
+        }
+    const hasErrorStep = current.steps.some(step => step.status === 'error')
+    const steps = hasErrorStep
+      ? current.steps
+      : markCurrentOrderStepError(current.steps, message, now)
+    orderProgress.value = {
+      ...current,
+      status: 'error',
+      steps,
+      error: message,
+      updatedAt: now,
+    }
+    orderNotice.value = {
+      id: `${flowId}-error-${Date.now()}`,
+      type: 'error',
+      message,
+    }
   }
 
   async function refresh(options: RunOptions = {}) {
@@ -280,11 +452,18 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function placeStrategy(request: StrategyRequest) {
-    const order = await run('order', () => api.placeManualStrategy(request))
+    const flowId = request.clientFlowId ?? makeOrderFlowId()
+    const orderRequest = { ...request, clientFlowId: flowId }
+    startOrderProgress(flowId, orderRequest)
+    const order = await run('order', () => api.placeManualStrategy(orderRequest))
     if (order && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: [order, ...snapshot.value.orders] }
+      finishOrderProgressSuccess(flowId, order)
       await refresh()
+      return
     }
+    finishOrderProgressError(flowId, error.value ?? '下单失败，请查看错误提示和恢复记录')
+    await refresh({ silent: true })
   }
 
   async function saveRule(rule: AutoInvestmentRule) {
@@ -328,6 +507,8 @@ export const useAppStore = defineStore('app', () => {
     error,
     backgroundError,
     activeView,
+    orderProgress,
+    orderNotice,
     settings,
     metrics,
     balances,
@@ -342,6 +523,9 @@ export const useAppStore = defineStore('app', () => {
     runningOrders,
     isLoading,
     isBusy,
+    bindOrderProgressEvents,
+    disposeOrderProgressEvents,
+    clearOrderProgress,
     bootstrap,
     refresh,
     connect,
@@ -359,6 +543,54 @@ export const useAppStore = defineStore('app', () => {
     refreshViewData,
   }
 })
+
+function createOrderProgressSteps(
+  activeStage?: OrderProgressStage,
+  status: OrderProgressStatus = 'pending',
+  message?: string,
+  timestamp?: string,
+): OrderProgressStepView[] {
+  return orderProgressStages.map(stage => ({
+    id: stage.id,
+    label: stage.label,
+    status: stage.id === activeStage ? status : 'pending',
+    message: stage.id === activeStage ? message : undefined,
+    timestamp: stage.id === activeStage ? timestamp : undefined,
+  }))
+}
+
+function progressStatusFromSteps(steps: OrderProgressStepView[]): OrderProgressStatus {
+  if (steps.some(step => step.status === 'error')) {
+    return 'error'
+  }
+  if (steps.find(step => step.id === 'persist')?.status === 'success') {
+    return 'success'
+  }
+  if (steps.some(step => step.status === 'running' || step.status === 'success')) {
+    return 'running'
+  }
+  return 'pending'
+}
+
+function markCurrentOrderStepError(
+  steps: OrderProgressStepView[],
+  message: string,
+  timestamp: string,
+) {
+  const runningIndex = steps.findIndex(step => step.status === 'running')
+  const pendingIndex = steps.findIndex(step => step.status === 'pending')
+  const fallbackIndex = Math.max(0, steps.length - 1)
+  const targetIndex = runningIndex >= 0 ? runningIndex : pendingIndex >= 0 ? pendingIndex : fallbackIndex
+  return steps.map((step, index) =>
+    index === targetIndex
+      ? { ...step, status: 'error' as OrderProgressStatus, message, timestamp }
+      : step,
+  )
+}
+
+function makeOrderFlowId() {
+  return `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
 
 function buildMetrics(
   settings: AppSettings | undefined,

@@ -22,8 +22,10 @@ import {
 } from 'naive-ui'
 import { computed, reactive, shallowRef, watch, watchEffect } from 'vue'
 import { useFormat } from '@/composables/useFormat'
+import OrderProgressPanel from '@/components/common/OrderProgressPanel.vue'
 import { useAppStore } from '@/stores/app'
 import type { StrategyCandidate, StrategyDirection } from '@/types/domain'
+import { localDateTimeLabel } from '@/utils/date'
 
 interface RuleForm {
   enabled: boolean
@@ -64,7 +66,7 @@ const candidateSortColumns: Array<{ key: CandidateSortKey, label: string }> = [
   { key: 'strike', label: '目标价' },
   { key: 'annualized', label: '年化' },
   { key: 'expiry', label: '到期' },
-  { key: 'limitPrice', label: '价格' },
+  { key: 'limitPrice', label: '标记价格' },
   { key: 'exerciseProbability', label: '被行权概率' },
 ]
 
@@ -245,14 +247,12 @@ watch(
 )
 
 function daysUntil(expiry: string) {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const target = new Date(`${expiry}T00:00:00`)
-  return Math.max(0, Math.ceil((target.getTime() - today.getTime()) / dayMs))
+  const target = expiry.includes('T') ? new Date(expiry) : new Date(`${expiry}T00:00:00`)
+  return Math.max(0, Math.ceil((target.getTime() - Date.now()) / dayMs))
 }
 
 function matchesExpiryFilter(candidate: StrategyCandidate) {
-  const days = daysUntil(candidate.expiry)
+  const days = daysUntil(candidate.expiryAt)
   if (expiryFilter.value === 'lt3') return days < 3
   if (expiryFilter.value === 'lt7') return days < 7
   if (expiryFilter.value === 'd7_30') return days >= 7 && days <= 30
@@ -283,7 +283,7 @@ function matchesCandidateFilters(candidate: StrategyCandidate) {
 
 function candidateSortNumber(candidate: StrategyCandidate, key: CandidateSortKey) {
   if (key === 'expiry') {
-    return new Date(`${candidate.expiry}T00:00:00`).getTime()
+    return new Date(candidate.expiryAt).getTime()
   }
   return Number(candidate[key])
 }
@@ -382,6 +382,7 @@ function submit() {
     optionSymbol: candidate.optionSymbol,
     direction: candidate.direction,
     expiry: candidate.expiry,
+    expiryAt: candidate.expiryAt,
     strike: candidate.strike,
     quantity: form.quantity.toFixed(2),
     limitPrice: candidate.limitPrice,
@@ -506,8 +507,8 @@ function submit() {
             </span>
             <span class="positive">{{ percent(candidate.annualized) }}</span>
             <span>
-              <strong>{{ candidate.expiry }}</strong>
-              <em>{{ daysUntil(candidate.expiry) }} 天</em>
+              <strong>{{ localDateTimeLabel(candidate.expiryAt) }}</strong>
+              <em>{{ daysUntil(candidate.expiryAt) }} 天</em>
             </span>
             <span>{{ money(candidate.limitPrice) }}</span>
             <span>{{ percent(candidate.exerciseProbability) }}</span>
@@ -544,8 +545,8 @@ function submit() {
           </article>
           <article>
             <span>到期日</span>
-            <strong>{{ selectedCandidate?.expiry ?? '--' }}</strong>
-            <em v-if="selectedCandidate">{{ daysUntil(selectedCandidate.expiry) }} 天</em>
+            <strong>{{ selectedCandidate ? localDateTimeLabel(selectedCandidate.expiryAt) : '--' }}</strong>
+            <em v-if="selectedCandidate">{{ daysUntil(selectedCandidate.expiryAt) }} 天</em>
           </article>
           <article>
             <span>预计权利金</span>
@@ -568,6 +569,12 @@ function submit() {
           <template #icon><NIcon :component="Zap" /></template>
           发送订单
         </NButton>
+
+        <OrderProgressPanel
+          :progress="store.orderProgress"
+          @close="store.clearOrderProgress"
+          @view-orders="store.openView('orders')"
+        />
       </section>
 
       <section class="auto-card">

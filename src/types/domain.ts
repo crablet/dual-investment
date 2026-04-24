@@ -22,6 +22,8 @@ export type StrategyStatus =
 export type RecommendationLevel = 'recommended' | 'watch' | 'reject'
 export type RiskSeverity = 'low' | 'medium' | 'high'
 export type LogLevel = 'info' | 'warn' | 'error'
+export type OrderProgressStage = 'validate' | 'funding' | 'risk' | 'submit' | 'persist'
+export type OrderProgressStatus = 'pending' | 'running' | 'success' | 'error'
 
 /** 前端可见运行设置，不包含明文 API Secret。 */
 export interface AppSettings {
@@ -50,6 +52,7 @@ export interface StrategyCandidate {
   optionSymbol: string
   direction: StrategyDirection
   expiry: string
+  expiryAt: string
   strike: DecimalString
   quantity: DecimalString
   limitPrice: DecimalString
@@ -97,6 +100,7 @@ export interface StrategyOrder {
   direction: StrategyDirection
   status: StrategyStatus
   expiry: string
+  expiryAt: string
   strike: DecimalString
   quantity: DecimalString
   filledQuantity: DecimalString
@@ -136,7 +140,6 @@ export interface AutoInvestmentRule {
 
 /** 风控规则集合。 */
 export interface RiskRuleSet {
-  maxSingleOrderUsdt: DecimalString
   maxDailyOrders: DecimalString
   maxMarginUsage: DecimalString
   maxDrawdown: DecimalString
@@ -220,6 +223,18 @@ export interface OrderAttemptView {
   updatedAt: string
 }
 
+/** 手动下单进度事件，只用于前端反馈，不作为交易事实来源。 */
+export interface OrderProgressEvent {
+  flowId: string
+  source: string
+  stage: OrderProgressStage
+  status: OrderProgressStatus
+  message: string
+  timestamp: string
+  optionSymbol?: string
+  exchangeOrderId?: string
+}
+
 /** 前端一次刷新拿到的完整应用快照。 */
 export interface AppSnapshot {
   settings: AppSettings
@@ -242,10 +257,12 @@ export interface ConnectBinanceRequest {
 /** 策略下单请求。`confirmLive` 是真实下单门禁。 */
 export interface StrategyRequest {
   candidateId?: string
+  clientFlowId?: string
   symbol: string
   optionSymbol?: string
   direction: StrategyDirection
   expiry: string
+  expiryAt: string
   strike: DecimalString
   quantity: DecimalString
   limitPrice: DecimalString

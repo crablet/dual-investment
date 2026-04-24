@@ -4,6 +4,7 @@
 // 不提供 mock 数据或浏览器 fallback，避免把实盘路径和演示路径混在一起。
 
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type {
   AppSettings,
   AppSnapshot,
@@ -11,6 +12,7 @@ import type {
   CandidateScanResult,
   ConnectBinanceRequest,
   LogSnapshot,
+  OrderProgressEvent,
   StrategyOrder,
   StrategyRequest,
   ToggleAutoRequest,
@@ -52,4 +54,10 @@ export const api = {
   openCurrentLogFile: () => call<void>('open_current_log_file'),
   openLogFolder: () => call<void>('open_log_folder'),
   clearLogFiles: () => call<LogSnapshot>('clear_log_files'),
+  listenOrderProgress: (handler: (event: OrderProgressEvent) => void) => {
+    if (!isTauriRuntime()) {
+      return Promise.resolve(() => undefined)
+    }
+    return listen<OrderProgressEvent>('order-progress', event => handler(event.payload))
+  },
 }

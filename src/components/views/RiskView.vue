@@ -78,7 +78,9 @@ function tagType(severity: RiskSeverity) {
       <div class="alert-list">
         <p v-if="!store.risk?.alerts.length" class="empty-state">暂无风控预警</p>
         <article v-for="alert in store.risk?.alerts" :key="alert.id">
-          <NTag :type="tagType(alert.severity)" size="small">{{ alert.severity === 'medium' ? '中等' : alert.severity === 'high' ? '高' : '低' }}</NTag>
+          <NTag :type="tagType(alert.severity)" size="small" class="alert-severity-tag">
+            {{ alert.severity === 'medium' ? '中等' : alert.severity === 'high' ? '高' : '低' }}
+          </NTag>
           <div>
             <strong>{{ alert.title }}</strong>
             <span>{{ alert.message }}</span>

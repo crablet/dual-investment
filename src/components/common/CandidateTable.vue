@@ -4,6 +4,7 @@
 import { NButton, NTag } from 'naive-ui'
 import { useFormat } from '@/composables/useFormat'
 import type { StrategyCandidate } from '@/types/domain'
+import { localDateTimeLabel } from '@/utils/date'
 
 defineProps<{
   candidates: StrategyCandidate[]
@@ -24,7 +25,7 @@ const { directionText, directionTone, money, percent } = useFormat()
           <th>方向</th>
           <th>到期日</th>
           <th>执行价</th>
-          <th>价格</th>
+          <th>标记价格</th>
           <th>权利金</th>
           <th>年化</th>
           <th>被行权概率</th>
@@ -39,7 +40,7 @@ const { directionText, directionTone, money, percent } = useFormat()
               {{ directionText(candidate.direction) }}
             </NTag>
           </td>
-          <td>{{ candidate.expiry }}</td>
+          <td>{{ localDateTimeLabel(candidate.expiryAt) }}</td>
           <td>{{ money(candidate.strike) }}</td>
           <td>{{ money(candidate.limitPrice) }}</td>
           <td>{{ money(candidate.premium) }}</td>
