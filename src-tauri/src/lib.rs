@@ -7,6 +7,7 @@ mod app_state;
 mod binance;
 mod commands;
 mod domain;
+mod logs;
 mod persistence;
 mod secrets;
 mod strategy;
@@ -14,9 +15,10 @@ mod tray;
 
 use app_state::AppState;
 use commands::{
-    connect_binance, connect_saved_binance, export_audit_logs, forget_binance_credentials,
-    get_app_snapshot, place_manual_strategy, recover_order_attempt, run_auto_once,
-    run_settlement_scan, save_auto_rule, scan_candidates, sync_live_state, toggle_auto_strategy,
+    clear_log_files, connect_binance, connect_saved_binance, forget_binance_credentials,
+    get_app_snapshot, get_log_snapshot, open_current_log_file, open_log_folder,
+    place_manual_strategy, recover_order_attempt, run_auto_once, run_settlement_scan,
+    save_auto_rule, scan_candidates, sync_live_state, toggle_auto_strategy,
 };
 use tauri::Manager;
 
@@ -44,7 +46,10 @@ pub fn run() {
             sync_live_state,
             run_settlement_scan,
             run_auto_once,
-            export_audit_logs
+            get_log_snapshot,
+            open_current_log_file,
+            open_log_folder,
+            clear_log_files
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;

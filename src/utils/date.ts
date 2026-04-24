@@ -71,6 +71,20 @@ export function localTimeLabel(value: string) {
   })
 }
 
+/** 把 ISO 时间转成本地 YYYY-MM-DD HH:mm:ss 标签。 */
+export function localDateTimeLabel(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return `${formatDateKey(date)} ${date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })}`
+}
+
 /** 从中文计划文本中提取 HH:mm。 */
 export function scheduleTimeLabel(schedule: string) {
   const matched = schedule.match(/([01]?\d|2[0-3]):([0-5]\d)/)

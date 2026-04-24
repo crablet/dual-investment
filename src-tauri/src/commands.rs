@@ -3,12 +3,13 @@
 //! command 层只做参数转发和错误转换，真实业务在 `AppState` 中完成。所有 command
 //! 按 Tauri 约定返回 `Result<T, String>`，让前端能直接展示可读错误。
 
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::app_state::AppState;
 use crate::domain::{
     AppSettings, AppSnapshot, AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest,
-    StrategyOrder, StrategyRequest, ToggleAutoRequest,
+    LogSnapshot, StrategyOrder, StrategyRequest, ToggleAutoRequest,
 };
 
 /// 获取应用完整快照。
@@ -116,11 +117,42 @@ pub async fn run_auto_once(state: State<'_, AppState>) -> Result<Option<Strategy
     state.run_auto_once().await.map_err(to_command_error)
 }
 
-/// 导出脱敏审计日志。
+/// 读取文件日志快照。
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub fn export_audit_logs(state: State<'_, AppState>) -> Result<String, String> {
-    state.export_audit_logs().map_err(to_command_error)
+pub fn get_log_snapshot(state: State<'_, AppState>) -> Result<LogSnapshot, String> {
+    state.log_snapshot().map_err(to_command_error)
+}
+
+/// 用系统默认应用打开今日日志文件。
+#[tauri::command]
+pub fn open_current_log_file(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let path = state
+        .ensure_current_log_file()
+        .map_err(to_command_error)?
+        .display()
+        .to_string();
+    app.opener()
+        .open_path(path, None::<String>)
+        .map_err(|error| format!("无法打开日志文件：{error}"))
+}
+
+/// 用系统文件管理器打开日志目录。
+#[tauri::command]
+pub fn open_log_folder(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let path = state
+        .ensure_log_directory()
+        .map_err(to_command_error)?
+        .display()
+        .to_string();
+    app.opener()
+        .open_path(path, None::<String>)
+        .map_err(|error| format!("无法打开日志目录：{error}"))
+}
+
+/// 删除全部本地日志文件。
+#[tauri::command]
+pub fn clear_log_files(state: State<'_, AppState>) -> Result<LogSnapshot, String> {
+    state.clear_log_files().map_err(to_command_error)
 }
 
 /// 把内部错误转换成 Tauri command 的字符串错误。

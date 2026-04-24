@@ -1,11 +1,10 @@
 // 事件日历派生逻辑。
 //
-// 日历只从当前应用快照派生订单、到期、结算、补齐、自动复投、风险、恢复和系统事件。
-// 审计事件通过 allowlist 映射，未知审计消息不会直接铺到前端，避免敏感上下文泄漏。
+// 日历只从当前应用快照派生订单、到期、结算、补齐、自动复投、风险和恢复事件。
 
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { useAppStore, type AppViewId } from '@/stores/app'
-import type { AuditEvent, OrderAttemptView, RiskAlert, StrategyOrder } from '@/types/domain'
+import type { OrderAttemptView, RiskAlert, StrategyOrder } from '@/types/domain'
 import {
   addDays,
   formatDateKey,
@@ -91,13 +90,6 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
 
     for (const attempt of store.orderAttempts) {
       const event = eventFromOrderAttempt(attempt)
-      if (event) {
-        rows.push(event)
-      }
-    }
-
-    for (const audit of store.auditRecent) {
-      const event = eventFromAudit(audit)
       if (event) {
         rows.push(event)
       }
@@ -203,68 +195,6 @@ function eventFromOrderAttempt(attempt: OrderAttemptView): CalendarEvent | undef
     targetView: 'orders',
     priority: attempt.status.includes('failed') ? 92 : 52,
   }
-}
-
-/** 审计事件 allowlist 映射。未知 kind 返回 undefined，不展示原始 message。 */
-function eventFromAudit(audit: AuditEvent): CalendarEvent | undefined {
-  const base = {
-    date: localDateKey(audit.createdAt),
-    timeLabel: localTimeLabel(audit.createdAt),
-  }
-
-  if (audit.kind === 'strategy.auto.no_candidate') {
-    return {
-      ...base,
-      id: `audit-${audit.id}`,
-      type: 'auto',
-      title: '自动复投扫描',
-      detail: '本次自动扫描无推荐候选',
-      tone: 'blue',
-      targetView: 'dual',
-      priority: 42,
-    }
-  }
-
-  if (audit.kind === 'strategy.rule.saved') {
-    return {
-      ...base,
-      id: `audit-${audit.id}`,
-      type: 'auto',
-      title: '自动复投规则保存',
-      detail: '自动复投筛选和下单规则已更新',
-      tone: 'blue',
-      targetView: 'dual',
-      priority: 38,
-    }
-  }
-
-  if (audit.kind === 'strategy.auto.toggled') {
-    return {
-      ...base,
-      id: `audit-${audit.id}`,
-      type: 'auto',
-      title: '自动复投状态变更',
-      detail: audit.message.includes('启用') ? '自动复投已启用' : '自动复投已暂停',
-      tone: 'blue',
-      targetView: 'dual',
-      priority: 55,
-    }
-  }
-
-  if (audit.kind === 'background.tick_failed' || audit.kind === 'strategy.order.sync_failed') {
-    return {
-      ...base,
-      id: `audit-${audit.id}`,
-      type: 'system',
-      title: audit.kind === 'background.tick_failed' ? '后台同步失败' : '订单同步失败',
-      detail: '需要检查连接状态或订单同步结果',
-      tone: 'red',
-      targetView: 'risk',
-      priority: 88,
-    }
-  }
-
-  return undefined
 }
 
 /** 按当前自动规则生成可见日期范围内的计划扫描事件。 */

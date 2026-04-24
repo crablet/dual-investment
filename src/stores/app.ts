@@ -89,7 +89,6 @@ export const useAppStore = defineStore('app', () => {
   const pnl = computed(() => snapshot.value?.pnl)
   const risk = computed(() => snapshot.value?.risk)
   const autoRule = computed(() => snapshot.value?.autoRule)
-  const auditRecent = computed(() => snapshot.value?.auditRecent ?? [])
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
   const runningOrders = computed(() =>
     orders.value.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
@@ -339,7 +338,6 @@ export const useAppStore = defineStore('app', () => {
     pnlBreakdown,
     risk,
     autoRule,
-    auditRecent,
     orderAttempts,
     runningOrders,
     isLoading,

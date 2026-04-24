@@ -1,8 +1,8 @@
 // 前端展示文案映射。
 //
-// 这里只维护 UI 标签和组件 tone。Rust 侧仍保留审计日志与错误提示所需的业务文案。
+// 这里只维护 UI 标签和组件 tone。Rust 侧仍保留日志与错误提示所需的业务文案。
 
-import type { StrategyDirection, StrategyStatus } from '@/types/domain'
+import type { LogLevel, StrategyDirection, StrategyStatus } from '@/types/domain'
 
 export const directionTextMap: Record<StrategyDirection, string> = {
   sellPut: '卖 Put 抄底',
@@ -45,6 +45,12 @@ export const attemptStatusTextMap: Record<string, string> = {
   spot_persist_failed: '现货补齐保存失败',
 }
 
+export const logLevelToneMap: Record<LogLevel, 'default' | 'error' | 'info' | 'success' | 'warning'> = {
+  info: 'info',
+  warn: 'warning',
+  error: 'error',
+}
+
 /** 策略状态中文文案。 */
 export function strategyStatusText(status: StrategyStatus) {
   return statusTextMap[status]
@@ -53,4 +59,9 @@ export function strategyStatusText(status: StrategyStatus) {
 /** 恢复记录状态中文文案。 */
 export function attemptStatusText(status: string) {
   return attemptStatusTextMap[status] ?? status
+}
+
+/** 日志等级标签 tone。 */
+export function logLevelTone(level: LogLevel) {
+  return logLevelToneMap[level]
 }

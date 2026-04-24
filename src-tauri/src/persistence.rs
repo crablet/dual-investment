@@ -9,8 +9,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 
 use crate::domain::{
-    AppError, AppResult, AuditEvent, AutoInvestmentRule, OrderAttempt, OrderAttemptStatus,
-    StrategyDirection, StrategyOrder,
+    AppError, AppResult, AutoInvestmentRule, OrderAttempt, OrderAttemptStatus, StrategyDirection,
+    StrategyOrder,
 };
 
 pub struct Persistence {
@@ -42,13 +42,6 @@ impl Persistence {
         self.connection
             .execute_batch(
                 "
-                CREATE TABLE IF NOT EXISTS audit_events (
-                    id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-
                 CREATE TABLE IF NOT EXISTS strategy_orders (
                     id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL,
@@ -74,31 +67,11 @@ impl Persistence {
                     updated_at TEXT NOT NULL
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_audit_events_created_at
-                    ON audit_events (created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_strategy_orders_updated_at
                     ON strategy_orders (updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_order_attempts_updated_at
                     ON order_attempts (updated_at DESC);
                 ",
-            )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-        Ok(())
-    }
-
-    /// 写入审计事件。
-    ///
-    /// 调用方必须传入脱敏后的业务摘要，不能把 Secret、签名 query 或原始响应写入 message。
-    pub fn append_audit(&self, event: &AuditEvent) -> AppResult<()> {
-        self.connection
-            .execute(
-                "INSERT OR REPLACE INTO audit_events (id, kind, message, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    event.id,
-                    event.kind,
-                    event.message,
-                    event.created_at.to_rfc3339(),
-                ],
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
         Ok(())
@@ -271,42 +244,6 @@ impl Persistence {
             });
         }
         Ok(attempts)
-    }
-
-    /// 读取近期审计事件。
-    pub fn recent_audit(&self, limit: usize) -> AppResult<Vec<AuditEvent>> {
-        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        let mut statement = self
-            .connection
-            .prepare(
-                "SELECT id, kind, message, created_at FROM audit_events ORDER BY created_at DESC LIMIT ?1",
-            )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-        let mapped = statement
-            .query_map([limit], |row| {
-                let created_at = row.get::<_, String>(3)?;
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    created_at,
-                ))
-            })
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-
-        let mut events = Vec::new();
-        for row in mapped {
-            let (id, kind, message, created_at) =
-                row.map_err(|error| AppError::Storage(error.to_string()))?;
-            let created_at = parse_time(&created_at)?;
-            events.push(AuditEvent {
-                id,
-                kind,
-                message,
-                created_at,
-            });
-        }
-        Ok(events)
     }
 }
 

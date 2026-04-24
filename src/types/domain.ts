@@ -21,6 +21,7 @@ export type StrategyStatus =
   | 'rebalanceFailed'
 export type RecommendationLevel = 'recommended' | 'watch' | 'reject'
 export type RiskSeverity = 'low' | 'medium' | 'high'
+export type LogLevel = 'info' | 'warn' | 'error'
 
 /** 前端可见运行设置，不包含明文 API Secret。 */
 export interface AppSettings {
@@ -178,12 +179,31 @@ export interface PnlReport {
   points: ChartPoint[]
 }
 
-/** 审计事件只包含脱敏摘要，不应包含 Secret、签名 query 或原始订单响应。 */
-export interface AuditEvent {
+/** 文件日志记录，只展示后端写入的脱敏摘要。 */
+export interface LogEntry {
   id: string
-  kind: string
+  timestamp: string
+  level: LogLevel
+  event: string
   message: string
-  createdAt: string
+}
+
+/** 每日日志文件展示信息。 */
+export interface LogFileInfo {
+  fileName: string
+  path: string
+  date: string
+  sizeBytes: number
+  entryCount: number
+  modifiedAt?: string
+}
+
+/** 设置页日志卡片快照。 */
+export interface LogSnapshot {
+  directory: string
+  currentFile: string
+  files: LogFileInfo[]
+  recentEntries: LogEntry[]
 }
 
 /** 下单/补齐恢复记录视图。 */
@@ -210,7 +230,6 @@ export interface AppSnapshot {
   pnl: PnlReport
   risk: RiskSnapshot
   autoRule: AutoInvestmentRule
-  auditRecent: AuditEvent[]
   orderAttempts: OrderAttemptView[]
 }
 

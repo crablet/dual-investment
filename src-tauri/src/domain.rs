@@ -106,6 +106,51 @@ pub struct AppSettings {
     pub default_symbol: String,
 }
 
+/// 应用日志等级。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+/// 文件日志中的单条记录。
+///
+/// 日志记录用于本机排障和设置页展示，内容必须保持脱敏，不能包含 Secret、签名 query
+/// 或 Binance 原始响应。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+    pub id: String,
+    pub timestamp: DateTime<Utc>,
+    pub level: LogLevel,
+    pub event: String,
+    pub message: String,
+}
+
+/// 一个每日日志文件的展示信息。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogFileInfo {
+    pub file_name: String,
+    pub path: String,
+    pub date: String,
+    pub size_bytes: u64,
+    pub entry_count: usize,
+    pub modified_at: Option<DateTime<Utc>>,
+}
+
+/// 设置页日志卡片需要的日志快照。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogSnapshot {
+    pub directory: String,
+    pub current_file: String,
+    pub files: Vec<LogFileInfo>,
+    pub recent_entries: Vec<LogEntry>,
+}
+
 /// 账户资产行。
 ///
 /// `free`、`locked` 和 `usdt_value` 以字符串序列化给前端，前端只负责展示或
@@ -346,18 +391,6 @@ pub struct PnlReport {
     #[serde(with = "rust_decimal::serde::str")]
     pub fees: Decimal,
     pub points: Vec<ChartPoint>,
-}
-
-/// 审计事件。
-///
-/// 审计日志记录的是脱敏、可展示的业务摘要，不保存 API Secret、签名 query 或原始订单响应。
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuditEvent {
-    pub id: String,
-    pub kind: String,
-    pub message: String,
-    pub created_at: DateTime<Utc>,
 }
 
 /// 下单恢复记录的状态机。
@@ -612,7 +645,6 @@ pub struct AppSnapshot {
     pub pnl: PnlReport,
     pub risk: RiskSnapshot,
     pub auto_rule: AutoInvestmentRule,
-    pub audit_recent: Vec<AuditEvent>,
     pub order_attempts: Vec<OrderAttemptView>,
 }
 

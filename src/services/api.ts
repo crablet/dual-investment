@@ -10,6 +10,7 @@ import type {
   AutoInvestmentRule,
   CandidateScanResult,
   ConnectBinanceRequest,
+  LogSnapshot,
   StrategyOrder,
   StrategyRequest,
   ToggleAutoRequest,
@@ -47,5 +48,8 @@ export const api = {
   syncLiveState: () => call<AppSnapshot>('sync_live_state'),
   runSettlementScan: () => call<StrategyOrder[]>('run_settlement_scan'),
   runAutoOnce: () => call<StrategyOrder | null>('run_auto_once'),
-  exportAuditLogs: () => call<string>('export_audit_logs'),
+  getLogSnapshot: () => call<LogSnapshot>('get_log_snapshot'),
+  openCurrentLogFile: () => call<void>('open_current_log_file'),
+  openLogFolder: () => call<void>('open_log_folder'),
+  clearLogFiles: () => call<LogSnapshot>('clear_log_files'),
 }

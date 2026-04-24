@@ -23,12 +23,14 @@ use uuid::Uuid;
 
 use crate::binance::BinanceClient;
 use crate::domain::{
-    AppError, AppResult, AppSettings, AppSnapshot, AuditEvent, AutoInvestmentRule, BalanceRow,
+    AppError, AppResult, AppSettings, AppSnapshot, AutoInvestmentRule, BalanceRow,
     CandidateScanDiagnostics, CandidateScanResult, ConnectBinanceRequest, ExchangeOrderAck,
-    OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt, OrderAttemptStatus,
-    OrderAttemptView, SimpleEarnSnapshot, SpotAccountSnapshot, StrategyCandidate,
-    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
+    LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
+    OrderAttemptStatus, OrderAttemptView, SimpleEarnSnapshot, SpotAccountSnapshot,
+    StrategyCandidate, StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus,
+    ToggleAutoRequest,
 };
+use crate::logs::LogStore;
 use crate::persistence::Persistence;
 use crate::secrets;
 use crate::strategy;
@@ -95,6 +97,7 @@ pub struct AppState {
     auto_rule: Arc<RwLock<AutoInvestmentRule>>,
     orders: Arc<RwLock<Vec<StrategyOrder>>>,
     persistence: Arc<Mutex<Persistence>>,
+    logs: Arc<LogStore>,
     worker_started: Arc<AtomicBool>,
     last_auto_scan_day: Arc<RwLock<Option<NaiveDate>>>,
 }
@@ -102,13 +105,17 @@ pub struct AppState {
 impl AppState {
     /// 从 Tauri 应用数据目录创建状态。
     pub fn new_in(data_dir: impl AsRef<Path>) -> AppResult<Self> {
-        Self::from_persistence(Persistence::open_app_data(data_dir)?)
+        let data_dir = data_dir.as_ref();
+        Self::from_persistence(
+            Persistence::open_app_data(data_dir)?,
+            LogStore::open_app_data(data_dir)?,
+        )
     }
 
     /// 从持久化层恢复状态。
     ///
     /// 启动时只加载已经绑定交易所订单号的订单，并强制关闭自动策略，避免应用重启后自动下单。
-    fn from_persistence(persistence: Persistence) -> AppResult<Self> {
+    fn from_persistence(persistence: Persistence, logs: LogStore) -> AppResult<Self> {
         let orders = persistence
             .list_orders()?
             .into_iter()
@@ -127,10 +134,11 @@ impl AppState {
             auto_rule: Arc::new(RwLock::new(auto_rule)),
             orders: Arc::new(RwLock::new(orders)),
             persistence: Arc::new(Mutex::new(persistence)),
+            logs: Arc::new(logs),
             worker_started: Arc::new(AtomicBool::new(false)),
             last_auto_scan_day: Arc::new(RwLock::new(None)),
         };
-        state.record_audit("app.started", "应用已启动，等待 Binance API 连接")?;
+        state.record_log("app.started", "应用已启动，等待 Binance API 连接")?;
         Ok(state)
     }
 
@@ -144,19 +152,16 @@ impl AppState {
         let scan_diagnostics = self.scan_diagnostics.read().await.clone();
         let orders = self.orders.read().await.clone();
         let accounts = self.live_accounts_if_connected().await?;
-        let (audit_recent, order_attempts) = {
+        let order_attempts = {
             let persistence = self
                 .persistence
                 .lock()
                 .map_err(|error| AppError::Storage(error.to_string()))?;
-            (
-                persistence.recent_audit(20)?,
-                persistence
-                    .list_order_attempts(20)?
-                    .into_iter()
-                    .map(OrderAttemptView::from)
-                    .collect::<Vec<_>>(),
-            )
+            persistence
+                .list_order_attempts(20)?
+                .into_iter()
+                .map(OrderAttemptView::from)
+                .collect::<Vec<_>>()
         };
         let option_account = accounts.as_ref().map(|accounts| &accounts.option);
         let balances = accounts.as_ref().map_or_else(Vec::new, |accounts| {
@@ -184,7 +189,6 @@ impl AppState {
             settings,
             auto_rule,
             orders,
-            audit_recent,
             order_attempts,
         })
     }
@@ -233,7 +237,7 @@ impl AppState {
         }
 
         self.ensure_background_worker();
-        self.record_audit("account.connected", "已连接 Binance 账户")?;
+        self.record_log("account.connected", "已连接 Binance 账户")?;
         Ok(settings)
     }
 
@@ -277,7 +281,7 @@ impl AppState {
         }
 
         self.ensure_background_worker();
-        self.record_audit(
+        self.record_log(
             "account.connected.saved",
             "已使用系统 keyring 凭据连接 Binance 账户",
         )?;
@@ -312,7 +316,7 @@ impl AppState {
             let mut rule = self.auto_rule.write().await;
             rule.enabled = false;
         }
-        self.record_audit(
+        self.record_log(
             "account.credentials.deleted",
             "已从系统 keyring 删除 Binance API 凭据",
         )?;
@@ -413,7 +417,7 @@ impl AppState {
             .lock()
             .map_err(|error| AppError::Storage(error.to_string()))?
             .save_auto_rule(&rule)?;
-        self.record_audit("strategy.rule.saved", "自动定投规则已保存")?;
+        self.record_log("strategy.rule.saved", "自动定投规则已保存")?;
         Ok(rule)
     }
 
@@ -445,7 +449,7 @@ impl AppState {
         if request.enabled {
             self.ensure_background_worker();
         }
-        self.record_audit(
+        self.record_log(
             "strategy.auto.toggled",
             if request.enabled {
                 "自动定投已启用，后台调度器会按规则扫描并自动下单"
@@ -503,16 +507,25 @@ impl AppState {
         self.execute_auto_strategy().await
     }
 
-    /// 导出审计日志 JSON。
-    ///
-    /// 审计内容在写入时已经脱敏，导出不包含 Secret 或原始交易所响应。
-    pub fn export_audit_logs(&self) -> AppResult<String> {
-        let events = self
-            .persistence
-            .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
-            .recent_audit(500)?;
-        serde_json::to_string_pretty(&events).map_err(|error| AppError::Storage(error.to_string()))
+    /// 返回设置页日志快照。
+    pub fn log_snapshot(&self) -> AppResult<LogSnapshot> {
+        self.logs.snapshot()
+    }
+
+    /// 确保今日日志文件存在，并返回路径。
+    pub fn ensure_current_log_file(&self) -> AppResult<std::path::PathBuf> {
+        self.logs.ensure_current_file()
+    }
+
+    /// 确保日志目录存在，并返回路径。
+    pub fn ensure_log_directory(&self) -> AppResult<std::path::PathBuf> {
+        self.logs.ensure_directory()
+    }
+
+    /// 删除全部本地日志文件。
+    pub fn clear_log_files(&self) -> AppResult<LogSnapshot> {
+        self.logs.clear()?;
+        self.logs.snapshot()
     }
 
     /// 执行真实期权下单的核心流程。
@@ -580,7 +593,7 @@ impl AppState {
             updated_at: now,
         };
         self.save_order_attempt(&attempt)?;
-        self.record_audit(
+        self.record_log(
             &format!("strategy.order.{source}.attempted"),
             &format!(
                 "{} {} {} 张，合约 {}，价格 {}",
@@ -617,7 +630,7 @@ impl AppState {
         attempt.message = "交易所订单和订单记录均已保存".to_string();
         attempt.updated_at = Utc::now();
         self.save_order_attempt(&attempt)?;
-        self.record_audit(
+        self.record_log(
             &format!("strategy.order.{source}.created"),
             &format!(
                 "{} {} {} 张，执行价 {}，交易所状态 {}",
@@ -653,7 +666,7 @@ impl AppState {
         attempt.message = "已从 Binance 查询订单并恢复到订单记录".to_string();
         attempt.updated_at = Utc::now();
         self.save_order_attempt(&attempt)?;
-        self.record_audit(
+        self.record_log(
             "strategy.order.recovered",
             &format!("{} 已从恢复记录重建订单记录", attempt.option_symbol),
         )?;
@@ -695,7 +708,7 @@ impl AppState {
         attempt.message = "已从 Binance 查询现货订单并恢复补齐状态".to_string();
         attempt.updated_at = Utc::now();
         self.save_order_attempt(&attempt)?;
-        self.record_audit(
+        self.record_log(
             "strategy.rebalance.recovered",
             &format!("{} 已从恢复记录重建现货补齐状态", attempt.option_symbol),
         )?;
@@ -712,7 +725,7 @@ impl AppState {
             match self.sync_single_order(&client, order.clone()).await {
                 Ok(order) => updated.push(order),
                 Err(error) => {
-                    self.record_audit(
+                    self.record_warning(
                         "strategy.order.sync_failed",
                         &format!("{} 同步失败：{}", order.option_symbol, error),
                     )?;
@@ -769,7 +782,7 @@ impl AppState {
                     settlement_price.round_dp(2)
                 );
                 self.save_order(&order).await?;
-                self.record_audit(
+                self.record_log(
                     "strategy.settlement.otm",
                     &format!("{} 到期 OTM，无需现货补齐", order.option_symbol),
                 )?;
@@ -837,7 +850,7 @@ impl AppState {
             order.updated_at = Utc::now();
             order.rebalance_message = format!("现货补齐资金准备失败：{error}");
             self.save_order(&order).await?;
-            self.record_audit(
+            self.record_warning(
                 "strategy.rebalance.failed",
                 &format!("{} {}", order.option_symbol, order.rebalance_message),
             )?;
@@ -850,7 +863,7 @@ impl AppState {
             order.updated_at = Utc::now();
             order.rebalance_message = format!("现货补齐风控失败：{error}");
             self.save_order(&order).await?;
-            self.record_audit(
+            self.record_warning(
                 "strategy.rebalance.failed",
                 &format!("{} {}", order.option_symbol, order.rebalance_message),
             )?;
@@ -883,7 +896,7 @@ impl AppState {
                 order.updated_at = Utc::now();
                 order.rebalance_message = format!("现货补齐下单失败：{error}");
                 self.save_order(&order).await?;
-                self.record_audit(
+                self.record_warning(
                     "strategy.rebalance.failed",
                     &format!("{} {}", order.option_symbol, order.rebalance_message),
                 )?;
@@ -915,7 +928,7 @@ impl AppState {
         attempt.message = "交易所现货订单和补齐状态均已保存".to_string();
         attempt.updated_at = Utc::now();
         self.save_order_attempt(&attempt)?;
-        self.record_audit(
+        self.record_log(
             "strategy.rebalance.created",
             &format!("{} {}", order.option_symbol, order.rebalance_message),
         )?;
@@ -948,7 +961,7 @@ impl AppState {
         let Some(candidate) = result.candidates.into_iter().find(|candidate| {
             candidate.recommendation == crate::domain::RecommendationLevel::Recommended
         }) else {
-            self.record_audit("strategy.auto.no_candidate", "本次自动扫描无推荐候选")?;
+            self.record_log("strategy.auto.no_candidate", "本次自动扫描无推荐候选")?;
             return Ok(None);
         };
 
@@ -1025,7 +1038,7 @@ impl AppState {
             loop {
                 interval.tick().await;
                 if let Err(error) = state.background_tick().await {
-                    let _ = state.record_audit("background.tick_failed", &error.to_string());
+                    let _ = state.record_error("background.tick_failed", &error.to_string());
                 }
             }
         });
@@ -1049,20 +1062,21 @@ impl AppState {
         Ok(())
     }
 
-    /// 写审计事件。
+    /// 写信息日志。
     ///
     /// 调用方传入的 message 必须是脱敏摘要，不应包含原始 Binance 响应。
-    fn record_audit(&self, kind: &str, message: &str) -> AppResult<()> {
-        let event = AuditEvent {
-            id: Uuid::new_v4().to_string(),
-            kind: kind.to_string(),
-            message: message.to_string(),
-            created_at: Utc::now(),
-        };
-        self.persistence
-            .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
-            .append_audit(&event)
+    fn record_log(&self, event: &str, message: &str) -> AppResult<()> {
+        self.logs.append(LogLevel::Info, event, message)
+    }
+
+    /// 写警告日志。
+    fn record_warning(&self, event: &str, message: &str) -> AppResult<()> {
+        self.logs.append(LogLevel::Warn, event, message)
+    }
+
+    /// 写错误日志。
+    fn record_error(&self, event: &str, message: &str) -> AppResult<()> {
+        self.logs.append(LogLevel::Error, event, message)
     }
 
     /// 保存下单/补齐恢复记录。
@@ -1147,7 +1161,7 @@ impl AppState {
         client
             .universal_transfer("MAIN_OPTION", "USDT", amount)
             .await?;
-        self.record_audit(
+        self.record_log(
             "funding.transfer.main_option",
             &format!("已从现货划转 {amount} USDT 到期权保证金账户，用于期权下单"),
         )?;
@@ -1224,7 +1238,7 @@ impl AppState {
         client
             .redeem_simple_earn_flexible(&position.product_id, amount)
             .await?;
-        self.record_audit(
+        self.record_log(
             "funding.earn.redeemed",
             &format!("已从 Simple Earn 活期赎回 {amount} {asset} 至现货账户，用于{purpose}"),
         )
@@ -1232,7 +1246,7 @@ impl AppState {
 
     async fn sweep_option_idle_usdt_best_effort(&self, client: &BinanceClient, purpose: &str) {
         if let Err(error) = self.sweep_option_idle_usdt(client, purpose).await {
-            let _ = self.record_audit("funding.sweep.failed", &format!("{purpose}失败：{error}"));
+            let _ = self.record_warning("funding.sweep.failed", &format!("{purpose}失败：{error}"));
         }
     }
 
@@ -1247,7 +1261,7 @@ impl AppState {
         client
             .universal_transfer("OPTION_MAIN", "USDT", amount)
             .await?;
-        self.record_audit(
+        self.record_log(
             "funding.transfer.option_main",
             &format!("已从期权保证金账户归集 {amount} USDT 到现货账户，{purpose}"),
         )?;
@@ -1261,7 +1275,7 @@ impl AppState {
         direction: StrategyDirection,
     ) {
         if let Err(error) = self.sweep_spot_rebalance_assets(client, direction).await {
-            let _ = self.record_audit(
+            let _ = self.record_warning(
                 "funding.sweep.failed",
                 &format!("现货补齐后归集失败：{error}"),
             );
@@ -1312,7 +1326,7 @@ impl AppState {
                 AppError::Binance(format!("未找到可申购的 Simple Earn 活期 {asset} 产品"))
             })?;
         if amount < product.min_purchase_amount {
-            self.record_audit(
+            self.record_log(
                 "funding.earn.subscribe_skipped",
                 &format!(
                     "{purpose}跳过 {asset} 活期申购：数量 {} 小于最小申购 {}",
@@ -1327,7 +1341,7 @@ impl AppState {
         client
             .subscribe_simple_earn_flexible(&product.product_id, amount)
             .await?;
-        self.record_audit(
+        self.record_log(
             "funding.earn.subscribed",
             &format!("已把 {amount} {asset} 从现货账户重新申购 Simple Earn 活期，{purpose}"),
         )
