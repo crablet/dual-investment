@@ -163,19 +163,12 @@ export interface RiskSnapshot {
   alerts: RiskAlert[]
 }
 
-export interface ChartPoint {
-  label: string
-  value: DecimalString
-}
-
 /** 收益报告，图表构成由前端再派生。 */
 export interface PnlReport {
   cumulative: DecimalString
   today: DecimalString
   optionPremium: DecimalString
-  realizedSpot: DecimalString
   floatingSpot: DecimalString
-  points: ChartPoint[]
 }
 
 /** 后台调度器和恢复记录的运行健康快照。 */

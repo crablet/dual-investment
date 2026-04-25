@@ -7,7 +7,6 @@ import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
 import EventCalendarBoard from '@/components/common/EventCalendarBoard.vue'
 import MetricCard from '@/components/common/MetricCard.vue'
-import MiniLineChart from '@/components/common/MiniLineChart.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useAppStore } from '@/stores/app'
 
@@ -121,15 +120,11 @@ const autoStatusItems = computed(() => [
   <div class="view-grid">
     <MetricCard v-for="metric in store.metrics" :key="metric.id" :metric="metric" />
 
-    <Panel title="账户概览" class="span-3">
+    <Panel title="账户概览" class="span-6">
       <AccountBalanceList :balances="store.balances" />
     </Panel>
 
-    <Panel title="收益趋势" class="span-5">
-      <MiniLineChart v-if="store.pnl" :points="store.pnl.points" />
-    </Panel>
-
-    <Panel title="收益构成" class="span-4">
+    <Panel title="收益构成" class="span-6">
       <DonutChart v-if="store.pnl" :items="store.pnlBreakdown" :center="pnlCenter" />
     </Panel>
 

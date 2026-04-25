@@ -11,7 +11,7 @@ use rust_decimal_macros::dec;
 use uuid::Uuid;
 
 use crate::domain::{
-    AutoInvestmentRule, BalanceRow, CandidateScanDiagnostics, CandidateScanResult, ChartPoint,
+    AutoInvestmentRule, BalanceRow, CandidateScanDiagnostics, CandidateScanResult,
     ExchangeOrderAck, OptionAccountSnapshot, OptionContract, OptionMarkPrice, PnlReport,
     RecommendationLevel, RiskAlert, RiskRuleSet, RiskSeverity, RiskSnapshot, SimpleEarnSnapshot,
     SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder, StrategyPreview,
@@ -50,9 +50,7 @@ pub fn empty_pnl_report() -> PnlReport {
         cumulative: Decimal::ZERO,
         today: Decimal::ZERO,
         option_premium: Decimal::ZERO,
-        realized_spot: Decimal::ZERO,
         floating_spot: Decimal::ZERO,
-        points: Vec::new(),
     }
 }
 
@@ -226,9 +224,7 @@ pub fn pnl_report_from_orders_with_spot(
         cumulative,
         today,
         option_premium,
-        realized_spot: Decimal::ZERO,
         floating_spot,
-        points: Vec::<ChartPoint>::new(),
     }
 }
 

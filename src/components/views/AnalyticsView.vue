@@ -3,7 +3,6 @@
 // 使用订单和收益快照做展示维度拆分，不在前端重算真实 PnL 事实。
 import { computed } from 'vue'
 import DonutChart from '@/components/common/DonutChart.vue'
-import MiniLineChart from '@/components/common/MiniLineChart.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
@@ -33,11 +32,7 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
 
 <template>
   <div class="view-grid">
-    <Panel title="收益趋势" class="span-5">
-      <MiniLineChart v-if="store.pnl" :points="store.pnl.points" />
-    </Panel>
-
-    <Panel title="收益构成" class="span-4">
+    <Panel title="收益构成" class="span-6">
       <DonutChart
         v-if="store.pnl"
         :items="store.pnlBreakdown"
@@ -45,7 +40,7 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
       />
     </Panel>
 
-    <Panel title="策略绩效对比" class="span-3">
+    <Panel title="策略绩效对比" class="span-6">
       <div class="bar-list">
         <div v-for="row in strategyPerformance" :key="row.label">
           <span>{{ row.label }}</span>
@@ -58,7 +53,6 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
       <div v-if="store.pnl" class="summary-cards monthly-summary-cards">
         <article><span>本月收益</span><strong>{{ money(store.pnl.cumulative) }}</strong></article>
         <article><span>本月权利金</span><strong>{{ money(store.pnl.optionPremium) }}</strong></article>
-        <article><span>现货已实现盈亏</span><strong>暂未计算</strong></article>
         <article><span>补齐 BTC 浮动盈亏</span><strong>{{ money(store.pnl.floatingSpot) }}</strong></article>
       </div>
     </Panel>

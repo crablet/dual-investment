@@ -368,15 +368,6 @@ pub struct RiskSnapshot {
     pub alerts: Vec<RiskAlert>,
 }
 
-/// 小型图表的数据点。
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChartPoint {
-    pub label: String,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub value: Decimal,
-}
-
 /// 收益汇总。
 ///
 /// 这里保留真实订单和现货补齐派生出的收益字段；展示用构成比例由前端从这些字段再派生。
@@ -390,10 +381,7 @@ pub struct PnlReport {
     #[serde(with = "rust_decimal::serde::str")]
     pub option_premium: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
-    pub realized_spot: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
     pub floating_spot: Decimal,
-    pub points: Vec<ChartPoint>,
 }
 
 /// 后台调度器和恢复记录的运行健康快照。
