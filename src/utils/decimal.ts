@@ -33,15 +33,6 @@ export function isNegativeDecimalString(value: DecimalString): boolean {
   return value.trim().startsWith('-') && !isZeroDecimalString(value)
 }
 
-/** 给 Decimal 字符串取反，用于把手续费展示成支出。 */
-export function negateDecimalString(value: DecimalString): DecimalString {
-  const normalized = value.trim()
-  if (isZeroDecimalString(normalized)) {
-    return '0'
-  }
-  return normalized.startsWith('-') ? normalized.slice(1) : `-${normalized}`
-}
-
 /** 把 Decimal 字符串拆成整数单位和小数位数。非法输入按 0 处理，避免 UI 派生中断。 */
 function parseDecimalString(raw: DecimalString): ParsedDecimal {
   const matched = raw.trim().match(/^([+-])?(\d+)(?:\.(\d+))?$/)

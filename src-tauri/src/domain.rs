@@ -336,12 +336,7 @@ pub struct AutoInvestmentRule {
 #[serde(rename_all = "camelCase")]
 pub struct RiskRuleSet {
     #[serde(with = "rust_decimal::serde::str")]
-    pub max_daily_orders: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
     pub max_margin_usage: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub max_drawdown: Decimal,
-    pub stop_after_consecutive_losses: u32,
 }
 
 /// 风控提醒。
@@ -369,8 +364,6 @@ pub struct RiskSnapshot {
     pub margin_usage: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub exercise_risk: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub daily_drawdown: Decimal,
     pub rules: RiskRuleSet,
     pub alerts: Vec<RiskAlert>,
 }
@@ -400,8 +393,6 @@ pub struct PnlReport {
     pub realized_spot: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub floating_spot: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub fees: Decimal,
     pub points: Vec<ChartPoint>,
 }
 
@@ -614,7 +605,6 @@ pub struct OptionAssetBalance {
     pub available: Decimal,
     pub initial_margin: Decimal,
     pub maint_margin: Decimal,
-    pub unrealized_pnl: Decimal,
     pub adjusted_equity: Decimal,
 }
 

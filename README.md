@@ -28,7 +28,7 @@ Rust 后端要求 Rust 1.95 或更新版本。
 
 本应用只保留实盘模式，会发起真实 Binance 订单、Simple Earn 活期申购/赎回和现货-期权账户划转。API Key 必须关闭提现权限，仅开启读取账户、读取行情、现货交易、期权交易、Simple Earn 所需的 Spot & Margin Trading 权限，以及 Universal Transfer 权限。
 
-本地风控不设置固定的单笔预计保证金上限；下单前仍会检查合约状态、数量精度与 `LOT_SIZE.stepSize`、价格精度与 `PRICE_FILTER.tickSize`、Binance 当前价格上下限、可用 USDT 保证金、下单后保证金占用率、单日下单次数和连续亏损停止规则。
+本地风控不设置固定的单笔预计保证金上限；下单前仍会检查合约状态、数量精度与 `LOT_SIZE.stepSize`、价格精度与 `PRICE_FILTER.tickSize`、Binance 当前价格上下限、可用 USDT 保证金和下单后保证金占用率。
 
 业务数据只来自 Binance 接口或本地 SQLite 中已记录的真实事件。普通浏览器运行只适合检查布局，所有业务命令都需要在 Tauri 客户端内执行。
 
@@ -68,6 +68,7 @@ pnpm tauri:build
 - 订单会持久化精确 `expiryAt`；恢复订单时必须从当前 `exchangeInfo` 找到同一合约并使用其精确到期时间，查不到则恢复失败。
 - 手动下单进度通过 Tauri `order-progress` 事件推送到前端；事件只包含阶段、状态、脱敏文案、合约号和交易所订单号，不包含 Secret、签名 query 或 Binance 原始响应。
 - 总览指标优先使用 Rust 快照中的事实口径；前端只做轻量展示派生和格式化。
+- 收益分析只展示权利金、今日收益和现货补齐浮动盈亏，不再单独展示或统计手续费支出。
 - 总览页和持仓与现货页的账户概览只在展示层合并同 ticker 资产，并复用同一个资产列表组件；Simple Earn 使用真实活期/定期持仓，不使用现货账户里的 `LD*` 镜像行。估值来自 Rust 快照中的行情换算结果，原始资产代码、来源和数量仍保留在 hover 明细中。
 - 资金准备只在手动确认下单、已确认开启的自动策略或到期补齐流程内执行；候选扫描只把现货和可赎回活期 USDT 纳入可用资金判断，不会触发真实资金移动。
 - 卖 Put 到期 ITM 后需要低买 BTC 时，现货补齐的 USDT 需求按 `settlement_price * filled_quantity * 1.10` 估算；这只是资金准备缓冲，实际成交仍以 Binance 现货市价单结果为准。

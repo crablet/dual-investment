@@ -774,7 +774,6 @@ impl AppState {
                 return Err(error);
             }
         };
-        let orders = self.orders.read().await.clone();
         let contract = match resolve_contract(&request, &contracts) {
             Ok(contract) => contract,
             Err(error) => {
@@ -808,17 +807,6 @@ impl AppState {
             Some(&contract.symbol),
             None,
         );
-
-        if let Err(error) = enforce_pre_funding_risk_rules(&account, &orders) {
-            progress.emit(
-                OrderProgressStage::Risk,
-                OrderProgressStatus::Error,
-                error.to_string(),
-                Some(&contract.symbol),
-                None,
-            );
-            return Err(error);
-        }
 
         progress.emit(
             OrderProgressStage::Funding,
@@ -871,7 +859,7 @@ impl AppState {
             Some(&contract.symbol),
             None,
         );
-        if let Err(error) = enforce_risk_rules(&request, contract, &account, &orders) {
+        if let Err(error) = enforce_risk_rules(&request, contract, &account) {
             self.sweep_option_idle_usdt_best_effort(&client, "期权风控拒绝后归集")
                 .await;
             progress.emit(
@@ -2169,11 +2157,9 @@ fn enforce_risk_rules(
     request: &StrategyRequest,
     contract: &OptionContract,
     account: &OptionAccountSnapshot,
-    orders: &[StrategyOrder],
 ) -> AppResult<()> {
     let rules = strategy::risk_snapshot_from_account(account).rules;
     let required = strategy::required_margin(contract, request.direction, request.quantity);
-    enforce_pre_funding_risk_rules(account, orders)?;
 
     if let Some(usdt) = account.asset("USDT") {
         let equity = if usdt.adjusted_equity > Decimal::ZERO {
@@ -2192,39 +2178,6 @@ fn enforce_risk_rules(
         }
     }
 
-    Ok(())
-}
-
-/// 校验不会因为资金划转而改变的风控条件，避免为必然拒绝的订单移动资金。
-fn enforce_pre_funding_risk_rules(
-    account: &OptionAccountSnapshot,
-    orders: &[StrategyOrder],
-) -> AppResult<()> {
-    let rules = strategy::risk_snapshot_from_account(account).rules;
-
-    let today = Utc::now().date_naive();
-    let daily_orders = orders
-        .iter()
-        .filter(|order| order.created_at.date_naive() == today)
-        .count();
-    if Decimal::from(daily_orders) >= rules.max_daily_orders {
-        return Err(AppError::RiskRejected(format!(
-            "今日下单次数已达到风控上限 {}",
-            rules.max_daily_orders
-        )));
-    }
-
-    let consecutive_losses = orders
-        .iter()
-        .take_while(|order| order.estimated_pnl < Decimal::ZERO)
-        .count();
-    if consecutive_losses
-        >= usize::try_from(rules.stop_after_consecutive_losses).unwrap_or(usize::MAX)
-    {
-        return Err(AppError::RiskRejected(
-            "连续亏损次数已达到自动停止阈值".to_string(),
-        ));
-    }
     Ok(())
 }
 

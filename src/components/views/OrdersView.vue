@@ -7,11 +7,17 @@ import { NButton, NIcon, NTag } from 'naive-ui'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
+import type { StrategyOrder } from '@/types/domain'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
 
 const store = useAppStore()
 const { directionText, directionTone, money, statusText, statusTone } = useFormat()
 const selectedId = shallowRef<string>()
+
+interface OrderDetailRow {
+  label: string
+  value: string
+}
 
 watchEffect(() => {
   // 首次进入或订单列表刷新后，默认选中最新订单，保留用户已有选择。
@@ -29,9 +35,40 @@ const todayExpiryCount = computed(() => {
   return store.orders.filter(order => localDateKey(order.expiryAt) === today).length
 })
 const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
+const detailRows = computed(() => {
+  if (!selected.value) {
+    return []
+  }
+  return createOrderDetailRows(selected.value)
+})
 
 function expiryLabel(order: { expiryAt: string }) {
   return localDateTimeLabel(order.expiryAt)
+}
+
+function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
+  return [
+    { label: '方向', value: directionText(order.direction) },
+    { label: '标的', value: order.symbol },
+    { label: '期权合约', value: order.optionSymbol },
+    { label: '交易所状态', value: order.exchangeStatus },
+    { label: '客户端订单号', value: order.clientOrderId },
+    { label: '到期时间', value: expiryLabel(order) },
+    { label: '执行价', value: money(order.strike) },
+    { label: '成交数量', value: `${order.filledQuantity} / ${order.quantity} 张` },
+    { label: '成交均价', value: money(order.avgPrice) },
+    { label: '手续费', value: money(order.fee) },
+    { label: '权利金', value: money(order.premium) },
+    { label: '保本价', value: money(order.breakeven) },
+    { label: '结算参考价', value: money(order.settlementPrice) },
+    { label: '现货订单号', value: order.spotOrderId ?? '--' },
+    { label: '现货状态', value: order.spotOrderStatus || '--' },
+    { label: '现货成交数量', value: `${order.spotFilledQuantity} BTC` },
+    { label: '现货成交均价', value: money(order.spotAvgPrice) },
+    { label: '现货手续费', value: order.spotFee },
+    { label: '到期补齐', value: order.settlementAction },
+    { label: '补齐结果', value: order.rebalanceMessage || '--' },
+  ]
 }
 </script>
 
@@ -96,35 +133,17 @@ function expiryLabel(order: { expiryAt: string }) {
     </Panel>
 
     <Panel title="订单详情" class="span-4">
-      <div v-if="selected" class="detail-list">
-        <h3>{{ selected.id }}</h3>
-        <NTag :type="statusTone(selected.status)" size="small" class="detail-status-tag">
-          {{ statusText(selected.status) }}
-        </NTag>
-        <p><span>方向</span><strong>{{ directionText(selected.direction) }}</strong></p>
-        <p><span>标的</span><strong>{{ selected.symbol }}</strong></p>
-        <p><span>期权合约</span><strong>{{ selected.optionSymbol }}</strong></p>
-        <p><span>交易所状态</span><strong>{{ selected.exchangeStatus }}</strong></p>
-        <p><span>客户端订单号</span><strong>{{ selected.clientOrderId }}</strong></p>
-        <p><span>到期时间</span><strong>{{ expiryLabel(selected) }}</strong></p>
-        <p><span>执行价</span><strong>{{ money(selected.strike) }}</strong></p>
-        <p><span>成交数量</span><strong>{{ selected.filledQuantity }} / {{ selected.quantity }} 张</strong></p>
-        <p><span>成交均价</span><strong>{{ money(selected.avgPrice) }}</strong></p>
-        <p><span>手续费</span><strong>{{ money(selected.fee) }}</strong></p>
-        <p><span>权利金</span><strong>{{ money(selected.premium) }}</strong></p>
-        <p><span>保本价</span><strong>{{ money(selected.breakeven) }}</strong></p>
-        <p><span>结算参考价</span><strong>{{ money(selected.settlementPrice) }}</strong></p>
-        <p><span>现货订单号</span><strong>{{ selected.spotOrderId ?? '--' }}</strong></p>
-        <p><span>现货状态</span><strong>{{ selected.spotOrderStatus || '--' }}</strong></p>
-        <p><span>现货成交数量</span><strong>{{ selected.spotFilledQuantity }} BTC</strong></p>
-        <p><span>现货成交均价</span><strong>{{ money(selected.spotAvgPrice) }}</strong></p>
-        <p><span>现货手续费</span><strong>{{ selected.spotFee }}</strong></p>
-        <p><span>到期补齐</span><strong>{{ selected.settlementAction }}</strong></p>
-        <p><span>补齐结果</span><strong>{{ selected.rebalanceMessage || '--' }}</strong></p>
-        <div class="button-row compact">
-          <NButton secondary @click="store.openView('portfolio')">查看持仓</NButton>
-          <NButton secondary @click="store.openView('dual')">复制策略</NButton>
-        </div>
+      <div v-if="selected" class="detail-list order-detail-list">
+        <header class="order-detail-heading">
+          <h3 :title="selected.id">{{ selected.id }}</h3>
+          <NTag :type="statusTone(selected.status)" size="small" class="detail-status-tag">
+            {{ statusText(selected.status) }}
+          </NTag>
+        </header>
+        <p v-for="row in detailRows" :key="row.label">
+          <span>{{ row.label }}</span>
+          <strong :title="row.value">{{ row.value }}</strong>
+        </p>
       </div>
       <p v-else class="empty-state">暂无订单详情</p>
     </Panel>

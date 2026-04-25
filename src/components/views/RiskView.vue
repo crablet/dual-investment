@@ -2,7 +2,7 @@
 // 风险控制视图。
 // 展示 Rust 风控快照和义务仓暴露概览；下单拦截仍由 Rust 在实盘下单前执行。
 import { computed } from 'vue'
-import { AlertTriangle, ShieldCheck } from '@lucide/vue'
+import { Activity, AlertTriangle, Gauge, ShieldCheck } from '@lucide/vue'
 import { NButton, NIcon, NProgress, NTag } from 'naive-ui'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
@@ -11,6 +11,8 @@ import type { RiskSeverity } from '@/types/domain'
 
 const store = useAppStore()
 const { money, percent } = useFormat()
+
+const riskLevelLabel = computed(() => store.risk?.level ?? '未同步')
 
 const exposureRows = computed(() => {
   const rows = [
@@ -41,28 +43,31 @@ function tagType(severity: RiskSeverity) {
 
 <template>
   <div class="view-grid">
-    <Panel title="风险等级" class="span-3">
+    <Panel title="风险等级" class="span-4">
       <div class="risk-score">
         <NIcon :component="ShieldCheck" />
         <strong>{{ store.risk?.score ?? 0 }}</strong>
-        <span>{{ store.risk?.level }}</span>
+        <span>{{ riskLevelLabel }}</span>
         <NProgress type="line" :percentage="store.risk?.score ?? 0" :show-indicator="false" status="warning" />
       </div>
     </Panel>
 
-    <Panel title="保证金占用率" class="span-3">
-      <div class="risk-metric"><strong>{{ percent(store.risk?.marginUsage ?? '0') }}</strong><span>保证金占用</span></div>
-      <NProgress :percentage="Number(store.risk?.marginUsage ?? 0)" :show-indicator="false" />
+    <Panel title="保证金占用率" class="span-4">
+      <div class="risk-score">
+        <NIcon :component="Gauge" />
+        <strong>{{ percent(store.risk?.marginUsage ?? '0') }}</strong>
+        <span>{{ riskLevelLabel }}</span>
+        <NProgress :percentage="Number(store.risk?.marginUsage ?? 0)" status="warning" :show-indicator="false" />
+      </div>
     </Panel>
 
-    <Panel title="被行权风险" class="span-3">
-      <div class="risk-metric"><strong>{{ percent(store.risk?.exerciseRisk ?? '0') }}</strong><span>{{ store.risk?.level }}</span></div>
-      <NProgress :percentage="Number(store.risk?.exerciseRisk ?? 0)" status="warning" :show-indicator="false" />
-    </Panel>
-
-    <Panel title="单日最大回撤" class="span-3">
-      <div class="risk-metric"><strong>{{ percent(store.risk?.dailyDrawdown ?? '0') }}</strong><span>回撤</span></div>
-      <NProgress :percentage="Number(store.risk?.dailyDrawdown ?? 0) * 10" status="success" :show-indicator="false" />
+    <Panel title="被行权风险" class="span-4">
+      <div class="risk-score">
+        <NIcon :component="Activity" />
+        <strong>{{ percent(store.risk?.exerciseRisk ?? '0') }}</strong>
+        <span>{{ riskLevelLabel }}</span>
+        <NProgress :percentage="Number(store.risk?.exerciseRisk ?? 0)" status="warning" :show-indicator="false" />
+      </div>
     </Panel>
 
     <Panel title="风险暴露" class="span-6">
@@ -87,17 +92,6 @@ function tagType(severity: RiskSeverity) {
           </div>
           <NButton size="small" secondary>查看</NButton>
         </article>
-      </div>
-    </Panel>
-
-    <Panel title="限制规则" class="span-12">
-      <div class="rule-toggles">
-        <article><span>单日最大执行次数</span><strong>{{ store.risk?.rules.maxDailyOrders }} 次/日</strong></article>
-        <article><span>单标的最大占用</span><strong>{{ percent(store.risk?.rules.maxMarginUsage ?? '0') }}</strong></article>
-        <article><span>最低目标年化</span><strong>{{ percent(store.autoRule?.minAnnualized ?? '0') }}</strong></article>
-        <article><span>最大回撤阈值</span><strong>{{ percent(store.risk?.rules.maxDrawdown ?? '0') }}</strong></article>
-        <article><span>连续亏损停止</span><strong>连续亏损 {{ store.risk?.rules.stopAfterConsecutiveLosses ?? 0 }} 次</strong></article>
-        <article><span>下单确认</span><strong>逐笔确认</strong></article>
       </div>
     </Panel>
 

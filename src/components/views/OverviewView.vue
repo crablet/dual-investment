@@ -1,9 +1,8 @@
 <script setup lang="ts">
 // 总览视图。
-// 组合账户、收益、待办、事件日历和快捷候选入口；具体数据都来自 Pinia 快照派生。
+// 组合账户、收益、待办、事件日历和活跃策略；具体数据都来自 Pinia 快照派生。
 import { computed } from 'vue'
 import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
-import CandidateTable from '@/components/common/CandidateTable.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
 import EventCalendarBoard from '@/components/common/EventCalendarBoard.vue'
 import MetricCard from '@/components/common/MetricCard.vue'
@@ -11,7 +10,6 @@ import MiniLineChart from '@/components/common/MiniLineChart.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useAppStore } from '@/stores/app'
 import type { AppViewId } from '@/stores/app'
-import type { StrategyCandidate } from '@/types/domain'
 
 interface PendingTask {
   id: string
@@ -115,24 +113,6 @@ const autoStatusItems = computed(() => [
   },
 ])
 
-function placeCandidate(candidate: StrategyCandidate) {
-  // 总览快捷下单同样必须显式确认，确认后才把 `confirmLive` 传给 Rust。
-  if (!window.confirm('确认发送 Binance 期权订单？')) {
-    return
-  }
-  void store.placeStrategy({
-    candidateId: candidate.id,
-    symbol: candidate.symbol,
-    optionSymbol: candidate.optionSymbol,
-    direction: candidate.direction,
-    expiry: candidate.expiry,
-    expiryAt: candidate.expiryAt,
-    strike: candidate.strike,
-    quantity: candidate.quantity,
-    limitPrice: candidate.limitPrice,
-    confirmLive: true,
-  })
-}
 </script>
 
 <template>
@@ -180,10 +160,6 @@ function placeCandidate(candidate: StrategyCandidate) {
 
     <Panel title="事件日历看板" class="span-12">
       <EventCalendarBoard />
-    </Panel>
-
-    <Panel title="快捷机会" class="span-12">
-      <CandidateTable :candidates="store.candidates.slice(0, 3)" @order="placeCandidate" />
     </Panel>
 
     <Panel title="活跃策略" class="span-12">

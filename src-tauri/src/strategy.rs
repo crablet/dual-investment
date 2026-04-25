@@ -52,7 +52,6 @@ pub fn empty_pnl_report() -> PnlReport {
         option_premium: Decimal::ZERO,
         realized_spot: Decimal::ZERO,
         floating_spot: Decimal::ZERO,
-        fees: Decimal::ZERO,
         points: Vec::new(),
     }
 }
@@ -199,7 +198,7 @@ fn is_simple_earn_ledger_asset(asset: &str) -> bool {
 
 /// 从真实订单和现货价格派生收益报告。
 ///
-/// 权利金、手续费和现货补齐浮动盈亏都来自已保存订单字段；没有订单时返回空报告。
+/// 权利金和现货补齐浮动盈亏都来自已保存订单字段；没有订单时返回空报告。
 pub fn pnl_report_from_orders_with_spot(
     orders: &[StrategyOrder],
     spot_price: Option<Decimal>,
@@ -209,7 +208,6 @@ pub fn pnl_report_from_orders_with_spot(
     }
 
     let option_premium: Decimal = orders.iter().map(|order| order.premium).sum();
-    let fees: Decimal = orders.iter().map(|order| order.fee).sum();
     let today = today_option_premium(orders);
     let floating_spot = spot_price.map_or(Decimal::ZERO, |price| {
         orders
@@ -223,14 +221,13 @@ pub fn pnl_report_from_orders_with_spot(
             .sum::<Decimal>()
             .round_dp(2)
     });
-    let cumulative = option_premium + floating_spot - fees;
+    let cumulative = option_premium + floating_spot;
     PnlReport {
         cumulative,
         today,
         option_premium,
         realized_spot: Decimal::ZERO,
         floating_spot,
-        fees,
         points: Vec::<ChartPoint>::new(),
     }
 }
@@ -242,7 +239,6 @@ pub fn empty_risk_snapshot() -> RiskSnapshot {
         level: "未同步".to_string(),
         margin_usage: Decimal::ZERO,
         exercise_risk: Decimal::ZERO,
-        daily_drawdown: Decimal::ZERO,
         rules: default_risk_rules(),
         alerts: Vec::new(),
     }
@@ -258,7 +254,6 @@ pub fn risk_snapshot_from_account(account: &OptionAccountSnapshot) -> RiskSnapsh
     let maintenance_usage = usdt
         .and_then(|asset| percent_of(asset.maint_margin, asset.adjusted_equity))
         .unwrap_or(Decimal::ZERO);
-    let unrealized_pnl = usdt.map_or(Decimal::ZERO, |asset| asset.unrealized_pnl);
     let level = if margin_usage >= dec!(80) {
         "高风险"
     } else if margin_usage >= dec!(50) {
@@ -296,11 +291,6 @@ pub fn risk_snapshot_from_account(account: &OptionAccountSnapshot) -> RiskSnapsh
         level: level.to_string(),
         margin_usage,
         exercise_risk: maintenance_usage,
-        daily_drawdown: if unrealized_pnl < Decimal::ZERO {
-            -unrealized_pnl
-        } else {
-            Decimal::ZERO
-        },
         rules,
         alerts,
     }
@@ -773,10 +763,7 @@ fn sort_candidates(candidates: &mut [StrategyCandidate]) {
 /// 默认风控规则。
 fn default_risk_rules() -> RiskRuleSet {
     RiskRuleSet {
-        max_daily_orders: dec!(20),
         max_margin_usage: dec!(50),
-        max_drawdown: dec!(5),
-        stop_after_consecutive_losses: 3,
     }
 }
 

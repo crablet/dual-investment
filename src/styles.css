@@ -202,7 +202,6 @@ input {
 }
 
 .metric-card strong,
-.risk-metric strong,
 .risk-score strong {
   display: block;
   margin-top: 4px;
@@ -269,19 +268,74 @@ input {
   justify-self: start;
 }
 
+.order-detail-list {
+  gap: 0;
+}
+
+.order-detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--line);
+}
+
+.order-detail-heading h3 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 16px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-detail-heading .detail-status-tag {
+  flex: 0 0 auto;
+}
+
 .account-row,
 .task-row,
 .detail-list p,
 .setting-list article,
 .calendar-list article,
-.obligation-list article,
-.rule-toggles article {
+.obligation-list article {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  margin: 0;
   padding: 11px 0;
   border-bottom: 1px solid var(--line);
+}
+
+.order-detail-list p {
+  display: grid;
+  grid-template-columns: minmax(92px, 34%) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 44px;
+  padding: 9px 0;
+  line-height: 1.35;
+}
+
+.order-detail-list p > span {
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.order-detail-list p > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .account-row {
@@ -455,7 +509,6 @@ input {
 .donut-legend,
 .payoff-stats,
 .summary-cards,
-.rule-toggles,
 .protection-grid {
   display: grid;
   gap: 10px;
@@ -1695,7 +1748,9 @@ button.opportunity-row.selected:hover {
 
 .risk-score {
   display: grid;
-  gap: 10px;
+  align-content: center;
+  gap: 8px;
+  min-height: 178px;
   text-align: center;
 }
 
@@ -1705,8 +1760,16 @@ button.opportunity-row.selected:hover {
   font-size: 34px;
 }
 
-.risk-metric span {
+.risk-score strong {
+  justify-self: center;
+}
+
+.risk-score > span {
   color: var(--muted);
+}
+
+.risk-score .n-progress {
+  margin-top: 8px;
 }
 
 .alert-list {
@@ -1740,10 +1803,6 @@ button.opportunity-row.selected:hover {
 .alert-list span {
   display: block;
   color: var(--muted);
-}
-
-.rule-toggles {
-  grid-template-columns: repeat(3, 1fr);
 }
 
 .security-action {
@@ -1798,7 +1857,6 @@ button.opportunity-row.selected:hover {
   }
 
   .summary-cards,
-  .rule-toggles,
   .order-strip,
   .payoff-stats {
     grid-template-columns: repeat(2, 1fr);

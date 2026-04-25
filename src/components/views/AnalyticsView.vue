@@ -9,7 +9,7 @@ import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
-const { money, percent } = useFormat()
+const { money } = useFormat()
 
 const strategyPerformance = computed(() => {
   const rows = [
@@ -60,8 +60,6 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
         <article><span>本月权利金</span><strong>{{ money(store.pnl.optionPremium) }}</strong></article>
         <article><span>现货已实现盈亏</span><strong>暂未计算</strong></article>
         <article><span>补齐 BTC 浮动盈亏</span><strong>{{ money(store.pnl.floatingSpot) }}</strong></article>
-        <article><span>手续费支出</span><strong>{{ money(store.pnl.fees) }}</strong></article>
-        <article><span>最大回撤</span><strong>{{ percent(store.risk?.dailyDrawdown ?? '0') }}</strong></article>
       </div>
     </Panel>
 

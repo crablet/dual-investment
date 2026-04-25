@@ -141,10 +141,7 @@ export interface AutoInvestmentRule {
 
 /** 风控规则集合。 */
 export interface RiskRuleSet {
-  maxDailyOrders: DecimalString
   maxMarginUsage: DecimalString
-  maxDrawdown: DecimalString
-  stopAfterConsecutiveLosses: number
 }
 
 /** 可展示的风险提醒；后端负责保证内容脱敏。 */
@@ -162,7 +159,6 @@ export interface RiskSnapshot {
   level: string
   marginUsage: DecimalString
   exerciseRisk: DecimalString
-  dailyDrawdown: DecimalString
   rules: RiskRuleSet
   alerts: RiskAlert[]
 }
@@ -179,7 +175,6 @@ export interface PnlReport {
   optionPremium: DecimalString
   realizedSpot: DecimalString
   floatingSpot: DecimalString
-  fees: DecimalString
   points: ChartPoint[]
 }
 

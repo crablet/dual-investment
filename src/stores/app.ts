@@ -28,7 +28,6 @@ import type {
 import {
   isNegativeDecimalString,
   isZeroDecimalString,
-  negateDecimalString,
   sumDecimalStrings,
 } from '@/utils/decimal'
 
@@ -649,7 +648,7 @@ function buildMetrics(
   ]
 }
 
-/** 从收益报告派生图表构成。负数手续费在前端作为支出显示。 */
+/** 从收益报告派生图表构成。 */
 function buildPnlBreakdown(report: AppSnapshot['pnl'] | undefined): PnlBreakdownItem[] {
   if (!report || (isZeroDecimalString(report.cumulative) && isZeroDecimalString(report.optionPremium))) {
     return []
@@ -660,11 +659,6 @@ function buildPnlBreakdown(report: AppSnapshot['pnl'] | undefined): PnlBreakdown
       label: '期权权利金',
       value: report.optionPremium,
       color: '#d89b2b',
-    },
-    {
-      label: '手续费',
-      value: negateDecimalString(report.fees),
-      color: '#cc4b37',
     },
     {
       label: '现货补齐浮动盈亏',
