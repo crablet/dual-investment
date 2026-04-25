@@ -3,8 +3,6 @@
 // 前端所有后端调用都集中在这里。普通浏览器环境没有 Tauri runtime 时直接抛出明确错误，
 // 不提供 mock 数据或浏览器 fallback，避免把实盘路径和演示路径混在一起。
 
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
 import type {
   AppSettings,
   AppSnapshot,
@@ -17,9 +15,12 @@ import type {
   StrategyRequest,
   ToggleAutoRequest,
 } from '@/types/domain'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
-const isTauriRuntime = () =>
-  typeof window !== 'undefined' && Reflect.has(window, '__TAURI_INTERNALS__')
+function isTauriRuntime() {
+  return typeof window !== 'undefined' && Reflect.has(window, '__TAURI_INTERNALS__')
+}
 
 /**
  * 调用 Tauri command。

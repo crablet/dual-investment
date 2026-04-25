@@ -2,6 +2,7 @@
 //!
 //! command 层只做参数转发和错误转换，真实业务在 `AppState` 中完成。所有 command
 //! 按 Tauri 约定返回 `Result<T, String>`，让前端能直接展示可读错误。
+#![allow(clippy::needless_pass_by_value)]
 
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;

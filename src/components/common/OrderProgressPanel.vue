@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { OrderProgressStepView, OrderProgressView } from '@/types/view'
 // 手动下单进度面板。
 // 只展示前端接收到的脱敏阶段事件；真实订单事实仍以策略订单列表和后端快照为准。
 import {
@@ -9,10 +10,9 @@ import {
   X,
   XCircle,
 } from '@lucide/vue'
-import { computed } from 'vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
+import { computed } from 'vue'
 import { useFormat } from '@/composables/useFormat'
-import type { OrderProgressStepView, OrderProgressView } from '@/types/view'
 
 const props = defineProps<{
   progress?: OrderProgressView
@@ -26,22 +26,30 @@ const emit = defineEmits<{
 const { money } = useFormat()
 
 const statusText = computed(() => {
-  if (!props.progress) return '待下单'
-  if (props.progress.status === 'success') return '已完成'
-  if (props.progress.status === 'error') return '失败'
+  if (!props.progress)
+    return '待下单'
+  if (props.progress.status === 'success')
+    return '已完成'
+  if (props.progress.status === 'error')
+    return '失败'
   return '进行中'
 })
 
 const statusTone = computed(() => {
-  if (props.progress?.status === 'success') return 'success'
-  if (props.progress?.status === 'error') return 'error'
+  if (props.progress?.status === 'success')
+    return 'success'
+  if (props.progress?.status === 'error')
+    return 'error'
   return 'warning'
 })
 
 function stepIcon(step: OrderProgressStepView) {
-  if (step.status === 'success') return CheckCircle2
-  if (step.status === 'error') return XCircle
-  if (step.status === 'running') return Loader2
+  if (step.status === 'success')
+    return CheckCircle2
+  if (step.status === 'error')
+    return XCircle
+  if (step.status === 'running')
+    return Loader2
   return Circle
 }
 </script>

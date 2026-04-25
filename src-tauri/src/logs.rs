@@ -70,9 +70,9 @@ impl LogStore {
         let paths = self.log_file_paths()?;
         let files = paths
             .iter()
-            .map(|path| self.file_info(path))
+            .map(|path| Self::file_info(path))
             .collect::<AppResult<Vec<_>>>()?;
-        let recent_entries = self.recent_entries(&paths, RECENT_ENTRY_LIMIT)?;
+        let recent_entries = Self::recent_entries(&paths, RECENT_ENTRY_LIMIT)?;
         Ok(LogSnapshot {
             directory: self.directory.display().to_string(),
             current_file: self.current_file_path().display().to_string(),
@@ -133,7 +133,7 @@ impl LogStore {
         Ok(paths)
     }
 
-    fn file_info(&self, path: &Path) -> AppResult<LogFileInfo> {
+    fn file_info(path: &Path) -> AppResult<LogFileInfo> {
         let metadata = fs::metadata(path).map_err(storage_error)?;
         let modified_at = metadata.modified().ok().map(DateTime::<Utc>::from);
         let file_name = path
@@ -156,7 +156,7 @@ impl LogStore {
         })
     }
 
-    fn recent_entries(&self, paths: &[PathBuf], limit: usize) -> AppResult<Vec<LogEntry>> {
+    fn recent_entries(paths: &[PathBuf], limit: usize) -> AppResult<Vec<LogEntry>> {
         let mut entries = Vec::new();
         for path in paths {
             let mut file_entries = read_entries(path)?;
@@ -194,6 +194,7 @@ fn count_lines(path: &Path) -> AppResult<usize> {
     Ok(reader.lines().map_while(Result::ok).count())
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn storage_error(error: std::io::Error) -> AppError {
     AppError::Storage(error.to_string())
 }

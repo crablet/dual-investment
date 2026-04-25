@@ -3,9 +3,6 @@
 // 这里是前端唯一的跨页面状态源：保存 Tauri 快照、请求 loading/error、当前视图，以及
 // 从快照派生出的指标和收益构成。真实业务计算仍以 Rust 返回的快照为准，前端只做展示层派生。
 
-import { defineStore } from 'pinia'
-import { computed, shallowRef } from 'vue'
-import { api } from '@/services/api'
 import type {
   AppSettings,
   AppSnapshot,
@@ -25,51 +22,62 @@ import type {
   OrderProgressView,
   PnlBreakdownItem,
 } from '@/types/view'
+import { defineStore } from 'pinia'
+import { computed, shallowRef } from 'vue'
+import { api } from '@/services/api'
 import {
   isNegativeDecimalString,
   isZeroDecimalString,
   sumDecimalStrings,
 } from '@/utils/decimal'
 
-type RequestKey =
-  | 'snapshot'
-  | 'connect'
-  | 'credentials'
-  | 'scan'
-  | 'sync'
-  | 'settlement'
-  | 'auto'
-  | 'recover'
-  | 'order'
-  | 'rule'
+type RequestKey
+  = | 'snapshot'
+    | 'connect'
+    | 'credentials'
+    | 'scan'
+    | 'sync'
+    | 'settlement'
+    | 'auto'
+    | 'recover'
+    | 'order'
+    | 'rule'
 
 /** 请求包装选项。silent 请求用于后台轮询，不清空前台错误提示。 */
 interface RunOptions {
   silent?: boolean
 }
 
-/** 应用内视图 ID；导航切换统一走 `openView`，以触发对应页面刷新。 */
-export type AppViewId =
-  | 'overview'
-  | 'dual'
-  | 'orders'
-  | 'portfolio'
-  | 'analytics'
-  | 'risk'
-  | 'settings'
+interface ConnectSavedOptions extends RunOptions {
+  autoReconnect?: boolean
+}
 
-const emptyPending = (): Record<RequestKey, number> => ({
-  snapshot: 0,
-  connect: 0,
-  credentials: 0,
-  scan: 0,
-  sync: 0,
-  settlement: 0,
-  auto: 0,
-  recover: 0,
-  order: 0,
-  rule: 0,
-})
+type AutoReconnectState = 'idle' | 'waiting' | 'connecting' | 'paused'
+
+/** 应用内视图 ID；导航切换统一走 `openView`，以触发对应页面刷新。 */
+export type AppViewId
+  = | 'overview'
+    | 'dual'
+    | 'orders'
+    | 'portfolio'
+    | 'analytics'
+    | 'risk'
+    | 'settings'
+
+function emptyPending(): Record<RequestKey, number> {
+  return {
+    snapshot: 0,
+    connect: 0,
+    credentials: 0,
+    scan: 0,
+    sync: 0,
+    settlement: 0,
+    auto: 0,
+    recover: 0,
+    order: 0,
+    rule: 0,
+  }
+}
 
 const metricMoneyFormatter = new Intl.NumberFormat('zh-CN', {
   minimumFractionDigits: 2,
@@ -92,6 +100,8 @@ const orderProgressSuccessMessages: Record<OrderProgressStage, string> = {
   persist: '订单已保存',
 }
 
+const reconnectBackoffDelays = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000]
+
 export const useAppStore = defineStore('app', () => {
   // 快照使用 shallowRef：后端每次返回完整对象，前端通过替换根引用触发更新。
   const snapshot = shallowRef<AppSnapshot>()
@@ -104,6 +114,10 @@ export const useAppStore = defineStore('app', () => {
   const orderProgress = shallowRef<OrderProgressView>()
   const orderNotice = shallowRef<OrderProgressNotice>()
   const unlistenOrderProgress = shallowRef<(() => void)>()
+  const autoReconnectState = shallowRef<AutoReconnectState>('idle')
+  const autoReconnectAttempts = shallowRef(0)
+  const autoReconnectDelayMs = shallowRef(reconnectBackoffDelays[0])
+  const lastAutoReconnectError = shallowRef<string>()
 
   const loading = computed(() => foregroundPending.value > 0)
   const backgroundLoading = computed(() => backgroundPending.value > 0)
@@ -129,6 +143,29 @@ export const useAppStore = defineStore('app', () => {
     pnl.value,
   ))
   const pnlBreakdown = computed<PnlBreakdownItem[]>(() => buildPnlBreakdown(pnl.value))
+  const canAutoReconnect = computed(() =>
+    Boolean(
+      settings.value?.savedCredentials
+      && !settings.value.connected
+      && autoReconnectState.value !== 'paused',
+    ),
+  )
+  const autoReconnectPaused = computed(() => autoReconnectState.value === 'paused')
+  const autoReconnectMessage = computed(() => {
+    if (settings.value?.connected || !settings.value?.savedCredentials) {
+      return undefined
+    }
+    if (autoReconnectState.value === 'connecting') {
+      return '正在使用已保存凭据自动连接 Binance'
+    }
+    if (autoReconnectState.value === 'paused') {
+      return `自动重连已暂停：${lastAutoReconnectError.value ?? '请检查已保存凭据和 Binance API 权限'}`
+    }
+    if (lastAutoReconnectError.value) {
+      return `自动重连将在约 ${formatReconnectDelay(autoReconnectDelayMs.value)} 后再次尝试。上次失败：${lastAutoReconnectError.value}`
+    }
+    return '检测到已保存凭据，后台会自动尝试连接 Binance'
+  })
 
   async function run<T>(
     key: RequestKey,
@@ -336,6 +373,7 @@ export const useAppStore = defineStore('app', () => {
     const next = await run('snapshot', () => api.getAppSnapshot(), options)
     if (next) {
       snapshot.value = next
+      reconcileAutoReconnectSettings(next.settings)
     }
   }
 
@@ -343,32 +381,66 @@ export const useAppStore = defineStore('app', () => {
   async function bootstrap() {
     await refresh()
     if (snapshot.value?.settings.savedCredentials && !snapshot.value.settings.connected) {
-      await connectSaved()
+      await tryAutoReconnectSaved()
     }
   }
 
   async function connect(request: ConnectBinanceRequest) {
+    resetAutoReconnect()
     const next = await run('connect', () => api.connectBinance(request))
     patchSettings(next)
     if (next?.connected) {
+      resetAutoReconnect()
       await syncLiveState()
     }
   }
 
-  async function connectSaved() {
-    const next = await run('connect', () => api.connectSavedBinance())
+  async function connectSaved(options: ConnectSavedOptions = {}) {
+    if (!options.autoReconnect) {
+      resetAutoReconnect()
+    }
+    const next = await run('connect', () => api.connectSavedBinance(), options)
     patchSettings(next)
     if (next?.connected) {
-      await syncLiveState()
+      resetAutoReconnect()
+      await syncLiveState(options)
+      return true
     }
+    return false
   }
 
   async function forgetCredentials() {
     const next = await run('credentials', () => api.forgetBinanceCredentials())
     patchSettings(next)
     if (next) {
+      resetAutoReconnect()
       await refresh()
     }
+  }
+
+  async function tryAutoReconnectSaved() {
+    if (!canAutoReconnect.value || isLoading('connect')) {
+      return false
+    }
+
+    autoReconnectState.value = 'connecting'
+    autoReconnectAttempts.value += 1
+    const connected = await connectSaved({ silent: true, autoReconnect: true })
+    if (connected) {
+      return true
+    }
+
+    const message = backgroundError.value ?? '自动连接 Binance 失败'
+    lastAutoReconnectError.value = message
+    if (isPermanentSavedConnectionError(message)) {
+      autoReconnectState.value = 'paused'
+      autoReconnectDelayMs.value = reconnectBackoffDelays.at(-1) ?? reconnectBackoffDelays[0]
+      return false
+    }
+
+    autoReconnectState.value = 'waiting'
+    autoReconnectDelayMs.value = reconnectDelayAfterAttempt(autoReconnectAttempts.value)
+    return false
   }
 
   async function scan(options: RunOptions = {}) {
@@ -488,7 +560,21 @@ export const useAppStore = defineStore('app', () => {
   function patchSettings(next?: AppSettings) {
     if (next && snapshot.value) {
       snapshot.value = { ...snapshot.value, settings: next }
+      reconcileAutoReconnectSettings(next)
     }
+  }
+
+  function reconcileAutoReconnectSettings(next: AppSettings) {
+    if (next.connected || !next.savedCredentials) {
+      resetAutoReconnect()
+    }
+  }
+
+  function resetAutoReconnect() {
+    autoReconnectState.value = 'idle'
+    autoReconnectAttempts.value = 0
+    autoReconnectDelayMs.value = reconnectBackoffDelays[0]
+    lastAutoReconnectError.value = undefined
   }
 
   /** 合并后端返回的更新订单，并按更新时间倒序展示。 */
@@ -507,6 +593,12 @@ export const useAppStore = defineStore('app', () => {
     backgroundLoading,
     error,
     backgroundError,
+    autoReconnectState,
+    autoReconnectAttempts,
+    autoReconnectDelayMs,
+    autoReconnectPaused,
+    autoReconnectMessage,
+    canAutoReconnect,
     activeView,
     orderProgress,
     orderNotice,
@@ -533,6 +625,7 @@ export const useAppStore = defineStore('app', () => {
     refresh,
     connect,
     connectSaved,
+    tryAutoReconnectSaved,
     forgetCredentials,
     scan,
     syncLiveState,
@@ -593,6 +686,30 @@ function markCurrentOrderStepError(
 
 function makeOrderFlowId() {
   return `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function reconnectDelayAfterAttempt(attempts: number) {
+  return reconnectBackoffDelays[Math.min(attempts, reconnectBackoffDelays.length - 1)]
+}
+
+function formatReconnectDelay(ms: number) {
+  const seconds = Math.max(1, Math.round(ms / 1_000))
+  if (seconds < 60) {
+    return `${seconds} 秒`
+  }
+  return `${Math.round(seconds / 60)} 分钟`
+}
+
+function isPermanentSavedConnectionError(message: string) {
+  return [
+    '系统 keyring 中没有已保存的 Binance API 凭据',
+    'Binance 期权账户当前不可交易',
+    'Binance 现货账户当前不可交易',
+    'HTTP 401',
+    'code -2014',
+    'code -2015',
+    'code -1022',
+  ].some(pattern => message.includes(pattern))
 }
 
 function buildMetrics(

@@ -652,7 +652,7 @@ pub fn required_margin(
     }
 }
 
-/// 把期权卖单限价对齐到 Binance PRICE_FILTER tick。
+/// 把期权卖单限价对齐到 Binance `PRICE_FILTER` tick。
 ///
 /// 期权下单始终是卖出限价 IOC。向下对齐不会把最低可接受权利金抬高到 mark price 之上，
 /// 同时避免把不在 tick size 网格上的价格发给 Binance。

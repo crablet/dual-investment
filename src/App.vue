@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import type { GlobalThemeOverrides } from 'naive-ui'
 // 根组件负责全局 UI provider、异步视图路由和后台静默同步。
 // 业务状态全部放在 Pinia store，视图组件只消费当前快照和触发显式操作。
 import { darkTheme, dateZhCN, NConfigProvider, NDialogProvider, NMessageProvider, zhCN } from 'naive-ui'
-import type { GlobalThemeOverrides } from 'naive-ui'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import { useAppStore } from '@/stores/app'
@@ -26,6 +26,7 @@ const currentView = computed(() => views[store.activeView] ?? OverviewView)
 let syncTimer: number | undefined
 let syncDelay = 60_000
 let syncDisposed = false
+const reconnectProbeDelay = 5_000
 const baseSyncDelay = 60_000
 const maxSyncDelay = 300_000
 
@@ -79,7 +80,7 @@ onMounted(() => {
   syncDisposed = false
   void store.bindOrderProgressEvents()
   void store.bootstrap()
-  scheduleBackgroundSync()
+  scheduleBackgroundSync(reconnectProbeDelay)
 })
 
 onBeforeUnmount(() => {
@@ -101,14 +102,24 @@ function scheduleBackgroundSync(delay = syncDelay) {
 
 async function runBackgroundSync() {
   syncTimer = undefined
-  if (store.settings?.connected && !store.isLoading('sync')) {
+  if (store.isLoading('snapshot') || store.isLoading('connect')) {
+    syncDelay = reconnectProbeDelay
+  }
+  else if (store.settings?.connected && !store.isLoading('sync')) {
     await store.syncLiveState({ silent: true })
     syncDelay = store.backgroundError
       ? Math.min(syncDelay * 2, maxSyncDelay)
       : baseSyncDelay
   }
   else if (!store.settings?.connected) {
-    syncDelay = baseSyncDelay
+    await store.refresh({ silent: true })
+    if (store.canAutoReconnect) {
+      const connected = await store.tryAutoReconnectSaved()
+      syncDelay = connected ? baseSyncDelay : store.autoReconnectDelayMs
+    }
+    else {
+      syncDelay = baseSyncDelay
+    }
   }
   scheduleBackgroundSync()
 }

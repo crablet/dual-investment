@@ -2,9 +2,11 @@
 //
 // 日历只从当前应用快照派生订单、到期、结算、补齐、自动复投、风险和恢复事件。
 
-import { computed, toValue, type MaybeRefOrGetter } from 'vue'
-import { useAppStore, type AppViewId } from '@/stores/app'
+import type { MaybeRefOrGetter } from 'vue'
+import type { AppViewId } from '@/stores/app'
 import type { OrderAttemptView, RiskAlert, StrategyOrder } from '@/types/domain'
+import { computed, toValue } from 'vue'
+import { useAppStore } from '@/stores/app'
 import {
   addDays,
   formatDateKey,
@@ -16,15 +18,15 @@ import {
 } from '@/utils/date'
 import { attemptStatusText, strategyStatusText } from '@/utils/labels'
 
-export type CalendarEventType =
-  | 'order'
-  | 'expiry'
-  | 'settlement'
-  | 'rebalance'
-  | 'auto'
-  | 'risk'
-  | 'recovery'
-  | 'system'
+export type CalendarEventType
+  = | 'order'
+    | 'expiry'
+    | 'settlement'
+    | 'rebalance'
+    | 'auto'
+    | 'risk'
+    | 'recovery'
+    | 'system'
 
 export type CalendarEventTone = 'gold' | 'green' | 'blue' | 'purple' | 'red' | 'gray'
 
@@ -238,8 +240,10 @@ function hasRebalanceEvent(order: StrategyOrder) {
 /** 同日事件按优先级高的先展示。 */
 function compareEvents(left: CalendarEvent, right: CalendarEvent) {
   const dateCompare = left.date.localeCompare(right.date)
-  if (dateCompare !== 0) return dateCompare
-  if (left.priority !== right.priority) return right.priority - left.priority
+  if (dateCompare !== 0)
+    return dateCompare
+  if (left.priority !== right.priority)
+    return right.priority - left.priority
   return (left.timeLabel ?? '').localeCompare(right.timeLabel ?? '')
 }
 

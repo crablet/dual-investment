@@ -2,9 +2,9 @@
 //
 // 日志读取和文件操作都通过 Tauri command 进入 Rust，不提供浏览器 fallback。
 
+import type { LogSnapshot } from '@/types/domain'
 import { computed, onMounted, shallowRef } from 'vue'
 import { api } from '@/services/api'
-import type { LogSnapshot } from '@/types/domain'
 
 type LogAction = 'refresh' | 'openFile' | 'openFolder' | 'clear'
 

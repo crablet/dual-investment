@@ -10,15 +10,15 @@ export type DecimalString = string
 /** 双币赢策略方向，来自 Rust `StrategyDirection` 的 camelCase 序列化。 */
 export type StrategyDirection = 'sellPut' | 'sellCall'
 /** 本地订单状态，包含交易所状态归一化和现货补齐失败等本地状态。 */
-export type StrategyStatus =
-  | 'pending'
-  | 'running'
-  | 'settled'
-  | 'cancelled'
-  | 'rejected'
-  | 'expired'
-  | 'partiallyFilled'
-  | 'rebalanceFailed'
+export type StrategyStatus
+  = | 'pending'
+    | 'running'
+    | 'settled'
+    | 'cancelled'
+    | 'rejected'
+    | 'expired'
+    | 'partiallyFilled'
+    | 'rebalanceFailed'
 export type RecommendationLevel = 'recommended' | 'watch' | 'reject'
 export type RiskSeverity = 'low' | 'medium' | 'high'
 export type LogLevel = 'info' | 'warn' | 'error'

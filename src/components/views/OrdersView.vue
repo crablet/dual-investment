@@ -1,13 +1,13 @@
 <script setup lang="ts">
+import type { StrategyOrder } from '@/types/domain'
 // 策略订单视图。
 // 展示真实订单、同步/结算操作和恢复记录；恢复动作会回到 Rust 重新查询 Binance。
 import { RefreshCw, ScanLine } from '@lucide/vue'
-import { computed, shallowRef, watchEffect } from 'vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
+import { computed, shallowRef, watchEffect } from 'vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
-import type { StrategyOrder } from '@/types/domain'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
 
 const store = useAppStore()

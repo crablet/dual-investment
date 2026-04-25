@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import type { ChartPoint } from '@/types/domain'
 // 轻量收益折线图。
 // 不引入图表库，直接把后端/前端派生点位归一化成 SVG polyline，适合小面积趋势展示。
 import { computed } from 'vue'
-import type { ChartPoint } from '@/types/domain'
 
 const props = defineProps<{
   points: ChartPoint[]

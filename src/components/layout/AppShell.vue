@@ -12,7 +12,8 @@ const message = useMessage()
 watch(
   () => store.orderNotice,
   (notice) => {
-    if (!notice) return
+    if (!notice)
+      return
     if (notice.type === 'success') {
       message.success(notice.message)
       return

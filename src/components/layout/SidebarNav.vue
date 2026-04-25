@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Component } from 'vue'
+import type { AppViewId } from '@/stores/app'
 // 侧边导航。
 // 点击入口统一调用 `store.openView`，让重复点击也能触发对应页面刷新逻辑。
 import {
@@ -11,9 +13,7 @@ import {
   Wallet,
 } from '@lucide/vue'
 import { NIcon } from 'naive-ui'
-import type { Component } from 'vue'
 import { useAppStore } from '@/stores/app'
-import type { AppViewId } from '@/stores/app'
 
 const store = useAppStore()
 

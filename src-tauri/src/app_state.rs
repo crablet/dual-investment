@@ -1,6 +1,6 @@
 //! 应用状态编排层。
 //!
-//! 这个模块连接 Tauri command、Binance 客户端、策略计算和 SQLite 持久化。
+//! 这个模块连接 Tauri command、Binance 客户端、策略计算和 `SQLite` 持久化。
 //! 它负责实盘连接、快照聚合、下单门禁、订单恢复、到期结算、现货补齐和后台轮询。
 //! 业务计算放在 `strategy.rs`，交易所请求放在 `binance.rs`，凭据读写放在 `secrets.rs`。
 
@@ -271,6 +271,17 @@ impl AppState {
     ///
     /// 连接阶段同时验证期权和现货账户权限，因为到期 ITM 后需要真实现货补齐能力。
     pub async fn connect_binance(&self, request: ConnectBinanceRequest) -> AppResult<AppSettings> {
+        let result = self.connect_binance_inner(request).await;
+        if let Err(error) = &result {
+            let _ = self.record_warning("account.connect_failed", &error.to_string());
+        }
+        result
+    }
+
+    async fn connect_binance_inner(
+        &self,
+        request: ConnectBinanceRequest,
+    ) -> AppResult<AppSettings> {
         if request.api_key.trim().is_empty() || request.api_secret.trim().is_empty() {
             return Err(AppError::Config("API Key 和 Secret 不能为空".to_string()));
         }
@@ -278,23 +289,7 @@ impl AppState {
         let api_key = request.api_key.trim().to_string();
         let api_secret = request.api_secret;
         let client = BinanceClient::new(api_key.clone(), api_secret.clone())?;
-        let option_account_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.verify_account().await }
-        });
-        let spot_account_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.spot_account().await }
-        });
-        let option_account = join_binance_request(option_account_task).await;
-        let spot_account = join_binance_request(spot_account_task).await;
-        option_account?;
-        let spot_account = spot_account?;
-        if !spot_account.can_trade {
-            return Err(AppError::Config(
-                "Binance 现货账户当前不可交易，无法执行到期补齐".to_string(),
-            ));
-        }
+        verify_binance_access(&client).await?;
         secrets::save_binance_credentials(&api_key, &api_secret)?;
 
         let mut runtime = self.runtime.write().await;
@@ -317,29 +312,21 @@ impl AppState {
 
     /// 使用系统 keyring 中的凭据连接 Binance。
     pub async fn connect_saved_binance(&self) -> AppResult<AppSettings> {
+        let result = self.connect_saved_binance_inner().await;
+        if let Err(error) = &result {
+            let _ = self.record_warning("account.connect_saved_failed", &error.to_string());
+        }
+        result
+    }
+
+    async fn connect_saved_binance_inner(&self) -> AppResult<AppSettings> {
         let Some((api_key, api_secret)) = secrets::load_binance_credentials()? else {
             return Err(AppError::Config(
                 "系统 keyring 中没有已保存的 Binance API 凭据".to_string(),
             ));
         };
         let client = BinanceClient::new(api_key.clone(), api_secret.clone())?;
-        let option_account_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.verify_account().await }
-        });
-        let spot_account_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.spot_account().await }
-        });
-        let option_account = join_binance_request(option_account_task).await;
-        let spot_account = join_binance_request(spot_account_task).await;
-        option_account?;
-        let spot_account = spot_account?;
-        if !spot_account.can_trade {
-            return Err(AppError::Config(
-                "Binance 现货账户当前不可交易，无法执行到期补齐".to_string(),
-            ));
-        }
+        verify_binance_access(&client).await?;
 
         let mut runtime = self.runtime.write().await;
         runtime.connected = true;
@@ -1865,6 +1852,27 @@ impl AppState {
             &format!("已把 {amount} {asset} 从现货账户重新申购 Simple Earn 活期，{purpose}"),
         )
     }
+}
+
+async fn verify_binance_access(client: &BinanceClient) -> AppResult<()> {
+    let option_account_task = spawn_binance_request({
+        let client = client.clone();
+        async move { client.verify_account().await }
+    });
+    let spot_account_task = spawn_binance_request({
+        let client = client.clone();
+        async move { client.spot_account().await }
+    });
+    let option_account = join_binance_request(option_account_task).await;
+    let spot_account = join_binance_request(spot_account_task).await;
+    option_account?;
+    let spot_account = spot_account?;
+    if !spot_account.can_trade {
+        return Err(AppError::Config(
+            "Binance 现货账户当前不可交易，无法执行到期补齐".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn spawn_binance_request<T, F>(future: F) -> tauri::async_runtime::JoinHandle<AppResult<T>>

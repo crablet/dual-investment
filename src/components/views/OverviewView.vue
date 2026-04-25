@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AppViewId } from '@/stores/app'
 // 总览视图。
 // 组合账户、收益、待办、事件日历和活跃策略；具体数据都来自 Pinia 快照派生。
 import { computed } from 'vue'
@@ -9,7 +10,6 @@ import MetricCard from '@/components/common/MetricCard.vue'
 import MiniLineChart from '@/components/common/MiniLineChart.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useAppStore } from '@/stores/app'
-import type { AppViewId } from '@/stores/app'
 
 interface PendingTask {
   id: string
@@ -30,6 +30,24 @@ const expiringOrdersCount = computed(() => {
     const expiry = new Date(order.expiryAt)
     return expiry >= today && expiry <= threshold
   }).length
+})
+const runtimeHealthAttention = computed(() => {
+  const health = store.health
+  return Boolean(
+    health
+    && (health.consecutiveFailures > 0 || health.skippedTicks > 0)
+    && (health.status === 'degraded' || health.status === 'attention'),
+  )
+})
+const runtimeHealthText = computed(() => {
+  const health = store.health
+  if (!health) {
+    return '后台同步状态未知'
+  }
+  if (health.consecutiveFailures > 0) {
+    return `后台同步连续失败 ${health.consecutiveFailures} 次`
+  }
+  return `后台同步已跳过 ${health.skippedTicks} 轮`
 })
 // 待办只从当前快照派生，不新增独立任务存储，避免和订单/候选状态漂移。
 const pendingTasks = computed<PendingTask[]>(() => {
@@ -65,29 +83,14 @@ const pendingTasks = computed<PendingTask[]>(() => {
   ]
   return tasks.filter(item => item.visible)
 })
-const runtimeHealthAttention = computed(() => {
-  const health = store.health
-  return Boolean(
-    health
-    && (health.consecutiveFailures > 0 || health.skippedTicks > 0)
-    && (health.status === 'degraded' || health.status === 'attention'),
-  )
-})
-const runtimeHealthText = computed(() => {
-  const health = store.health
-  if (!health) {
-    return '后台同步状态未知'
-  }
-  if (health.consecutiveFailures > 0) {
-    return `后台同步连续失败 ${health.consecutiveFailures} 次`
-  }
-  return `后台同步已跳过 ${health.skippedTicks} 轮`
-})
 const runtimeHealthLabel = computed(() => {
   const health = store.health
-  if (!health || health.status === 'idle') return '等待连接'
-  if (health.status === 'healthy') return '运行正常'
-  if (health.status === 'degraded') return '需要关注'
+  if (!health || health.status === 'idle')
+    return '等待连接'
+  if (health.status === 'healthy')
+    return '运行正常'
+  if (health.status === 'degraded')
+    return '需要关注'
   return '待处理'
 })
 const autoStatusItems = computed(() => [
@@ -112,7 +115,6 @@ const autoStatusItems = computed(() => [
     tone: store.settings?.connected ? 'active' : 'neutral',
   },
 ])
-
 </script>
 
 <template>
@@ -152,7 +154,7 @@ const autoStatusItems = computed(() => [
         <div class="auto-status-list">
           <p v-for="item in autoStatusItems" :key="item.label" class="auto-status-item">
             <span>{{ item.label }}</span>
-            <strong :class="['auto-status-value', `tone-${item.tone}`]">{{ item.value }}</strong>
+            <strong class="auto-status-value" :class="[`tone-${item.tone}`]">{{ item.value }}</strong>
           </p>
         </div>
       </div>

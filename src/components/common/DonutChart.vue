@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import type { PnlBreakdownItem } from '@/types/view'
 // 收益/资产构成环形图。
 // 输入项是展示模型，组件只计算 SVG stroke 的占比和偏移，不负责业务归因。
 import { computed } from 'vue'
-import type { PnlBreakdownItem } from '@/types/view'
 
 const props = defineProps<{
   items: PnlBreakdownItem[]

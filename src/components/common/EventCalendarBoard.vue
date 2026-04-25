@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { CalendarEvent, CalendarEventTone, CalendarEventType } from '@/composables/useCalendarEvents'
 // 事件日历看板。
 // 组件只负责月份、类型筛选和详情列表交互；事件本身由 `useCalendarEvents` 从快照派生。
 import {
@@ -9,11 +10,9 @@ import {
 import { NButton, NIcon } from 'naive-ui'
 import { computed, shallowRef } from 'vue'
 import {
+
   calendarEventTypes,
   useCalendarEvents,
-  type CalendarEvent,
-  type CalendarEventTone,
-  type CalendarEventType,
 } from '@/composables/useCalendarEvents'
 import { useAppStore } from '@/stores/app'
 import {
@@ -130,7 +129,6 @@ function typeLabel(type: CalendarEventType) {
 function toneClass(tone: CalendarEventTone) {
   return `tone-${tone}`
 }
-
 </script>
 
 <template>
@@ -167,9 +165,9 @@ function toneClass(tone: CalendarEventTone) {
             :key="day.date"
             class="event-calendar-day"
             :class="{
-              outside: !day.inCurrentMonth,
-              today: day.isToday,
-              selected: selectedDate === day.date,
+              'outside': !day.inCurrentMonth,
+              'today': day.isToday,
+              'selected': selectedDate === day.date,
               'has-events': day.events.length > 0,
             }"
             type="button"

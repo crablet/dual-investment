@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import type { BalanceRow, DecimalString } from '@/types/domain'
 // 账户余额聚合列表。
 // 把现货、期权保证金和 Simple Earn 同名资产按 ticker 汇总，hover 展示真实来源数量。
 import { NTooltip } from 'naive-ui'
 import { computed } from 'vue'
 import { useFormat } from '@/composables/useFormat'
-import type { BalanceRow, DecimalString } from '@/types/domain'
 import { isZeroDecimalString, sumDecimalStrings } from '@/utils/decimal'
 
 interface BalanceDetail {

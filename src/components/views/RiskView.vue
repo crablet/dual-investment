@@ -1,13 +1,13 @@
 <script setup lang="ts">
+import type { RiskSeverity } from '@/types/domain'
+import { Activity, AlertTriangle, Gauge, ShieldCheck } from '@lucide/vue'
+import { NButton, NIcon, NProgress, NTag } from 'naive-ui'
 // 风险控制视图。
 // 展示 Rust 风控快照和义务仓暴露概览；下单拦截仍由 Rust 在实盘下单前执行。
 import { computed } from 'vue'
-import { Activity, AlertTriangle, Gauge, ShieldCheck } from '@lucide/vue'
-import { NButton, NIcon, NProgress, NTag } from 'naive-ui'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
-import type { RiskSeverity } from '@/types/domain'
 
 const store = useAppStore()
 const { money, percent } = useFormat()
@@ -35,8 +35,10 @@ function exposureByDirection(direction: 'sellPut' | 'sellCall') {
 
 /** 映射 Naive UI 标签类型。 */
 function tagType(severity: RiskSeverity) {
-  if (severity === 'high') return 'error'
-  if (severity === 'medium') return 'warning'
+  if (severity === 'high')
+    return 'error'
+  if (severity === 'medium')
+    return 'warning'
   return 'info'
 }
 </script>

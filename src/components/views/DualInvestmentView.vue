@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import type { StrategyCandidate, StrategyDirection } from '@/types/domain'
 // 双币赢工作台。
 // 统一承载候选浏览、手动下单和自动复投规则；没有独立自动复投页面或 mock 数据路径。
 import {
   ArrowDownCircle,
-  ArrowUpDown,
   ArrowUpCircle,
+  ArrowUpDown,
   ChevronDown,
   ChevronUp,
   RefreshCw,
@@ -21,10 +22,9 @@ import {
   NSwitch,
 } from 'naive-ui'
 import { computed, reactive, shallowRef, watch, watchEffect } from 'vue'
-import { useFormat } from '@/composables/useFormat'
 import OrderProgressPanel from '@/components/common/OrderProgressPanel.vue'
+import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
-import type { StrategyCandidate, StrategyDirection } from '@/types/domain'
 import { localDateTimeLabel } from '@/utils/date'
 
 interface RuleForm {
@@ -193,14 +193,18 @@ const otherDirectionCandidateCount = computed(() =>
 )
 
 const emptyCandidateTitle = computed(() => {
-  if (store.candidates.length === 0) return '暂无候选'
-  if (activeCandidateFilterCount.value > 0) return '当前筛选没有候选'
-  if (currentDirectionCandidateCount.value > 0) return '当前到期日没有候选'
+  if (store.candidates.length === 0)
+    return '暂无候选'
+  if (activeCandidateFilterCount.value > 0)
+    return '当前筛选没有候选'
+  if (currentDirectionCandidateCount.value > 0)
+    return '当前到期日没有候选'
   return `暂无${activeDirectionLabel.value}（${activeOptionType.value}）候选`
 })
 
 const emptyCandidateHint = computed(() => {
-  if (store.candidates.length === 0) return '当前还没有候选，请先重新扫描。'
+  if (store.candidates.length === 0)
+    return '当前还没有候选，请先重新扫描。'
   if (activeCandidateFilterCount.value > 0) {
     return '可以放宽年化、被行权概率或距现货筛选，也可以一键重置筛选条件。'
   }
@@ -212,12 +216,14 @@ const emptyCandidateHint = computed(() => {
 
 const projectedPremium = computed(() => {
   // 右侧卡片的预计权利金只是 UI 估算；真实权利金以 Binance 成交回报为准。
-  if (!selectedCandidate.value) return 0
+  if (!selectedCandidate.value)
+    return 0
   return Number(selectedCandidate.value.limitPrice) * form.quantity
 })
 
 const projectedBreakeven = computed(() => {
-  if (!selectedCandidate.value) return 0
+  if (!selectedCandidate.value)
+    return 0
   const strike = Number(selectedCandidate.value.strike)
   const price = Number(selectedCandidate.value.limitPrice)
   return selectedCandidate.value.direction === 'sellPut'
@@ -228,7 +234,7 @@ const projectedBreakeven = computed(() => {
 const canSubmit = computed(() =>
   Boolean(store.settings?.connected)
   && Boolean(selectedCandidate.value)
-  && form.quantity >= 0.01
+  && form.quantity >= 0.01,
 )
 
 watch(
@@ -253,11 +259,16 @@ function daysUntil(expiry: string) {
 
 function matchesExpiryFilter(candidate: StrategyCandidate) {
   const days = daysUntil(candidate.expiryAt)
-  if (expiryFilter.value === 'lt3') return days < 3
-  if (expiryFilter.value === 'lt7') return days < 7
-  if (expiryFilter.value === 'd7_30') return days >= 7 && days <= 30
-  if (expiryFilter.value === 'd30_60') return days > 30 && days <= 60
-  if (expiryFilter.value === 'gt60') return days > 60
+  if (expiryFilter.value === 'lt3')
+    return days < 3
+  if (expiryFilter.value === 'lt7')
+    return days < 7
+  if (expiryFilter.value === 'd7_30')
+    return days >= 7 && days <= 30
+  if (expiryFilter.value === 'd30_60')
+    return days > 30 && days <= 60
+  if (expiryFilter.value === 'gt60')
+    return days > 60
   return true
 }
 
@@ -295,9 +306,12 @@ function compareCandidateSortValue(
 ) {
   const leftValue = candidateSortNumber(left, key)
   const rightValue = candidateSortNumber(right, key)
-  if (!Number.isFinite(leftValue) && !Number.isFinite(rightValue)) return 0
-  if (!Number.isFinite(leftValue)) return 1
-  if (!Number.isFinite(rightValue)) return -1
+  if (!Number.isFinite(leftValue) && !Number.isFinite(rightValue))
+    return 0
+  if (!Number.isFinite(leftValue))
+    return 1
+  if (!Number.isFinite(rightValue))
+    return -1
   return leftValue - rightValue
 }
 
@@ -332,7 +346,8 @@ function resetCandidateFilters() {
 
 function signedPercent(value: string | number) {
   const numeric = Number(value)
-  if (!Number.isFinite(numeric)) return '--'
+  if (!Number.isFinite(numeric))
+    return '--'
   const sign = numeric > 0 ? '+' : ''
   return `${sign}${percent(numeric)}`
 }

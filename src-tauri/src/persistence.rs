@@ -1,4 +1,4 @@
-//! 本地 SQLite 持久化层。
+//! 本地 `SQLite` 持久化层。
 //!
 //! 这里只保存业务事件、订单快照、自动规则和恢复记录；API Key/Secret 永远不进入
 //! SQLite。订单和审计以追加/替换业务事实的方式保存，便于应用重启后从真实交易所状态恢复。
@@ -18,14 +18,14 @@ pub struct Persistence {
 }
 
 impl Persistence {
-    /// 打开应用数据目录中的 SQLite 数据库。
+    /// 打开应用数据目录中的 `SQLite` 数据库。
     pub fn open_app_data(data_dir: impl AsRef<Path>) -> AppResult<Self> {
         std::fs::create_dir_all(data_dir.as_ref())
             .map_err(|error| AppError::Storage(error.to_string()))?;
         Self::open(data_dir.as_ref().join("dual-investment.db"))
     }
 
-    /// 打开指定 SQLite 文件并确保表结构存在。
+    /// 打开指定 `SQLite` 文件并确保表结构存在。
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
         let connection =
             Connection::open(path).map_err(|error| AppError::Storage(error.to_string()))?;
@@ -268,7 +268,7 @@ fn parse_time(value: &str) -> AppResult<DateTime<Utc>> {
         .map(|time| time.with_timezone(&Utc))
 }
 
-/// 解析 SQLite 中持久化的策略方向。
+/// 解析 `SQLite` 中持久化的策略方向。
 fn parse_direction(value: &str) -> AppResult<StrategyDirection> {
     match value {
         "sellPut" => Ok(StrategyDirection::SellPut),
@@ -277,7 +277,7 @@ fn parse_direction(value: &str) -> AppResult<StrategyDirection> {
     }
 }
 
-/// 解析 SQLite 中持久化的恢复状态。
+/// 解析 `SQLite` 中持久化的恢复状态。
 fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
     match value {
         "attempted" => Ok(OrderAttemptStatus::Attempted),

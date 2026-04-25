@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { LogFileInfo } from '@/types/domain'
 // 设置视图。
 // 负责 Binance 凭据连接、keyring 删除和本地文件日志查看；API Secret 提交后立即清空本地表单字段。
 import { FileText, FolderOpen, KeyRound, RefreshCw, Trash2 } from '@lucide/vue'
@@ -7,7 +8,6 @@ import { computed, reactive } from 'vue'
 import Panel from '@/components/common/Panel.vue'
 import { useLogSnapshot } from '@/composables/useLogSnapshot'
 import { useAppStore } from '@/stores/app'
-import type { LogFileInfo } from '@/types/domain'
 import { localDateTimeLabel } from '@/utils/date'
 import { logLevelTone } from '@/utils/labels'
 
@@ -24,6 +24,7 @@ const backendStatus = computed(() => store.settings?.connected ? '已连接' : '
 const backendStatusClass = computed(() => store.settings?.connected ? 'positive' : 'warning')
 const credentialStatus = computed(() => store.settings?.savedCredentials ? '已保存' : '未保存')
 const credentialStatusClass = computed(() => store.settings?.savedCredentials ? 'positive' : 'warning')
+const reconnectAlertType = computed(() => store.autoReconnectPaused ? 'warning' : 'info')
 const latestLogLabel = computed(() => {
   const latest = logs.recentEntries.value[0]
   return latest ? localDateTimeLabel(latest.timestamp) : '暂无记录'
@@ -121,6 +122,9 @@ function modifiedLabel(file: LogFileInfo) {
                 使用已保存凭据连接
               </NButton>
             </div>
+            <NAlert v-if="store.autoReconnectMessage" :type="reconnectAlertType" class="settings-reconnect-alert">
+              {{ store.autoReconnectMessage }}
+            </NAlert>
           </div>
         </div>
 
@@ -300,6 +304,10 @@ function modifiedLabel(file: LogFileInfo) {
 
 .settings-connect-actions :deep(.n-button) {
   width: 100%;
+}
+
+.settings-reconnect-alert {
+  min-width: 0;
 }
 
 .settings-permissions {

@@ -7,7 +7,7 @@
 
 :root {
   color-scheme: dark;
-  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   font-synthesis: none;
   line-height: 1.5;
   text-rendering: optimizeLegibility;
@@ -143,14 +143,30 @@ input {
   grid-column: span 3;
 }
 
-.span-3 { grid-column: span 3; }
-.span-4 { grid-column: span 4; }
-.span-5 { grid-column: span 5; }
-.span-6 { grid-column: span 6; }
-.span-7 { grid-column: span 7; }
-.span-8 { grid-column: span 8; }
-.span-12 { grid-column: span 12; }
-.row-span-3 { grid-row: span 3; }
+.span-3 {
+  grid-column: span 3;
+}
+.span-4 {
+  grid-column: span 4;
+}
+.span-5 {
+  grid-column: span 5;
+}
+.span-6 {
+  grid-column: span 6;
+}
+.span-7 {
+  grid-column: span 7;
+}
+.span-8 {
+  grid-column: span 8;
+}
+.span-12 {
+  grid-column: span 12;
+}
+.row-span-3 {
+  grid-row: span 3;
+}
 
 .panel,
 .metric-card {
@@ -230,10 +246,18 @@ input {
   white-space: nowrap;
 }
 
-.tone-gold .metric-icon { color: var(--gold); }
-.tone-blue .metric-icon { color: var(--blue); }
-.tone-green .metric-icon { color: var(--green); }
-.tone-gray .metric-icon { color: var(--muted); }
+.tone-gold .metric-icon {
+  color: var(--gold);
+}
+.tone-blue .metric-icon {
+  color: var(--blue);
+}
+.tone-green .metric-icon {
+  color: var(--green);
+}
+.tone-gray .metric-icon {
+  color: var(--muted);
+}
 
 .account-list,
 .task-list,
@@ -574,9 +598,15 @@ input {
   background: rgba(245, 182, 37, 0.05);
 }
 
-.positive { color: var(--green); }
-.negative { color: var(--red); }
-.warning { color: var(--gold); }
+.positive {
+  color: var(--green);
+}
+.negative {
+  color: var(--red);
+}
+.warning {
+  color: var(--gold);
+}
 
 .empty-state {
   margin: 0;
@@ -612,8 +642,13 @@ input {
   background: var(--gold);
 }
 
-.task-index.warning { background: #ff9c1a; }
-.task-index.blue { background: var(--blue); color: white; }
+.task-index.warning {
+  background: #ff9c1a;
+}
+.task-index.blue {
+  background: var(--blue);
+  color: white;
+}
 
 .auto-status-panel {
   container-type: inline-size;
@@ -1321,7 +1356,10 @@ input {
 
 .opportunity-row {
   display: grid;
-  grid-template-columns: minmax(104px, 1fr) minmax(52px, 0.5fr) minmax(128px, 1.2fr) minmax(64px, 0.65fr) minmax(88px, 0.85fr);
+  grid-template-columns: minmax(104px, 1fr) minmax(52px, 0.5fr) minmax(128px, 1.2fr) minmax(64px, 0.65fr) minmax(
+      88px,
+      0.85fr
+    );
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -1865,7 +1903,6 @@ button.opportunity-row.selected:hover {
   .view-grid > .metric-card {
     grid-column: span 3;
   }
-
 }
 
 @media (max-width: 1080px) {

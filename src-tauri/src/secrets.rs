@@ -4,7 +4,7 @@
 //! 连接状态、脱敏 API Key 或内存中的客户端实例，不能把 Secret 写入 SQLite、审计日志、
 //! 前端 store 或导出文件。
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use keyring_core::{Entry, Error as KeyringError};
 
@@ -13,7 +13,8 @@ use crate::domain::{AppError, AppResult};
 const SERVICE: &str = "com.dualinvestment.app";
 const API_KEY_USER: &str = "binance-api-key";
 const API_SECRET_USER: &str = "binance-api-secret";
-static KEYRING_STORE_INIT: OnceLock<Result<(), String>> = OnceLock::new();
+static KEYRING_STORE_READY: OnceLock<()> = OnceLock::new();
+static KEYRING_STORE_INIT_LOCK: Mutex<()> = Mutex::new(());
 
 /// 保存 Binance 凭据到系统 keyring。
 pub fn save_binance_credentials(api_key: &str, api_secret: &str) -> AppResult<()> {
@@ -71,13 +72,21 @@ fn entry(user: &str) -> AppResult<Entry> {
 
 /// 懒加载初始化 keyring store，避免每次读写凭据都重复注册平台实现。
 fn ensure_keyring_store() -> AppResult<()> {
-    match KEYRING_STORE_INIT.get_or_init(configure_keyring_store) {
-        Ok(()) => Ok(()),
-        Err(message) => Err(AppError::Config(message.clone())),
+    if KEYRING_STORE_READY.get().is_some() {
+        return Ok(());
     }
+    let _guard = KEYRING_STORE_INIT_LOCK
+        .lock()
+        .map_err(|error| AppError::Config(format!("系统安全凭据存储初始化锁不可用：{error}")))?;
+    if KEYRING_STORE_READY.get().is_some() {
+        return Ok(());
+    }
+    configure_keyring_store().map_err(AppError::Config)?;
+    let _ = KEYRING_STORE_READY.set(());
+    Ok(())
 }
 
-/// Linux 使用 Secret Service / DBus keyring。
+/// Linux 使用 Secret Service / `DBus` keyring。
 #[cfg(target_os = "linux")]
 fn configure_keyring_store() -> Result<(), String> {
     let store = dbus_secret_service_keyring_store::Store::new()

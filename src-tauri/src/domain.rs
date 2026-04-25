@@ -426,7 +426,7 @@ pub enum OrderAttemptStatus {
 }
 
 impl OrderAttemptStatus {
-    /// 返回持久化到 SQLite 的稳定状态字符串。
+    /// 返回持久化到 `SQLite` 的稳定状态字符串。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Attempted => "attempted",
