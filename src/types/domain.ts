@@ -25,6 +25,7 @@ export type LogLevel = 'info' | 'warn' | 'error'
 export type OrderProgressStage = 'validate' | 'funding' | 'risk' | 'submit' | 'persist'
 export type OrderProgressStatus = 'pending' | 'running' | 'success' | 'error'
 export type RuntimeHealthStatus = 'idle' | 'healthy' | 'degraded' | 'attention'
+export type StrategyOrderSource = 'liveOrder' | 'adoptedPosition'
 
 /** 前端可见运行设置，不包含明文 API Secret。 */
 export interface AppSettings {
@@ -94,6 +95,7 @@ export interface CandidateScanResult {
 /** 本地保存的真实策略订单。 */
 export interface StrategyOrder {
   id: string
+  source: StrategyOrderSource
   exchangeOrderId?: string
   clientOrderId: string
   symbol: string
@@ -123,6 +125,29 @@ export interface StrategyOrder {
   spotFilledQuantity: DecimalString
   spotAvgPrice: DecimalString
   spotFee: DecimalString
+}
+
+/** 可由本机接管监控的 Binance 当前期权持仓。 */
+export interface AdoptableOptionPositionView {
+  id: string
+  symbol: string
+  direction: StrategyDirection
+  expiry: string
+  expiryAt: string
+  strike: DecimalString
+  quantity: DecimalString
+  entryPrice: DecimalString
+  markPrice: DecimalString
+  premium: DecimalString
+  alreadyTracked: boolean
+  adoptable: boolean
+  reason: string
+}
+
+/** 接管 Binance 当前期权持仓请求。 */
+export interface AdoptOptionPositionsRequest {
+  symbols: string[]
+  confirmLive: boolean
 }
 
 /** 自动复投规则；保存规则不代表已经开启自动策略。 */

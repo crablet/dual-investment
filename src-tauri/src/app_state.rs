@@ -5,7 +5,7 @@
 //! 业务计算放在 `strategy.rs`，交易所请求放在 `binance.rs`，凭据读写放在 `secrets.rs`。
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     path::Path,
     sync::{
@@ -24,13 +24,14 @@ use uuid::Uuid;
 
 use crate::binance::BinanceClient;
 use crate::domain::{
-    AppError, AppResult, AppSettings, AppSnapshot, AutoInvestmentRule, BalanceRow,
-    CandidateScanDiagnostics, CandidateScanResult, ConnectBinanceRequest, ExchangeOrderAck,
-    LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
-    OrderAttemptStatus, OrderAttemptView, OrderProgressEvent, OrderProgressStage,
-    OrderProgressStatus, RuntimeHealth, RuntimeHealthStatus, SimpleEarnSnapshot,
-    SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder, StrategyRequest,
-    StrategyStatus, ToggleAutoRequest,
+    AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppError, AppResult, AppSettings,
+    AppSnapshot, AutoInvestmentRule, BalanceRow, CandidateScanDiagnostics, CandidateScanResult,
+    ConnectBinanceRequest, ExchangeOrderAck, LogLevel, LogSnapshot, OptionAccountSnapshot,
+    OptionContract, OptionMarkPrice, OptionPosition, OrderAttempt, OrderAttemptStatus,
+    OrderAttemptView, OrderProgressEvent, OrderProgressStage, OrderProgressStatus, RuntimeHealth,
+    RuntimeHealthStatus, SimpleEarnSnapshot, SpotAccountSnapshot, StrategyCandidate,
+    StrategyDirection, StrategyOrder, StrategyOrderSource, StrategyRequest, StrategyStatus,
+    ToggleAutoRequest,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -184,7 +185,7 @@ impl AppState {
         let orders = persistence
             .list_orders()?
             .into_iter()
-            .filter(|order| order.exchange_order_id.is_some())
+            .filter(is_trackable_order)
             .collect();
         let mut auto_rule = persistence
             .load_auto_rule()?
@@ -549,6 +550,85 @@ impl AppState {
         } else {
             self.recover_option_attempt(attempt).await
         }
+    }
+
+    /// 列出当前 Binance 期权持仓中可由本机接管监控的记录。
+    pub async fn list_adoptable_option_positions(
+        &self,
+    ) -> AppResult<Vec<AdoptableOptionPositionView>> {
+        let client = self.live_client().await?;
+        let contracts = client.exchange_info().await?;
+        let positions = client.option_positions().await?;
+        let orders = self.orders.read().await.clone();
+        let mut rows = positions
+            .iter()
+            .filter_map(|position| {
+                contracts
+                    .iter()
+                    .find(|contract| contract.symbol == position.symbol)
+                    .map(|contract| adoptable_position_view(position, contract, &orders))
+            })
+            .collect::<AppResult<Vec<_>>>()?;
+        rows.sort_by(|left, right| {
+            left.expiry_at
+                .cmp(&right.expiry_at)
+                .then_with(|| left.symbol.cmp(&right.symbol))
+        });
+        Ok(rows)
+    }
+
+    /// 把选中的 Binance 当前期权持仓接管为本地策略订单。
+    ///
+    /// 接管不发送交易所订单，但之后会进入本机同步、结算和现货补齐流程。
+    pub async fn adopt_option_positions(
+        &self,
+        request: AdoptOptionPositionsRequest,
+    ) -> AppResult<Vec<StrategyOrder>> {
+        if !request.confirm_live {
+            return Err(AppError::RiskRejected(
+                "接管期权持仓需要显式确认后续到期补齐风险".to_string(),
+            ));
+        }
+        let symbols = normalized_unique_symbols(&request.symbols)?;
+        let _maintenance_guard = self.maintenance_lock.lock().await;
+        let client = self.live_client().await?;
+        let contracts = client.exchange_info().await?;
+        let positions = client.option_positions().await?;
+        let mut adopted = Vec::new();
+
+        for symbol in symbols {
+            let position = positions
+                .iter()
+                .find(|position| position.symbol == symbol)
+                .ok_or_else(|| {
+                    AppError::RiskRejected(format!(
+                        "Binance 当前期权持仓中未找到 {symbol}，请刷新后重试"
+                    ))
+                })?;
+            let contract = contracts
+                .iter()
+                .find(|contract| contract.symbol == symbol)
+                .ok_or_else(|| {
+                    AppError::RiskRejected(format!(
+                        "{symbol} 已不在 Binance exchangeInfo 中，无法接管"
+                    ))
+                })?;
+            {
+                let orders = self.orders.read().await;
+                ensure_position_can_be_adopted(position, contract, &orders)?;
+            }
+            let order = strategy::order_from_adopted_position(position, contract);
+            self.save_order(&order).await?;
+            self.record_log(
+                "strategy.order.adopted",
+                &format!(
+                    "{} 已从 Binance 当前期权持仓接管，数量 {} 张",
+                    order.option_symbol, order.filled_quantity
+                ),
+            )?;
+            adopted.push(order);
+        }
+        Ok(adopted)
     }
 
     /// 同步订单、执行到期结算，然后返回完整快照。
@@ -1163,16 +1243,47 @@ impl AppState {
         client: &BinanceClient,
         mut order: StrategyOrder,
     ) -> AppResult<StrategyOrder> {
-        let ack = client
-            .query_option_order(
-                &order.option_symbol,
-                order.exchange_order_id.as_deref(),
-                Some(&order.client_order_id),
-            )
-            .await?;
-        apply_option_ack(&mut order, &ack);
+        if has_exchange_order_ref(&order) {
+            let ack = client
+                .query_option_order(
+                    &order.option_symbol,
+                    order.exchange_order_id.as_deref(),
+                    Some(&order.client_order_id),
+                )
+                .await?;
+            apply_option_ack(&mut order, &ack);
+        } else {
+            self.sync_adopted_position_order(client, &mut order).await?;
+        }
         self.save_order(&order).await?;
         Ok(order)
+    }
+
+    /// 同步没有原始订单号的接管记录。
+    ///
+    /// 未到期前如果 Binance 当前持仓消失，说明外部已经平仓，本机停止后续补齐动作；
+    /// 已到期后持仓可能已经被交易所现金结算移除，此时保留订单进入结算扫描。
+    async fn sync_adopted_position_order(
+        &self,
+        client: &BinanceClient,
+        order: &mut StrategyOrder,
+    ) -> AppResult<()> {
+        let positions = client.option_positions().await?;
+        let position = positions
+            .iter()
+            .find(|position| position.symbol == order.option_symbol && is_short_position(position));
+        if let Some(position) = position {
+            apply_option_position(order, position);
+            return Ok(());
+        }
+        if Utc::now() < order.expiry_at {
+            order.status = StrategyStatus::Cancelled;
+            order.exchange_status = "POSITION_CLOSED".to_string();
+            order.updated_at = Utc::now();
+            order.rebalance_message =
+                "Binance 当前期权持仓已不存在，本机停止跟踪该接管记录".to_string();
+        }
+        Ok(())
     }
 
     /// 扫描已经到期的订单并执行结算/补齐。
@@ -1976,6 +2087,123 @@ fn request_from_option_attempt(
     })
 }
 
+fn normalized_unique_symbols(symbols: &[String]) -> AppResult<Vec<String>> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    for symbol in symbols
+        .iter()
+        .map(|symbol| symbol.trim())
+        .filter(|symbol| !symbol.is_empty())
+    {
+        if seen.insert(symbol.to_string()) {
+            normalized.push(symbol.to_string());
+        }
+    }
+    if normalized.is_empty() {
+        return Err(AppError::Config("请选择需要接管的期权持仓".to_string()));
+    }
+    Ok(normalized)
+}
+
+fn adoptable_position_view(
+    position: &OptionPosition,
+    contract: &OptionContract,
+    orders: &[StrategyOrder],
+) -> AppResult<AdoptableOptionPositionView> {
+    let direction = direction_from_contract(contract)?;
+    let already_tracked = has_tracked_option_symbol(orders, &position.symbol);
+    let (adoptable, reason) = adoptable_position_state(position, contract, already_tracked);
+    Ok(AdoptableOptionPositionView {
+        id: position.symbol.clone(),
+        symbol: position.symbol.clone(),
+        direction,
+        expiry: contract.expiry,
+        expiry_at: contract.expiry_at,
+        strike: contract.strike_price,
+        quantity: position.quantity,
+        entry_price: position.entry_price,
+        mark_price: position.mark_price,
+        premium: (position.entry_price * position.quantity).round_dp(2),
+        already_tracked,
+        adoptable,
+        reason,
+    })
+}
+
+fn ensure_position_can_be_adopted(
+    position: &OptionPosition,
+    contract: &OptionContract,
+    orders: &[StrategyOrder],
+) -> AppResult<()> {
+    direction_from_contract(contract)?;
+    let already_tracked = has_tracked_option_symbol(orders, &position.symbol);
+    let (adoptable, reason) = adoptable_position_state(position, contract, already_tracked);
+    if adoptable {
+        Ok(())
+    } else {
+        Err(AppError::RiskRejected(format!(
+            "{} 不能接管：{}",
+            position.symbol, reason
+        )))
+    }
+}
+
+fn adoptable_position_state(
+    position: &OptionPosition,
+    contract: &OptionContract,
+    already_tracked: bool,
+) -> (bool, String) {
+    if already_tracked {
+        return (false, "本地已有跟踪记录".to_string());
+    }
+    if contract.underlying != "BTCUSDT" {
+        return (false, "仅支持 BTC/USDT 期权".to_string());
+    }
+    if !is_short_position(position) {
+        return (false, "仅支持接管卖出期权义务仓".to_string());
+    }
+    if position.quantity <= Decimal::ZERO {
+        return (false, "持仓数量为 0".to_string());
+    }
+    if position.entry_price <= Decimal::ZERO {
+        return (false, "Binance 持仓缺少有效入场价".to_string());
+    }
+    if Utc::now() >= contract.expiry_at {
+        return (false, "期权已到期".to_string());
+    }
+    (true, "可接管".to_string())
+}
+
+fn has_tracked_option_symbol(orders: &[StrategyOrder], option_symbol: &str) -> bool {
+    orders.iter().any(|order| {
+        order.option_symbol == option_symbol
+            && !matches!(
+                order.status,
+                StrategyStatus::Settled
+                    | StrategyStatus::Rejected
+                    | StrategyStatus::Expired
+                    | StrategyStatus::Cancelled
+            )
+    })
+}
+
+fn direction_from_contract(contract: &OptionContract) -> AppResult<StrategyDirection> {
+    match contract.side.as_str() {
+        "PUT" => Ok(StrategyDirection::SellPut),
+        "CALL" => Ok(StrategyDirection::SellCall),
+        side => Err(AppError::RiskRejected(format!(
+            "不支持的 Binance 期权方向：{side}"
+        ))),
+    }
+}
+
+fn is_short_position(position: &OptionPosition) -> bool {
+    matches!(
+        position.side.to_ascii_uppercase().as_str(),
+        "SHORT" | "SELL" | "SHORT_POSITION"
+    )
+}
+
 /// 解析 Binance 期权合约代码中的到期日、执行价和方向。
 fn parse_option_symbol(value: &str) -> AppResult<(NaiveDate, Decimal, StrategyDirection)> {
     let parts = value.split('-').collect::<Vec<_>>();
@@ -2317,6 +2545,24 @@ fn apply_option_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) {
     order.updated_at = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
 }
 
+/// 把 Binance 当前期权持仓应用到接管订单。
+fn apply_option_position(order: &mut StrategyOrder, position: &OptionPosition) {
+    order.status = StrategyStatus::Running;
+    order.exchange_status = "POSITION".to_string();
+    order.quantity = position.quantity;
+    order.filled_quantity = position.quantity;
+    if position.entry_price > Decimal::ZERO {
+        order.avg_price = position.entry_price;
+    }
+    order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
+    order.estimated_pnl = order.premium - order.fee;
+    order.breakeven = match order.direction {
+        StrategyDirection::SellPut => order.strike - order.avg_price,
+        StrategyDirection::SellCall => order.strike + order.avg_price,
+    };
+    order.updated_at = position.update_time.unwrap_or_else(Utc::now);
+}
+
 /// 把现货补齐订单回报应用到本地订单。
 ///
 /// 现货没有足额成交时，订单进入 `RebalanceFailed`，避免系统继续自动执行相关动作。
@@ -2377,9 +2623,21 @@ fn is_uncertain_submit_error(error: &AppError) -> bool {
     )
 }
 
+fn has_exchange_order_ref(order: &StrategyOrder) -> bool {
+    order
+        .exchange_order_id
+        .as_ref()
+        .is_some_and(|id| !id.is_empty())
+        || !order.client_order_id.trim().is_empty()
+}
+
+fn is_trackable_order(order: &StrategyOrder) -> bool {
+    has_exchange_order_ref(order) || order.source == StrategyOrderSource::AdoptedPosition
+}
+
 /// 判断期权订单是否仍需要向交易所同步。
 fn should_sync_option_order(order: &StrategyOrder) -> bool {
-    order.exchange_order_id.is_some()
+    is_trackable_order(order)
         && !matches!(
             order.status,
             StrategyStatus::Settled

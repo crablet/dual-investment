@@ -23,7 +23,7 @@ use tokio::time::sleep;
 
 use crate::domain::{
     AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot,
-    OptionAssetBalance, OptionContract, OptionMarkPrice, SimpleEarnAssetBalance,
+    OptionAssetBalance, OptionContract, OptionMarkPrice, OptionPosition, SimpleEarnAssetBalance,
     SimpleEarnFlexibleProduct, SimpleEarnSnapshot, SpotAccountSnapshot, SpotAssetBalance,
     StrategyDirection, StrategyRequest,
 };
@@ -82,6 +82,14 @@ impl BinanceClient {
             .signed_get(&self.eapi_base, "/eapi/v1/marginAccount", Vec::new())
             .await?;
         parse_account_snapshot(&response)
+    }
+
+    /// 查询当前期权持仓，用于接管外部订单和同步已接管记录。
+    pub async fn option_positions(&self) -> AppResult<Vec<OptionPosition>> {
+        let response = self
+            .signed_get(&self.eapi_base, "/eapi/v1/position", Vec::new())
+            .await?;
+        parse_option_positions(&response)
     }
 
     /// 查询期权合约元数据。
@@ -676,6 +684,56 @@ fn parse_account_snapshot(value: &Value) -> AppResult<OptionAccountSnapshot> {
     })
 }
 
+/// 解析当前期权持仓列表。
+fn parse_option_positions(value: &Value) -> AppResult<Vec<OptionPosition>> {
+    let rows = value
+        .as_array()
+        .or_else(|| value.get("data").and_then(Value::as_array))
+        .or_else(|| value.get("rows").and_then(Value::as_array))
+        .ok_or_else(|| AppError::Binance("Binance 期权持仓响应不是数组".to_string()))?;
+
+    rows.iter()
+        .map(parse_option_position)
+        .filter(|result| {
+            result
+                .as_ref()
+                .map_or(true, |position| position.quantity > Decimal::ZERO)
+        })
+        .collect()
+}
+
+/// 解析单条期权持仓。Binance 字段在不同响应版本中可能略有差异，这里只抽取接管所需事实。
+fn parse_option_position(value: &Value) -> AppResult<OptionPosition> {
+    let raw_quantity =
+        decimal_from_any_field(value, &["quantity", "positionAmt", "positionAmount"])?
+            .unwrap_or(Decimal::ZERO);
+    let side = optional_string_field(value, "side").unwrap_or_else(|| {
+        if raw_quantity < Decimal::ZERO {
+            "SHORT"
+        } else {
+            "LONG"
+        }
+        .to_string()
+    });
+    let quantity = if raw_quantity < Decimal::ZERO {
+        -raw_quantity
+    } else {
+        raw_quantity
+    };
+    Ok(OptionPosition {
+        symbol: string_field(value, "symbol")?,
+        side,
+        quantity,
+        entry_price: decimal_from_any_field(
+            value,
+            &["entryPrice", "avgPrice", "averagePrice", "costPrice"],
+        )?
+        .unwrap_or(Decimal::ZERO),
+        mark_price: optional_decimal_field(value, "markPrice")?.unwrap_or(Decimal::ZERO),
+        update_time: date_time_from_any_millis_field(value, &["updateTime", "time"]),
+    })
+}
+
 /// 解析单个期权保证金资产。
 fn parse_asset_balance(value: &Value) -> AppResult<OptionAssetBalance> {
     Ok(OptionAssetBalance {
@@ -815,6 +873,16 @@ fn decimal_from_any_field(value: &Value, keys: &[&str]) -> AppResult<Option<Deci
         }
     }
     Ok(None)
+}
+
+fn date_time_from_any_millis_field(value: &Value, keys: &[&str]) -> Option<DateTime<Utc>> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .map(value_to_string)
+            .and_then(|text| text.parse::<i64>().ok())
+            .and_then(DateTime::<Utc>::from_timestamp_millis)
+    })
 }
 
 /// 解析现货交易对价格列表。

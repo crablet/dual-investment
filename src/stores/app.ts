@@ -4,6 +4,8 @@
 // 从快照派生出的指标和收益构成。真实业务计算仍以 Rust 返回的快照为准，前端只做展示层派生。
 
 import type {
+  AdoptableOptionPositionView,
+  AdoptOptionPositionsRequest,
   AppSettings,
   AppSnapshot,
   AutoInvestmentRule,
@@ -40,6 +42,7 @@ type RequestKey
     | 'settlement'
     | 'auto'
     | 'recover'
+    | 'adopt'
     | 'order'
     | 'rule'
 
@@ -74,6 +77,7 @@ function emptyPending(): Record<RequestKey, number> {
     settlement: 0,
     auto: 0,
     recover: 0,
+    adopt: 0,
     order: 0,
     rule: 0,
   }
@@ -113,6 +117,7 @@ export const useAppStore = defineStore('app', () => {
   const activeView = shallowRef<AppViewId>('overview')
   const orderProgress = shallowRef<OrderProgressView>()
   const orderNotice = shallowRef<OrderProgressNotice>()
+  const adoptableOptionPositions = shallowRef<AdoptableOptionPositionView[]>([])
   const unlistenOrderProgress = shallowRef<(() => void)>()
   const autoReconnectState = shallowRef<AutoReconnectState>('idle')
   const autoReconnectAttempts = shallowRef(0)
@@ -524,6 +529,26 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function loadAdoptableOptionPositions() {
+    const rows = await run('adopt', () => api.listAdoptableOptionPositions())
+    if (rows) {
+      adoptableOptionPositions.value = rows
+    }
+  }
+
+  async function adoptOptionPositions(request: AdoptOptionPositionsRequest) {
+    const orders = await run('adopt', () => api.adoptOptionPositions(request))
+    if (orders && snapshot.value) {
+      snapshot.value = { ...snapshot.value, orders: mergeOrders(orders, snapshot.value.orders) }
+      adoptableOptionPositions.value = adoptableOptionPositions.value.map(row =>
+        request.symbols.includes(row.symbol)
+          ? { ...row, adoptable: false, alreadyTracked: true, reason: '本地已有跟踪记录' }
+          : row,
+      )
+      await refresh()
+    }
+  }
+
   async function placeStrategy(request: StrategyRequest) {
     const flowId = request.clientFlowId ?? makeOrderFlowId()
     const orderRequest = { ...request, clientFlowId: flowId }
@@ -602,6 +627,7 @@ export const useAppStore = defineStore('app', () => {
     activeView,
     orderProgress,
     orderNotice,
+    adoptableOptionPositions,
     settings,
     metrics,
     balances,
@@ -632,6 +658,8 @@ export const useAppStore = defineStore('app', () => {
     runSettlementScan,
     runAutoOnce,
     recoverAttempt,
+    loadAdoptableOptionPositions,
+    adoptOptionPositions,
     placeStrategy,
     saveRule,
     toggleAuto,

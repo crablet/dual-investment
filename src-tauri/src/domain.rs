@@ -84,6 +84,17 @@ pub enum StrategyStatus {
     RebalanceFailed,
 }
 
+/// 本地策略订单来源。
+///
+/// 接管持仓没有原始订单号，必须显式标记来源，避免启动加载和同步逻辑继续假设
+/// 所有可跟踪订单都来自本机下单响应。
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StrategyOrderSource {
+    LiveOrder,
+    AdoptedPosition,
+}
+
 /// 候选机会的推荐等级。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -257,6 +268,7 @@ pub struct CandidateScanResult {
 #[serde(rename_all = "camelCase")]
 pub struct StrategyOrder {
     pub id: String,
+    pub source: StrategyOrderSource,
     pub exchange_order_id: Option<String>,
     #[serde(default)]
     pub client_order_id: String,
@@ -655,6 +667,43 @@ pub struct ExchangeOrderAck {
     pub update_time: Option<DateTime<Utc>>,
 }
 
+/// Binance 期权当前持仓。
+///
+/// 接管外部订单时以当前持仓为事实来源；它不一定能反查到原始下单订单号。
+#[derive(Clone, Debug)]
+pub struct OptionPosition {
+    pub symbol: String,
+    pub side: String,
+    pub quantity: Decimal,
+    pub entry_price: Decimal,
+    pub mark_price: Decimal,
+    pub update_time: Option<DateTime<Utc>>,
+}
+
+/// 可接管的 Binance 期权持仓视图。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptableOptionPositionView {
+    pub id: String,
+    pub symbol: String,
+    pub direction: StrategyDirection,
+    pub expiry: NaiveDate,
+    pub expiry_at: DateTime<Utc>,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub strike: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub quantity: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub entry_price: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub mark_price: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub premium: Decimal,
+    pub already_tracked: bool,
+    pub adoptable: bool,
+    pub reason: String,
+}
+
 /// 期权行权记录中的结算价格。
 #[derive(Clone, Debug)]
 pub struct ExerciseRecord {
@@ -735,5 +784,15 @@ pub struct StrategyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ToggleAutoRequest {
     pub enabled: bool,
+    pub confirm_live: bool,
+}
+
+/// 接管 Binance 当前期权持仓的请求。
+///
+/// 接管不会立即下单，但后续到期 ITM 时可能触发现货补齐，因此仍要求显式确认。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptOptionPositionsRequest {
+    pub symbols: Vec<String>,
     pub confirm_live: bool,
 }

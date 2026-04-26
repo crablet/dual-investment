@@ -9,8 +9,9 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::app_state::AppState;
 use crate::domain::{
-    AppSettings, AppSnapshot, AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest,
-    LogSnapshot, StrategyOrder, StrategyRequest, ToggleAutoRequest,
+    AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppSettings, AppSnapshot,
+    AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest, LogSnapshot, StrategyOrder,
+    StrategyRequest, ToggleAutoRequest,
 };
 
 /// 获取应用完整快照。
@@ -97,6 +98,29 @@ pub async fn recover_order_attempt(
 ) -> Result<StrategyOrder, String> {
     state
         .recover_order_attempt(attempt_id)
+        .await
+        .map_err(to_command_error)
+}
+
+/// 列出可由本机接管监控的 Binance 期权持仓。
+#[tauri::command]
+pub async fn list_adoptable_option_positions(
+    state: State<'_, AppState>,
+) -> Result<Vec<AdoptableOptionPositionView>, String> {
+    state
+        .list_adoptable_option_positions()
+        .await
+        .map_err(to_command_error)
+}
+
+/// 接管选中的 Binance 期权持仓。
+#[tauri::command]
+pub async fn adopt_option_positions(
+    state: State<'_, AppState>,
+    request: AdoptOptionPositionsRequest,
+) -> Result<Vec<StrategyOrder>, String> {
+    state
+        .adopt_option_positions(request)
         .await
         .map_err(to_command_error)
 }

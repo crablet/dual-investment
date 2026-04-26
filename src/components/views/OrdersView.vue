@@ -6,6 +6,7 @@ import { RefreshCw, ScanLine } from '@lucide/vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
 import { computed, shallowRef, watchEffect } from 'vue'
 import Panel from '@/components/common/Panel.vue'
+import AdoptOptionPositionsPanel from '@/components/orders/AdoptOptionPositionsPanel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
@@ -147,6 +148,8 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
       </div>
       <p v-else class="empty-state">暂无订单详情</p>
     </Panel>
+
+    <AdoptOptionPositionsPanel class="span-12" />
 
     <Panel title="恢复记录" class="span-12">
       <div class="table-wrap">

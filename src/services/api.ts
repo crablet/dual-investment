@@ -4,6 +4,8 @@
 // 不提供 mock 数据或浏览器 fallback，避免把实盘路径和演示路径混在一起。
 
 import type {
+  AdoptableOptionPositionView,
+  AdoptOptionPositionsRequest,
   AppSettings,
   AppSnapshot,
   AutoInvestmentRule,
@@ -48,6 +50,10 @@ export const api = {
     call<AppSettings>('toggle_auto_strategy', { request }),
   recoverOrderAttempt: (attemptId: string) =>
     call<StrategyOrder>('recover_order_attempt', { attemptId }),
+  listAdoptableOptionPositions: () =>
+    call<AdoptableOptionPositionView[]>('list_adoptable_option_positions'),
+  adoptOptionPositions: (request: AdoptOptionPositionsRequest) =>
+    call<StrategyOrder[]>('adopt_option_positions', { request }),
   syncLiveState: () => call<AppSnapshot>('sync_live_state'),
   runSettlementScan: () => call<StrategyOrder[]>('run_settlement_scan'),
   runAutoOnce: () => call<StrategyOrder | null>('run_auto_once'),
