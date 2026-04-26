@@ -1,0 +1,209 @@
+use std::collections::HashMap;
+
+use chrono::Utc;
+use rust_decimal::Decimal;
+
+use super::math::max_decimal;
+use crate::domain::{
+    BalanceRow, OptionAccountSnapshot, PnlReport, SimpleEarnSnapshot, SpotAccountSnapshot,
+    StrategyDirection, StrategyOrder,
+};
+
+struct BalanceValuation {
+    usdt_value: Decimal,
+    known: bool,
+}
+
+/// 构造空收益报告。
+pub fn empty_pnl_report() -> PnlReport {
+    PnlReport {
+        cumulative: Decimal::ZERO,
+        today: Decimal::ZERO,
+        option_premium: Decimal::ZERO,
+        floating_spot: Decimal::ZERO,
+    }
+}
+
+/// 从期权保证金账户构造前端资产行。
+pub fn build_balances(
+    account: &OptionAccountSnapshot,
+    spot_prices: &HashMap<String, Decimal>,
+) -> Vec<BalanceRow> {
+    account
+        .assets
+        .iter()
+        .map(|asset| {
+            let valuation = if asset.asset == "USDT" {
+                BalanceValuation {
+                    usdt_value: asset.adjusted_equity,
+                    known: true,
+                }
+            } else {
+                asset_usdt_value(&asset.asset, asset.margin_balance, spot_prices)
+            };
+            BalanceRow {
+                asset: asset.asset.clone(),
+                source: "期权保证金".to_string(),
+                free: asset.available,
+                locked: max_decimal(asset.margin_balance - asset.available, Decimal::ZERO),
+                usdt_value: valuation.usdt_value,
+                usdt_value_known: valuation.known,
+            }
+        })
+        .collect()
+}
+
+/// 从现货账户构造前端资产行。
+///
+/// 现货账户里的 `LD*` 是 Simple Earn 镜像，必须忽略，避免和理财接口重复统计。
+pub fn build_spot_balances(
+    account: &SpotAccountSnapshot,
+    spot_prices: &HashMap<String, Decimal>,
+) -> Vec<BalanceRow> {
+    account
+        .balances
+        .iter()
+        .filter(|asset| {
+            (asset.free > Decimal::ZERO || asset.locked > Decimal::ZERO)
+                && !is_simple_earn_ledger_asset(&asset.asset)
+        })
+        .map(|asset| {
+            let valuation = asset_usdt_value(&asset.asset, asset.free + asset.locked, spot_prices);
+            BalanceRow {
+                asset: asset.asset.clone(),
+                source: "现货".to_string(),
+                free: asset.free,
+                locked: asset.locked,
+                usdt_value: valuation.usdt_value,
+                usdt_value_known: valuation.known,
+            }
+        })
+        .collect()
+}
+
+/// 从 Simple Earn 活期/定期持仓构造前端资产行。
+pub fn build_simple_earn_balances(
+    earn: &SimpleEarnSnapshot,
+    spot_prices: &HashMap<String, Decimal>,
+) -> Vec<BalanceRow> {
+    let mut grouped: HashMap<(String, String), Decimal> = HashMap::new();
+    for balance in &earn.balances {
+        if balance.amount <= Decimal::ZERO {
+            continue;
+        }
+        *grouped
+            .entry((balance.asset.clone(), balance.source.clone()))
+            .or_default() += balance.amount;
+    }
+
+    grouped
+        .into_iter()
+        .map(|((asset, source), amount)| {
+            let valuation = asset_usdt_value(&asset, amount, spot_prices);
+            BalanceRow {
+                asset,
+                source,
+                free: amount,
+                locked: Decimal::ZERO,
+                usdt_value: valuation.usdt_value,
+                usdt_value_known: valuation.known,
+            }
+        })
+        .collect()
+}
+
+/// 按原始 ticker 计算 USDT 估值。
+fn asset_usdt_value(
+    asset: &str,
+    quantity: Decimal,
+    spot_prices: &HashMap<String, Decimal>,
+) -> BalanceValuation {
+    if quantity <= Decimal::ZERO {
+        return BalanceValuation {
+            usdt_value: Decimal::ZERO,
+            known: true,
+        };
+    }
+    if let Some(price) = asset_usdt_price(asset, spot_prices) {
+        BalanceValuation {
+            usdt_value: quantity * price,
+            known: true,
+        }
+    } else {
+        BalanceValuation {
+            usdt_value: Decimal::ZERO,
+            known: false,
+        }
+    }
+}
+
+fn asset_usdt_price(asset: &str, spot_prices: &HashMap<String, Decimal>) -> Option<Decimal> {
+    if asset == "USDT" {
+        return Some(Decimal::ONE);
+    }
+
+    let usdt_symbol = format!("{asset}USDT");
+    if let Some(price) = positive_price(spot_prices.get(&usdt_symbol)) {
+        return Some(price);
+    }
+
+    let btc_symbol = format!("{asset}BTC");
+    let asset_btc = positive_price(spot_prices.get(&btc_symbol))?;
+    let btc_usdt = positive_price(spot_prices.get("BTCUSDT"))?;
+    Some(asset_btc * btc_usdt)
+}
+
+fn positive_price(price: Option<&Decimal>) -> Option<Decimal> {
+    price.copied().filter(|value| *value > Decimal::ZERO)
+}
+
+fn is_simple_earn_ledger_asset(asset: &str) -> bool {
+    if asset.starts_with("LD") && asset.len() > 4 {
+        return true;
+    }
+    false
+}
+
+/// 从真实订单和现货价格派生收益报告。
+///
+/// 权利金和现货补齐浮动盈亏都来自已保存订单字段；没有订单时返回空报告。
+pub fn pnl_report_from_orders_with_spot(
+    orders: &[StrategyOrder],
+    spot_price: Option<Decimal>,
+) -> PnlReport {
+    if orders.is_empty() {
+        return empty_pnl_report();
+    }
+
+    let option_premium: Decimal = orders.iter().map(|order| order.premium).sum();
+    let today = today_option_premium(orders);
+    let floating_spot = spot_price.map_or(Decimal::ZERO, |price| {
+        orders
+            .iter()
+            .filter(|order| {
+                order.direction == StrategyDirection::SellPut
+                    && order.spot_filled_quantity > Decimal::ZERO
+                    && order.spot_avg_price > Decimal::ZERO
+            })
+            .map(|order| (price - order.spot_avg_price) * order.spot_filled_quantity)
+            .sum::<Decimal>()
+            .round_dp(2)
+    });
+    let cumulative = option_premium + floating_spot;
+    PnlReport {
+        cumulative,
+        today,
+        option_premium,
+        floating_spot,
+    }
+}
+
+/// 统计当天订单权利金。
+fn today_option_premium(orders: &[StrategyOrder]) -> Decimal {
+    let today = Utc::now().date_naive();
+    orders
+        .iter()
+        .filter(|order| order.created_at.date_naive() == today)
+        .map(|order| order.premium)
+        .sum::<Decimal>()
+}

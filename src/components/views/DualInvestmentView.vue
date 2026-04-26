@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { StrategyCandidate, StrategyDirection } from '@/types/domain'
 // 双币赢工作台。
 // 统一承载候选浏览、手动下单和自动复投规则；没有独立自动复投页面或 mock 数据路径。
 import {
@@ -21,8 +20,13 @@ import {
   NSlider,
   NSwitch,
 } from 'naive-ui'
-import { computed, reactive, shallowRef, watch, watchEffect } from 'vue'
+import { reactive, shallowRef, watchEffect } from 'vue'
 import OrderProgressPanel from '@/components/common/OrderProgressPanel.vue'
+import {
+  candidateSortColumns,
+  expiryFilters,
+  useDualInvestmentCandidates,
+} from '@/composables/useDualInvestmentCandidates'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { localDateTimeLabel } from '@/utils/date'
@@ -40,56 +44,31 @@ interface RuleForm {
   excludeSameDirection: boolean
 }
 
-interface CandidateFilterForm {
-  minAnnualized: number | null
-  maxExerciseProbability: number | null
-  maxDistanceAbs: number | null
-}
-
-type CandidateSortKey = 'strike' | 'annualized' | 'expiry' | 'limitPrice' | 'exerciseProbability'
-type CandidateSortDirection = 'asc' | 'desc'
-
 const store = useAppStore()
 const { money, percent } = useFormat()
-
-const dayMs = 86_400_000
-const expiryFilters = [
-  { id: 'all', label: '所有到期日' },
-  { id: 'lt3', label: '< 3 天' },
-  { id: 'lt7', label: '< 7 天' },
-  { id: 'd7_30', label: '7-30 天' },
-  { id: 'd30_60', label: '30-60 天' },
-  { id: 'gt60', label: '> 60 天' },
-] as const
-
-const candidateSortColumns: Array<{ key: CandidateSortKey, label: string }> = [
-  { key: 'strike', label: '目标价' },
-  { key: 'annualized', label: '年化' },
-  { key: 'expiry', label: '到期' },
-  { key: 'limitPrice', label: '标记价格' },
-  { key: 'exerciseProbability', label: '被行权概率' },
-]
-
-const candidateSortDefaultDirection: Record<CandidateSortKey, CandidateSortDirection> = {
-  strike: 'asc',
-  annualized: 'desc',
-  expiry: 'asc',
-  limitPrice: 'desc',
-  exerciseProbability: 'asc',
-}
-
-type ExpiryFilter = typeof expiryFilters[number]['id']
-
-const selectedCandidateId = shallowRef<string>()
-const expiryFilter = shallowRef<ExpiryFilter>('all')
-const candidateSortKey = shallowRef<CandidateSortKey>('annualized')
-const candidateSortDirection = shallowRef<CandidateSortDirection>('desc')
+const {
+  form,
+  candidateFilter,
+  selectedCandidate,
+  filteredCandidates,
+  sortedCandidates,
+  expiryFilter,
+  candidateSortKey,
+  candidateSortDirection,
+  referenceSpotPrice,
+  panelTitle,
+  emptyCandidateTitle,
+  emptyCandidateHint,
+  projectedPremium,
+  projectedBreakeven,
+  canSubmit,
+  daysUntil,
+  toggleCandidateSort,
+  selectDirection,
+  selectCandidate,
+  resetCandidateFilters,
+} = useDualInvestmentCandidates()
 const advancedAutoOpen = shallowRef(false)
-
-const form = reactive({
-  direction: 'sellPut' as StrategyDirection,
-  quantity: 0.01,
-})
 
 const ruleForm = reactive<RuleForm>({
   enabled: false,
@@ -104,12 +83,6 @@ const ruleForm = reactive<RuleForm>({
   excludeSameDirection: true,
 })
 
-const candidateFilter = reactive<CandidateFilterForm>({
-  minAnnualized: null,
-  maxExerciseProbability: null,
-  maxDistanceAbs: null,
-})
-
 watchEffect(() => {
   if (!store.autoRule) {
     return
@@ -122,227 +95,6 @@ watchEffect(() => {
     maxIvRank: Number(store.autoRule.maxIvRank),
   })
 })
-
-const selectedCandidate = computed(() =>
-  store.candidates.find(candidate => candidate.id === selectedCandidateId.value),
-)
-
-const filteredCandidates = computed(() => {
-  // 前端筛选只影响展示。候选生成和方向/现货价硬约束已经在 Rust 策略层完成。
-  return store.candidates
-    .filter(candidate => candidate.direction === form.direction)
-    .filter(matchesExpiryFilter)
-    .filter(matchesCandidateFilters)
-})
-
-const sortedCandidates = computed(() => {
-  // 排序保持稳定：字段相同时使用扫描顺序，避免列表在同一批数据中跳动。
-  return filteredCandidates.value
-    .map((candidate, index) => ({ candidate, index }))
-    .sort((left, right) => {
-      const modifier = candidateSortDirection.value === 'asc' ? 1 : -1
-      const delta = compareCandidateSortValue(
-        left.candidate,
-        right.candidate,
-        candidateSortKey.value,
-      )
-      return delta === 0 ? left.index - right.index : delta * modifier
-    })
-    .map(item => item.candidate)
-})
-
-const activeCandidateFilterCount = computed(() =>
-  [
-    candidateFilter.minAnnualized,
-    candidateFilter.maxExerciseProbability,
-    candidateFilter.maxDistanceAbs,
-  ].filter(value => value !== null).length,
-)
-
-const referenceSpotPrice = computed(() =>
-  store.candidates.find(candidate => Number(candidate.spotPrice) > 0)?.spotPrice,
-)
-
-const directionStats = computed(() => ({
-  sellPut: store.candidates.filter(candidate => candidate.direction === 'sellPut').length,
-  sellCall: store.candidates.filter(candidate => candidate.direction === 'sellCall').length,
-}))
-
-const panelTitle = computed(() =>
-  form.direction === 'sellPut' ? '以 USDT 低买 BTC' : '以 BTC 高卖 BTC',
-)
-
-const activeDirectionLabel = computed(() =>
-  form.direction === 'sellPut' ? '低买' : '高卖',
-)
-
-const otherDirectionLabel = computed(() =>
-  form.direction === 'sellPut' ? '高卖' : '低买',
-)
-
-const activeOptionType = computed(() =>
-  form.direction === 'sellPut' ? 'Put' : 'Call',
-)
-
-const currentDirectionCandidateCount = computed(() =>
-  form.direction === 'sellPut' ? directionStats.value.sellPut : directionStats.value.sellCall,
-)
-
-const otherDirectionCandidateCount = computed(() =>
-  form.direction === 'sellPut' ? directionStats.value.sellCall : directionStats.value.sellPut,
-)
-
-const emptyCandidateTitle = computed(() => {
-  if (store.candidates.length === 0)
-    return '暂无候选'
-  if (activeCandidateFilterCount.value > 0)
-    return '当前筛选没有候选'
-  if (currentDirectionCandidateCount.value > 0)
-    return '当前到期日没有候选'
-  return `暂无${activeDirectionLabel.value}（${activeOptionType.value}）候选`
-})
-
-const emptyCandidateHint = computed(() => {
-  if (store.candidates.length === 0)
-    return '当前还没有候选，请先重新扫描。'
-  if (activeCandidateFilterCount.value > 0) {
-    return '可以放宽年化、被行权概率或距现货筛选，也可以一键重置筛选条件。'
-  }
-  if (currentDirectionCandidateCount.value === 0 && otherDirectionCandidateCount.value > 0) {
-    return `本次扫描只有${otherDirectionLabel.value}候选，当前没有${activeDirectionLabel.value}候选。可以放宽自动复投规则，或切换到${otherDirectionLabel.value}查看。`
-  }
-  return '当前到期日筛选没有命中；候选浏览范围为 1-90 天，可以切换到所有到期日，或重新扫描候选。'
-})
-
-const projectedPremium = computed(() => {
-  // 右侧卡片的预计权利金只是 UI 估算；真实权利金以 Binance 成交回报为准。
-  if (!selectedCandidate.value)
-    return 0
-  return Number(selectedCandidate.value.limitPrice) * form.quantity
-})
-
-const projectedBreakeven = computed(() => {
-  if (!selectedCandidate.value)
-    return 0
-  const strike = Number(selectedCandidate.value.strike)
-  const price = Number(selectedCandidate.value.limitPrice)
-  return selectedCandidate.value.direction === 'sellPut'
-    ? strike - price
-    : strike + price
-})
-
-const canSubmit = computed(() =>
-  Boolean(store.settings?.connected)
-  && Boolean(selectedCandidate.value)
-  && form.quantity >= 0.01,
-)
-
-watch(
-  sortedCandidates,
-  (candidates) => {
-    if (selectedCandidateId.value && candidates.some(candidate => candidate.id === selectedCandidateId.value)) {
-      return
-    }
-    if (candidates[0]) {
-      selectCandidate(candidates[0])
-      return
-    }
-    selectedCandidateId.value = undefined
-  },
-  { immediate: true },
-)
-
-function daysUntil(expiry: string) {
-  const target = expiry.includes('T') ? new Date(expiry) : new Date(`${expiry}T00:00:00`)
-  return Math.max(0, Math.ceil((target.getTime() - Date.now()) / dayMs))
-}
-
-function matchesExpiryFilter(candidate: StrategyCandidate) {
-  const days = daysUntil(candidate.expiryAt)
-  if (expiryFilter.value === 'lt3')
-    return days < 3
-  if (expiryFilter.value === 'lt7')
-    return days < 7
-  if (expiryFilter.value === 'd7_30')
-    return days >= 7 && days <= 30
-  if (expiryFilter.value === 'd30_60')
-    return days > 30 && days <= 60
-  if (expiryFilter.value === 'gt60')
-    return days > 60
-  return true
-}
-
-function matchesCandidateFilters(candidate: StrategyCandidate) {
-  const annualized = Number(candidate.annualized)
-  const exerciseProbability = Number(candidate.exerciseProbability)
-  const distanceAbs = Math.abs(Number(candidate.strikeDistancePercent))
-
-  if (candidateFilter.minAnnualized !== null && annualized < candidateFilter.minAnnualized) {
-    return false
-  }
-  if (
-    candidateFilter.maxExerciseProbability !== null
-    && exerciseProbability > candidateFilter.maxExerciseProbability
-  ) {
-    return false
-  }
-  if (candidateFilter.maxDistanceAbs !== null && distanceAbs > candidateFilter.maxDistanceAbs) {
-    return false
-  }
-  return true
-}
-
-function candidateSortNumber(candidate: StrategyCandidate, key: CandidateSortKey) {
-  if (key === 'expiry') {
-    return new Date(candidate.expiryAt).getTime()
-  }
-  return Number(candidate[key])
-}
-
-function compareCandidateSortValue(
-  left: StrategyCandidate,
-  right: StrategyCandidate,
-  key: CandidateSortKey,
-) {
-  const leftValue = candidateSortNumber(left, key)
-  const rightValue = candidateSortNumber(right, key)
-  if (!Number.isFinite(leftValue) && !Number.isFinite(rightValue))
-    return 0
-  if (!Number.isFinite(leftValue))
-    return 1
-  if (!Number.isFinite(rightValue))
-    return -1
-  return leftValue - rightValue
-}
-
-function toggleCandidateSort(key: CandidateSortKey) {
-  if (candidateSortKey.value === key) {
-    candidateSortDirection.value = candidateSortDirection.value === 'asc' ? 'desc' : 'asc'
-    return
-  }
-  candidateSortKey.value = key
-  candidateSortDirection.value = candidateSortDefaultDirection[key]
-}
-
-function selectDirection(direction: StrategyDirection) {
-  if (form.direction === direction) {
-    return
-  }
-  form.direction = direction
-  selectedCandidateId.value = undefined
-}
-
-function selectCandidate(candidate: StrategyCandidate) {
-  selectedCandidateId.value = candidate.id
-  form.direction = candidate.direction
-  form.quantity = Number(candidate.quantity)
-}
-
-function resetCandidateFilters() {
-  candidateFilter.minAnnualized = null
-  candidateFilter.maxExerciseProbability = null
-  candidateFilter.maxDistanceAbs = null
-}
 
 function signedPercent(value: string | number) {
   const numeric = Number(value)

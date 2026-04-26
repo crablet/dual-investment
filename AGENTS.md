@@ -34,15 +34,15 @@
 - 下单进度事件只承载脱敏阶段摘要、合约号和交易所订单号；不要把进度事件当交易事实来源。
 - 导航切换和重复点击通过 Pinia `openView` 刷新页面数据；刷新、后台同步和自动重连不得自动开启策略或下单。静默请求不要清空前台错误提示，并避免 `sync`/`connect` 请求堆积。
 - `AppSnapshot.health` 只用于运行观测和提醒，不是订单、结算、资金或日历事实来源。
-- 总览指标优先使用后端快照事实口径；前端只做轻量展示派生。日期工具和状态/方向/恢复记录文案集中在 `src/utils/date.ts` 和 `src/utils/labels.ts`。
+- 总览指标优先使用后端快照事实口径；前端只做轻量展示派生。日期工具和状态/方向/恢复记录文案集中在 `src/utils/date.ts` 和 `src/utils/labels.ts`。Pinia 对外状态源保持在 `src/stores/app.ts`，可把指标、订单进度、重连等纯展示/状态机 helper 拆到 `src/stores/` 同目录模块。
 - 总览页和持仓与现货页的账户概览复用 `src/components/common/AccountBalanceList.vue`；Simple Earn 使用真实活期/定期持仓，不使用现货账户 `LD*` 镜像资产。估值由 Rust 计算，无法定价时前端显示“暂无估值”。
 - 候选、订单、义务仓和日历展示到期信息时使用 `expiryAt` 的本地日期时间，不要在前端按日期拼接时间。总览事件日历只从现有快照派生，不从日志文件派生事件。
 - 账户、持仓、义务仓等多列列表使用稳定 grid 列宽；标签列左对齐，数字列右对齐并使用等宽数字。
 
 ## Rust 与 Tauri 约定
 
-- 金融领域类型集中在 `src-tauri/src/domain.rs`；策略计算放在 `strategy.rs`，状态编排放在 `app_state.rs`。
-- Binance 接口只放在 `binance.rs`，不要让前端或策略层拼签名；Simple Earn、Universal Transfer 和期权持仓查询也必须在这里封装。
+- 金融领域类型集中在 `src-tauri/src/domain.rs`；策略计算放在 `strategy.rs` 及 `src-tauri/src/strategy/` 子模块，状态编排放在 `app_state.rs` 及 `src-tauri/src/app_state/` 子模块。
+- Binance 接口只放在 `binance.rs` 及 `src-tauri/src/binance/` 子模块，不要让前端或策略层拼签名；Simple Earn、Universal Transfer 和期权持仓查询也必须在这里封装。
 - Binance 查询类 GET 请求可以短退避重试；下单、Simple Earn 申购/赎回和 Universal Transfer 不得在网络失败时盲目重试，结果不确定时先走交易所查询恢复。
 - `StrategyOrder.source` 是订单跟踪语义的一部分：本机下单/恢复订单使用 `liveOrder`，外部持仓接管订单使用 `adoptedPosition`。不要用 ID 前缀或订单号缺失来推断来源。
 - 启动加载、快照同步和可跟踪订单判断必须保留 `adoptedPosition`；接管订单可以没有 `exchangeOrderId` 和 `clientOrderId`，不得再用订单号是否存在作为唯一加载条件。

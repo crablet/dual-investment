@@ -67,19 +67,24 @@ src/
     common/AccountBalanceList.vue   账户资产聚合列表
     common/EventCalendarBoard.vue   总览事件日历看板
     orders/AdoptOptionPositionsPanel.vue  Binance 期权持仓接管面板
+    settings/        Binance 连接和日志设置面板
   composables/       格式化和可复用前端逻辑
+    useDualInvestmentCandidates.ts  双币赢候选筛选、排序和选中状态
   services/          Tauri API
-  stores/            Pinia 应用状态
+  stores/            Pinia 应用状态和展示派生 helper
   types/             前后端共享数据形状
   utils/             前端纯展示工具
 src-tauri/
-  src/app_state.rs   应用状态、订单与规则编排
-  src/binance.rs     Binance 签名请求和订单接口
+  src/app_state.rs   应用状态、订单与规则编排入口
+  src/app_state/     接管、资金、订单恢复、校验和运行时 helper
+  src/binance.rs     Binance 客户端和请求入口
+  src/binance/       Binance HTTP 辅助和响应解析
   src/domain.rs      金融领域模型
   src/logs.rs        每日文件日志读写
   src/persistence.rs SQLite 订单、订单尝试和自动规则存储
   src/secrets.rs     系统 keyring 凭据读写
-  src/strategy.rs    策略预览和规则默认值
+  src/strategy.rs    策略计算入口
+  src/strategy/      候选、订单、余额、风险和 Decimal 工具
 ```
 
 ## 后续增强

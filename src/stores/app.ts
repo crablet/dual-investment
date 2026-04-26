@@ -11,7 +11,6 @@ import type {
   AutoInvestmentRule,
   ConnectBinanceRequest,
   OrderProgressEvent,
-  OrderProgressStage,
   OrderProgressStatus,
   StrategyOrder,
   StrategyRequest,
@@ -20,18 +19,28 @@ import type {
 import type {
   MetricCardModel,
   OrderProgressNotice,
-  OrderProgressStepView,
   OrderProgressView,
   PnlBreakdownItem,
 } from '@/types/view'
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
 import { api } from '@/services/api'
+import { buildMetrics, buildPnlBreakdown } from '@/stores/appMetrics'
 import {
-  isNegativeDecimalString,
-  isZeroDecimalString,
-  sumDecimalStrings,
-} from '@/utils/decimal'
+  formatReconnectDelay,
+  isPermanentSavedConnectionError,
+  reconnectBackoffDelays,
+  reconnectDelayAfterAttempt,
+} from '@/stores/autoReconnect'
+import {
+  createInitialOrderProgress,
+  createOrderProgressFromOrder,
+  createOrderProgressSteps,
+  makeOrderFlowId,
+  markCurrentOrderStepError,
+  orderProgressSuccessMessages,
+  progressStatusFromSteps,
+} from '@/stores/orderProgress'
 
 type RequestKey
   = | 'snapshot'
@@ -82,29 +91,6 @@ function emptyPending(): Record<RequestKey, number> {
     rule: 0,
   }
 }
-
-const metricMoneyFormatter = new Intl.NumberFormat('zh-CN', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
-const orderProgressStages: Array<{ id: OrderProgressStage, label: string }> = [
-  { id: 'validate', label: '校验' },
-  { id: 'funding', label: '资金准备' },
-  { id: 'risk', label: '风控' },
-  { id: 'submit', label: '发送 Binance' },
-  { id: 'persist', label: '保存订单' },
-]
-
-const orderProgressSuccessMessages: Record<OrderProgressStage, string> = {
-  validate: '下单参数已通过校验',
-  funding: '资金准备已完成',
-  risk: '本地下单风控已通过',
-  submit: 'Binance 已返回订单状态',
-  persist: '订单已保存',
-}
-
-const reconnectBackoffDelays = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000]
 
 export const useAppStore = defineStore('app', () => {
   // 快照使用 shallowRef：后端每次返回完整对象，前端通过替换根引用触发更新。
@@ -252,16 +238,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function startOrderProgress(flowId: string, request: StrategyRequest): OrderProgressView {
-    const now = new Date().toISOString()
-    const progress: OrderProgressView = {
-      flowId,
-      source: 'manual',
-      status: 'running',
-      optionSymbol: request.optionSymbol,
-      startedAt: now,
-      updatedAt: now,
-      steps: createOrderProgressSteps('validate', 'running', '正在提交下单请求', now),
-    }
+    const progress = createInitialOrderProgress(flowId, request)
     orderProgress.value = progress
     return progress
   }
@@ -303,19 +280,7 @@ export const useAppStore = defineStore('app', () => {
     const now = new Date().toISOString()
     const current = orderProgress.value?.flowId === flowId
       ? orderProgress.value
-      : startOrderProgress(flowId, {
-          candidateId: undefined,
-          clientFlowId: flowId,
-          symbol: order.symbol,
-          optionSymbol: order.optionSymbol,
-          direction: order.direction,
-          expiry: order.expiry,
-          expiryAt: order.expiryAt,
-          strike: order.strike,
-          quantity: order.quantity,
-          limitPrice: order.avgPrice,
-          confirmLive: true,
-        })
+      : startOrderProgress(flowId, createOrderProgressFromOrder(flowId, order))
     const steps = current.steps.map((step) => {
       const status: OrderProgressStatus = step.status === 'error' ? 'error' : 'success'
       return {
@@ -667,156 +632,3 @@ export const useAppStore = defineStore('app', () => {
     refreshViewData,
   }
 })
-
-function createOrderProgressSteps(
-  activeStage?: OrderProgressStage,
-  status: OrderProgressStatus = 'pending',
-  message?: string,
-  timestamp?: string,
-): OrderProgressStepView[] {
-  return orderProgressStages.map(stage => ({
-    id: stage.id,
-    label: stage.label,
-    status: stage.id === activeStage ? status : 'pending',
-    message: stage.id === activeStage ? message : undefined,
-    timestamp: stage.id === activeStage ? timestamp : undefined,
-  }))
-}
-
-function progressStatusFromSteps(steps: OrderProgressStepView[]): OrderProgressStatus {
-  if (steps.some(step => step.status === 'error')) {
-    return 'error'
-  }
-  if (steps.find(step => step.id === 'persist')?.status === 'success') {
-    return 'success'
-  }
-  if (steps.some(step => step.status === 'running' || step.status === 'success')) {
-    return 'running'
-  }
-  return 'pending'
-}
-
-function markCurrentOrderStepError(
-  steps: OrderProgressStepView[],
-  message: string,
-  timestamp: string,
-) {
-  const runningIndex = steps.findIndex(step => step.status === 'running')
-  const pendingIndex = steps.findIndex(step => step.status === 'pending')
-  const fallbackIndex = Math.max(0, steps.length - 1)
-  const targetIndex = runningIndex >= 0 ? runningIndex : pendingIndex >= 0 ? pendingIndex : fallbackIndex
-  return steps.map((step, index) =>
-    index === targetIndex
-      ? { ...step, status: 'error' as OrderProgressStatus, message, timestamp }
-      : step,
-  )
-}
-
-function makeOrderFlowId() {
-  return `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function reconnectDelayAfterAttempt(attempts: number) {
-  return reconnectBackoffDelays[Math.min(attempts, reconnectBackoffDelays.length - 1)]
-}
-
-function formatReconnectDelay(ms: number) {
-  const seconds = Math.max(1, Math.round(ms / 1_000))
-  if (seconds < 60) {
-    return `${seconds} 秒`
-  }
-  return `${Math.round(seconds / 60)} 分钟`
-}
-
-function isPermanentSavedConnectionError(message: string) {
-  return [
-    '系统 keyring 中没有已保存的 Binance API 凭据',
-    'Binance 期权账户当前不可交易',
-    'Binance 现货账户当前不可交易',
-    'HTTP 401',
-    'code -2014',
-    'code -2015',
-    'code -1022',
-  ].some(pattern => message.includes(pattern))
-}
-
-function buildMetrics(
-  settings: AppSettings | undefined,
-  balances: AppSnapshot['balances'],
-  pnl: AppSnapshot['pnl'] | undefined,
-): MetricCardModel[] {
-  const connected = settings?.connected ?? false
-  const syncState = connected ? 'Binance 账户已同步' : '等待 API 连接'
-  const totalEquity = sumDecimalStrings(balances.map(balance => balance.usdtValue))
-  const availableMargin = balances.find(
-    balance => balance.asset === 'USDT' && balance.source === '期权保证金',
-  )?.free ?? '0'
-  const todayPremium = pnl?.today ?? '0'
-
-  return [
-    {
-      id: 'portfolio',
-      title: '总资产估值',
-      value: formatMetricMoney(totalEquity),
-      subValue: syncState,
-      change: 'Binance',
-      icon: 'wallet',
-      tone: 'gold',
-    },
-    {
-      id: 'margin',
-      title: '可用保证金',
-      value: formatMetricMoney(availableMargin),
-      subValue: syncState,
-      change: 'Binance',
-      icon: 'shield',
-      tone: 'blue',
-    },
-    {
-      id: 'premium',
-      title: '今日权利金',
-      value: formatMetricMoney(todayPremium),
-      subValue: '今日',
-      change: '订单',
-      icon: 'coins',
-      tone: 'gold',
-    },
-    {
-      id: 'status',
-      title: '运行状态',
-      value: settings?.autoEnabled ? '运行中' : connected ? '已连接' : '未连接',
-      subValue: 'Tauri 客户端',
-      change: syncState,
-      icon: 'activity',
-      tone: settings?.autoEnabled ? 'green' : connected ? 'gold' : 'gray',
-    },
-  ]
-}
-
-/** 从收益报告派生图表构成。 */
-function buildPnlBreakdown(report: AppSnapshot['pnl'] | undefined): PnlBreakdownItem[] {
-  if (!report || (isZeroDecimalString(report.cumulative) && isZeroDecimalString(report.optionPremium))) {
-    return []
-  }
-
-  return [
-    {
-      label: '期权权利金',
-      value: report.optionPremium,
-      color: '#d89b2b',
-    },
-    {
-      label: '现货补齐浮动盈亏',
-      value: report.floatingSpot,
-      color: isNegativeDecimalString(report.floatingSpot) ? '#cc4b37' : '#2fa66a',
-    },
-  ]
-}
-
-function formatMetricMoney(value: string) {
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric)) {
-    return `${value} USDT`
-  }
-  return `${metricMoneyFormatter.format(numeric)} USDT`
-}

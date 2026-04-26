@@ -6,6 +6,7 @@
 mod app_state;
 mod binance;
 mod commands;
+mod decimal_utils;
 mod domain;
 mod logs;
 mod persistence;
