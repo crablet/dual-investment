@@ -20,7 +20,7 @@ interface PendingTask {
 
 const store = useAppStore()
 
-const activeStrategies = computed(() => store.orders.slice(0, 4))
+const activeStrategies = computed(() => store.runningOrders.slice(0, 4))
 const pnlCenter = computed(() => Number(store.pnl?.cumulative ?? 0).toLocaleString('zh-CN'))
 const expiringOrdersCount = computed(() => {
   const today = new Date()

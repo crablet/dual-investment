@@ -293,6 +293,8 @@ pub struct StrategyOrder {
     #[serde(with = "rust_decimal::serde::str")]
     pub estimated_pnl: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
+    pub annualized: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
     pub breakeven: Decimal,
     #[serde(default)]
     pub exchange_status: String,
@@ -418,6 +420,7 @@ pub enum OrderAttemptStatus {
     Attempted,
     ExchangeAck,
     Persisted,
+    Failed,
     PersistFailed,
     SpotAttempted,
     SpotExchangeAck,
@@ -432,6 +435,7 @@ impl OrderAttemptStatus {
             Self::Attempted => "attempted",
             Self::ExchangeAck => "exchange_ack",
             Self::Persisted => "persisted",
+            Self::Failed => "failed",
             Self::PersistFailed => "persist_failed",
             Self::SpotAttempted => "spot_attempted",
             Self::SpotExchangeAck => "spot_exchange_ack",

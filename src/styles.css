@@ -363,9 +363,9 @@ input {
 }
 
 .account-row {
-  /* 账户列表固定为“标签左、数字右”的扫描结构，避免多资产行视觉跳动。 */
+  /* 账户列表固定为“短 ticker 左、金额右”的扫描结构，金额列需要更宽。 */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(76px, 42%);
+  grid-template-columns: minmax(52px, 1fr) minmax(0, 2fr);
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -1687,7 +1687,11 @@ button.opportunity-row.selected:hover {
 }
 
 .summary-cards {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.monthly-summary-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .order-summary-cards article {
@@ -1700,6 +1704,7 @@ button.opportunity-row.selected:hover {
 
 .monthly-summary-cards article {
   display: flex;
+  min-width: 0;
   min-height: 104px;
   flex-direction: column;
   justify-content: center;
@@ -1721,6 +1726,10 @@ button.opportunity-row.selected:hover {
 .order-summary-cards strong {
   margin: 0;
   line-height: 1;
+}
+
+.monthly-summary-cards strong {
+  overflow-wrap: anywhere;
 }
 
 .bar-list {
@@ -1866,10 +1875,10 @@ button.opportunity-row.selected:hover {
     grid-column: span 6;
   }
 
-  .summary-cards,
+  .summary-cards:not(.monthly-summary-cards),
   .order-strip,
   .payoff-stats {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .view-grid > .metric-card {

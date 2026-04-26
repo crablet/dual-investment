@@ -130,6 +130,17 @@ impl Persistence {
         Ok(())
     }
 
+    /// 删除本地策略订单快照。
+    pub fn delete_order(&self, order_id: &str) -> AppResult<()> {
+        self.connection
+            .execute(
+                "DELETE FROM strategy_orders WHERE id = ?1",
+                params![order_id],
+            )
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        Ok(())
+    }
+
     /// 保存自动复投规则。
     ///
     /// 规则可持久化，但应用启动时会强制关闭自动执行状态。
@@ -253,7 +264,7 @@ impl Persistence {
             .query_row(
                 "SELECT COUNT(*)
                  FROM order_attempts
-                 WHERE status NOT IN ('persisted', 'spot_persisted')",
+                 WHERE status NOT IN ('persisted', 'failed', 'spot_persisted')",
                 [],
                 |row| row.get::<_, i64>(0),
             )
@@ -283,6 +294,7 @@ fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
         "attempted" => Ok(OrderAttemptStatus::Attempted),
         "exchange_ack" => Ok(OrderAttemptStatus::ExchangeAck),
         "persisted" => Ok(OrderAttemptStatus::Persisted),
+        "failed" => Ok(OrderAttemptStatus::Failed),
         "persist_failed" => Ok(OrderAttemptStatus::PersistFailed),
         "spot_attempted" => Ok(OrderAttemptStatus::SpotAttempted),
         "spot_exchange_ack" => Ok(OrderAttemptStatus::SpotExchangeAck),

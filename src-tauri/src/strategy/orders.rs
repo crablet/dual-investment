@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -88,6 +88,7 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
 pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> StrategyOrder {
     let preview = preview_strategy(request);
     let now = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
+    let opened_at = ack.create_time.or(ack.update_time).unwrap_or(now);
     let avg_price = if ack.avg_price > Decimal::ZERO {
         ack.avg_price
     } else {
@@ -95,6 +96,18 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
     };
     let premium = (avg_price * ack.executed_qty).round_dp(2);
     let status = status_from_exchange(&ack.status, ack.executed_qty, ack.quantity);
+    let annualized_quantity = if ack.executed_qty > Decimal::ZERO {
+        ack.executed_qty
+    } else {
+        request.quantity
+    };
+    let annualized = annualized_from_order_terms(
+        premium,
+        request.strike,
+        annualized_quantity,
+        opened_at,
+        request.expiry_at,
+    );
     StrategyOrder {
         id: format!("LIVE-{}", Uuid::new_v4().simple()),
         source: StrategyOrderSource::LiveOrder,
@@ -117,6 +130,7 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         fee: ack.fee,
         premium,
         estimated_pnl: premium - ack.fee,
+        annualized,
         breakeven: preview.candidate.breakeven,
         exchange_status: ack.status.clone(),
         created_at: now,
@@ -148,6 +162,13 @@ pub fn order_from_adopted_position(
         .expect("validated option contract side before adoption");
     let now = position.update_time.unwrap_or_else(Utc::now);
     let premium = (position.entry_price * position.quantity).round_dp(2);
+    let annualized = annualized_from_order_terms(
+        premium,
+        contract.strike_price,
+        position.quantity,
+        now,
+        contract.expiry_at,
+    );
     StrategyOrder {
         id: format!("ADOPT-{}", Uuid::new_v4().simple()),
         source: StrategyOrderSource::AdoptedPosition,
@@ -166,6 +187,7 @@ pub fn order_from_adopted_position(
         fee: Decimal::ZERO,
         premium,
         estimated_pnl: premium,
+        annualized,
         breakeven: breakeven_from_entry(contract.strike_price, position.entry_price, direction),
         exchange_status: "POSITION".to_string(),
         created_at: now,
@@ -188,4 +210,26 @@ pub fn order_from_adopted_position(
         spot_avg_price: Decimal::ZERO,
         spot_fee: Decimal::ZERO,
     }
+}
+
+/// 按真实成交/持仓字段估算订单年化收益率。
+///
+/// 订单持久化后年化成为订单事实字段，前端只负责展示，不重新做金融计算。
+pub fn annualized_from_order_terms(
+    premium: Decimal,
+    strike: Decimal,
+    quantity: Decimal,
+    opened_at: DateTime<Utc>,
+    expiry_at: DateTime<Utc>,
+) -> Decimal {
+    let expiry_days = days_between(opened_at, expiry_at).max(1);
+    estimate_annualized(premium, strike, quantity, expiry_days)
+}
+
+fn days_between(start: DateTime<Utc>, end: DateTime<Utc>) -> i64 {
+    let seconds = (end - start).num_seconds();
+    if seconds <= 0 {
+        return 1;
+    }
+    (seconds + 86_399) / 86_400
 }

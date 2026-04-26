@@ -22,6 +22,6 @@ pub use candidates::{
 };
 #[allow(unused_imports)]
 pub use orders::preview_strategy;
-pub use orders::{order_from_adopted_position, order_from_request};
+pub use orders::{annualized_from_order_terms, order_from_adopted_position, order_from_request};
 pub use risk::{empty_risk_snapshot, risk_snapshot_from_account};
 pub use rules::default_auto_rule;

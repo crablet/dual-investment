@@ -114,3 +114,151 @@ function modifiedLabel(file: LogFileInfo) {
     </section>
   </Panel>
 </template>
+
+<style scoped>
+.settings-logs {
+  min-width: 0;
+}
+
+.settings-log-error {
+  margin-bottom: 12px;
+}
+
+.settings-log-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-log-summary div,
+.settings-log-path {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-log-summary span,
+.settings-log-path span {
+  min-width: 0;
+  color: var(--muted);
+}
+
+.settings-log-summary strong,
+.settings-log-path strong {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-log-path {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-log-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-log-actions :deep(.n-button) {
+  width: 100%;
+}
+
+.settings-log-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+}
+
+.settings-log-section h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-empty-row {
+  min-height: 42px;
+  padding: 10px 0;
+  color: var(--muted);
+}
+
+.settings-log-entry {
+  display: grid;
+  grid-template-columns: 150px 64px minmax(220px, 0.55fr) minmax(0, 1.45fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-log-entry:last-child,
+.settings-log-file:last-child {
+  border-bottom: 0;
+}
+
+.settings-log-entry time,
+.settings-log-file time,
+.settings-log-file span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-log-level {
+  justify-self: center;
+  min-width: 52px;
+}
+
+.settings-log-level :deep(.n-tag__content) {
+  display: inline-flex;
+  justify-content: center;
+  width: 100%;
+  text-align: center;
+  text-transform: lowercase;
+}
+
+.settings-log-event {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-log-entry p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-log-file {
+  display: grid;
+  grid-template-columns: 88px 64px 82px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  min-height: 36px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-log-file strong {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1180px) {
+  .settings-log-entry {
+    grid-template-columns: 142px 54px minmax(0, 1fr);
+  }
+
+  .settings-log-entry p {
+    grid-column: 1 / -1;
+  }
+}
+</style>

@@ -37,7 +37,7 @@ use self::funding::{
 };
 use self::orders::{
     apply_option_ack, apply_option_position, apply_spot_ack, combined_balances, is_spot_attempt,
-    request_from_option_attempt,
+    is_unfilled_terminal_option_ack, request_from_option_attempt,
 };
 use self::runtime::{
     client_from_runtime, join_binance_request, make_client_order_id, make_spot_client_order_id,
@@ -1099,6 +1099,31 @@ impl AppState {
             return Err(error);
         }
 
+        if is_unfilled_terminal_option_ack(&ack) {
+            let message = format!(
+                "Binance 返回未成交终态 {}，成交数量 0，本地不创建策略订单",
+                ack.status
+            );
+            attempt.status = OrderAttemptStatus::Failed;
+            attempt.message.clone_from(&message);
+            attempt.updated_at = Utc::now();
+            self.save_order_attempt(&attempt)?;
+            self.record_log(
+                &format!("strategy.order.{source}.failed"),
+                &format!("{} {}", contract.symbol, message),
+            )?;
+            progress.emit(
+                OrderProgressStage::Persist,
+                OrderProgressStatus::Error,
+                message.clone(),
+                Some(&contract.symbol),
+                Some(&ack.order_id),
+            );
+            self.sweep_option_idle_usdt_best_effort(&client, "期权下单未成交后归集")
+                .await;
+            return Err(AppError::Binance(message));
+        }
+
         let order = strategy::order_from_request(&request, &ack);
         if let Err(error) = self.save_order(&order).await {
             attempt.status = OrderAttemptStatus::PersistFailed;
@@ -1175,6 +1200,22 @@ impl AppState {
                 Some(&attempt.client_order_id),
             )
             .await?;
+        if is_unfilled_terminal_option_ack(&ack) {
+            let message = format!(
+                "Binance 返回未成交终态 {}，成交数量 0，本地不创建策略订单",
+                ack.status
+            );
+            attempt.status = OrderAttemptStatus::Failed;
+            attempt.exchange_order_id = Some(ack.order_id.clone());
+            attempt.message.clone_from(&message);
+            attempt.updated_at = Utc::now();
+            self.save_order_attempt(&attempt)?;
+            self.record_log(
+                "strategy.order.recover_failed",
+                &format!("{} {}", attempt.option_symbol, message),
+            )?;
+            return Err(AppError::Binance(message));
+        }
         let contracts = client.exchange_info().await?;
         let contract = contracts
             .iter()
@@ -1250,7 +1291,8 @@ impl AppState {
 
         for order in orders.into_iter().filter(should_sync_option_order) {
             match self.sync_single_order(&client, order.clone()).await {
-                Ok(order) => updated.push(order),
+                Ok(Some(order)) => updated.push(order),
+                Ok(None) => {}
                 Err(error) => {
                     self.record_warning(
                         "strategy.order.sync_failed",
@@ -1267,7 +1309,7 @@ impl AppState {
         &self,
         client: &BinanceClient,
         mut order: StrategyOrder,
-    ) -> AppResult<StrategyOrder> {
+    ) -> AppResult<Option<StrategyOrder>> {
         if has_exchange_order_ref(&order) {
             let ack = client
                 .query_option_order(
@@ -1276,12 +1318,23 @@ impl AppState {
                     Some(&order.client_order_id),
                 )
                 .await?;
+            if is_unfilled_terminal_option_ack(&ack) {
+                self.delete_order(&order.id).await?;
+                self.record_log(
+                    "strategy.order.unfilled_removed",
+                    &format!(
+                        "{} 交易所状态 {} 且未成交，已从本地订单移除",
+                        order.option_symbol, ack.status
+                    ),
+                )?;
+                return Ok(None);
+            }
             apply_option_ack(&mut order, &ack);
         } else {
             self.sync_adopted_position_order(client, &mut order).await?;
         }
         self.save_order(&order).await?;
-        Ok(order)
+        Ok(Some(order))
     }
 
     /// 同步没有原始订单号的接管记录。
@@ -1321,11 +1374,11 @@ impl AppState {
 
         for mut order in orders.into_iter().filter(should_settle_order) {
             if order.filled_quantity <= Decimal::ZERO {
-                order.status = StrategyStatus::Expired;
-                order.updated_at = Utc::now();
-                order.rebalance_message = "期权未成交，无需到期补齐".to_string();
-                self.save_order(&order).await?;
-                updated.push(order);
+                self.delete_order(&order.id).await?;
+                self.record_log(
+                    "strategy.settlement.unfilled_removed",
+                    &format!("{} 未成交，到期扫描已从本地订单移除", order.option_symbol),
+                )?;
                 continue;
             }
 
@@ -1694,6 +1747,20 @@ impl AppState {
         } else {
             orders.insert(0, order.clone());
         }
+        Ok(())
+    }
+
+    /// 删除本地订单快照，并同步更新内存缓存。
+    async fn delete_order(&self, order_id: &str) -> AppResult<()> {
+        {
+            let persistence = self
+                .persistence
+                .lock()
+                .map_err(|error| AppError::Storage(error.to_string()))?;
+            persistence.delete_order(order_id)?;
+        }
+        let mut orders = self.orders.write().await;
+        orders.retain(|order| order.id != order_id);
         Ok(())
     }
 

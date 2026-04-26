@@ -11,3 +11,12 @@ import SettingsLogPanel from '@/components/settings/SettingsLogPanel.vue'
     <SettingsLogPanel />
   </div>
 </template>
+
+<style scoped>
+.settings-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+</style>

@@ -259,7 +259,10 @@ pub(super) fn validate_spot_rebalance(
 }
 
 pub(super) fn should_consume_auto_day_after_error(error: &AppError) -> bool {
-    !matches!(error, AppError::Binance(_))
+    match error {
+        AppError::Binance(message) => message.contains("未成交终态"),
+        _ => true,
+    }
 }
 
 pub(super) fn is_uncertain_submit_error(error: &AppError) -> bool {

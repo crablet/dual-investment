@@ -39,6 +39,7 @@ export const statusToneMap: Record<StrategyStatus, 'default' | 'error' | 'info' 
 export const attemptStatusTextMap: Record<string, string> = {
   attempted: '准备发送期权订单',
   exchange_ack: '交易所已接单',
+  failed: '下单失败',
   persist_failed: '订单保存失败',
   spot_attempted: '准备发送现货补齐',
   spot_exchange_ack: '现货交易所已接单',

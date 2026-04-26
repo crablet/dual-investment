@@ -22,6 +22,7 @@
 - 候选扫描使用 `BTCUSDT` 现货价过滤方向：低买只保留执行价低于现货的 Put，高卖只保留执行价高于现货的 Call；候选浏览范围保持到期 `1-90` 天。
 - 下单或补齐需要资金时，先检查现货/期权可用余额；不足时只从 Simple Earn 活期真实持仓赎回，必要时再划转到期权保证金账户。卖 Put 到期 ITM 的现货补齐 USDT 缓冲由 `SELL_PUT_REBALANCE_USDT_BUFFER` 控制。
 - 下单或现货补齐请求结果不确定时，不要盲目重发真实订单；必须先按 `clientOrderId` 或交易所订单号重新查询 Binance，并保留 `order_attempts` 恢复记录。交易所已接单但本地保存失败时，恢复也必须重新查询 Binance 事实。
+- 期权订单如果被 Binance 确认为 `EXPIRED`、`REJECTED`、`CANCELED` 或 `CANCELLED` 且成交数量为 0，必须视为下单失败：`order_attempts` 记录为 `failed`，不得创建、恢复或继续跟踪为活跃 `StrategyOrder`，也不得进入同步、结算或现货补齐流程。
 - 接管后的订单会进入同步、到期结算和现货补齐流程；接管入口本身不下单、不移动资金，但后续 ITM 补齐仍是真实资金动作，必须保留显式确认和脱敏日志。
 
 ## 前端约定
@@ -35,6 +36,8 @@
 - 导航切换和重复点击通过 Pinia `openView` 刷新页面数据；刷新、后台同步和自动重连不得自动开启策略或下单。静默请求不要清空前台错误提示，并避免 `sync`/`connect` 请求堆积。
 - `AppSnapshot.health` 只用于运行观测和提醒，不是订单、结算、资金或日历事实来源。
 - 总览指标优先使用后端快照事实口径；前端只做轻量展示派生。日期工具和状态/方向/恢复记录文案集中在 `src/utils/date.ts` 和 `src/utils/labels.ts`。Pinia 对外状态源保持在 `src/stores/app.ts`，可把指标、订单进度、重连等纯展示/状态机 helper 拆到 `src/stores/` 同目录模块。
+- 收益明细当前按订单展示权利金、年化和备注，不保留前端硬编码的“收益类型”列。若要展示多种收益来源，必须由 Rust 提供明确收益明细 DTO，不得在前端自行拼分类或从日志推断。
+- 收益明细中的订单年化只展示 `StrategyOrder.annualized`，不得在前端用 `Number` 按权利金和到期天数重算真实收益率。
 - 总览页和持仓与现货页的账户概览复用 `src/components/common/AccountBalanceList.vue`；Simple Earn 使用真实活期/定期持仓，不使用现货账户 `LD*` 镜像资产。估值由 Rust 计算，无法定价时前端显示“暂无估值”。
 - 候选、订单、义务仓和日历展示到期信息时使用 `expiryAt` 的本地日期时间，不要在前端按日期拼接时间。总览事件日历只从现有快照派生，不从日志文件派生事件。
 - 账户、持仓、义务仓等多列列表使用稳定 grid 列宽；标签列左对齐，数字列右对齐并使用等宽数字。
@@ -45,8 +48,9 @@
 - Binance 接口只放在 `binance.rs` 及 `src-tauri/src/binance/` 子模块，不要让前端或策略层拼签名；Simple Earn、Universal Transfer 和期权持仓查询也必须在这里封装。
 - Binance 查询类 GET 请求可以短退避重试；下单、Simple Earn 申购/赎回和 Universal Transfer 不得在网络失败时盲目重试，结果不确定时先走交易所查询恢复。
 - `StrategyOrder.source` 是订单跟踪语义的一部分：本机下单/恢复订单使用 `liveOrder`，外部持仓接管订单使用 `adoptedPosition`。不要用 ID 前缀或订单号缺失来推断来源。
+- `StrategyOrder.annualized` 是订单快照事实字段，必须由 Rust 使用 `Decimal` 计算并持久化。本机订单使用实际权利金、执行价、实际成交数量、交易所订单创建时间到 `expiryAt` 的天数计算；接管订单使用当前持仓 entry price、数量和 Binance 持仓更新时间到 `expiryAt` 的天数计算。
 - 启动加载、快照同步和可跟踪订单判断必须保留 `adoptedPosition`；接管订单可以没有 `exchangeOrderId` 和 `clientOrderId`，不得再用订单号是否存在作为唯一加载条件。
-- 接管订单如果没有原始交易所订单号或 `clientOrderId`，同步时只能以 Binance 当前期权持仓和到期行权记录为事实来源；未到期前持仓消失应停止跟踪，已到期后交给结算扫描处理。
+- 接管订单如果没有原始交易所订单号或 `clientOrderId`，同步时只能以 Binance 当前期权持仓和到期行权记录为事实来源；未到期前持仓消失应停止跟踪，已到期后交给结算扫描处理。除非新增历史订单或成交查询并完成可靠匹配，否则不要把接管单的持仓更新时间描述成原始下单时间。
 - 系统凭据读写只放在 `secrets.rs`；keyring store 初始化失败不应永久缓存为不可恢复状态，后续应允许重试。
 - 文件日志读写只放在 `logs.rs`；日志按 `logs/YYYY-MM-DD.log` 追加 JSONL，只允许脱敏摘要。连接失败可以写脱敏日志事件。
 - 所有 command 返回 `Result<T, String>`，内部用 `AppError` 表达错误。订单和恢复记录保存不可变事实，日志只做追加记录。

@@ -111,6 +111,7 @@ export interface StrategyOrder {
   fee: DecimalString
   premium: DecimalString
   estimatedPnl: DecimalString
+  annualized: DecimalString
   breakeven: DecimalString
   exchangeStatus: string
   createdAt: string

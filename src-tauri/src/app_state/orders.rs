@@ -81,7 +81,27 @@ pub(super) fn apply_option_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck
     order.fee = ack.fee;
     order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
     order.estimated_pnl = order.premium - order.fee;
+    let annualized_quantity = if order.filled_quantity > Decimal::ZERO {
+        order.filled_quantity
+    } else {
+        order.quantity
+    };
+    order.annualized = strategy::annualized_from_order_terms(
+        order.premium,
+        order.strike,
+        annualized_quantity,
+        order.created_at,
+        order.expiry_at,
+    );
     order.updated_at = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
+}
+
+pub(super) fn is_unfilled_terminal_option_ack(ack: &ExchangeOrderAck) -> bool {
+    ack.executed_qty <= Decimal::ZERO
+        && matches!(
+            ack.status.as_str(),
+            "EXPIRED" | "REJECTED" | "CANCELED" | "CANCELLED"
+        )
 }
 
 /// 把 Binance 当前期权持仓应用到接管订单。
@@ -95,6 +115,18 @@ pub(super) fn apply_option_position(order: &mut StrategyOrder, position: &Option
     }
     order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
     order.estimated_pnl = order.premium - order.fee;
+    let annualized_quantity = if order.filled_quantity > Decimal::ZERO {
+        order.filled_quantity
+    } else {
+        order.quantity
+    };
+    order.annualized = strategy::annualized_from_order_terms(
+        order.premium,
+        order.strike,
+        annualized_quantity,
+        order.created_at,
+        order.expiry_at,
+    );
     order.breakeven = match order.direction {
         StrategyDirection::SellPut => order.strike - order.avg_price,
         StrategyDirection::SellCall => order.strike + order.avg_price,

@@ -108,3 +108,147 @@ async function forgetCredentials() {
     </div>
   </Panel>
 </template>
+
+<style scoped>
+.settings-connection {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(190px, 0.68fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.settings-primary {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.settings-connection-status {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-connection-status > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.settings-connection-status .settings-status-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-connection-status span {
+  min-width: 0;
+  color: var(--muted);
+}
+
+.settings-connection-status strong {
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.settings-connection-status strong.positive {
+  color: var(--green);
+}
+
+.settings-connection-status strong.warning {
+  color: var(--gold);
+}
+
+.settings-connect-form {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-connect-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-connect-actions :deep(.n-button) {
+  width: 100%;
+}
+
+.settings-reconnect-alert {
+  min-width: 0;
+}
+
+.settings-permissions {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
+}
+
+.settings-permissions h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-permissions ul {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-permissions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  min-height: 38px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-permissions li:last-child {
+  border-bottom: 0;
+}
+
+.settings-permissions span {
+  min-width: 0;
+  color: var(--muted);
+}
+
+.settings-permissions strong {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.settings-permissions strong.warning {
+  color: var(--gold);
+}
+
+@media (max-width: 1180px) {
+  .settings-connection {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-permissions {
+    padding-top: 16px;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+</style>
