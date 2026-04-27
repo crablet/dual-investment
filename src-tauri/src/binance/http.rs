@@ -1,5 +1,11 @@
+//! Binance HTTP 辅助函数。
+//!
+//! 这里集中处理网络错误分类、查询类重试判断和签名 query 编码。错误消息只保留方法、
+//! 路径和原因，不能包含 API Secret、签名原文或 Binance 原始响应。
+
 use crate::domain::AppError;
 
+/// 把 `reqwest` 错误转成脱敏的 Binance 错误消息。
 pub(super) fn request_error(method: &str, path: &str, error: &reqwest::Error) -> AppError {
     let reason = if error.is_timeout() {
         "请求超时"
@@ -17,6 +23,7 @@ pub(super) fn request_error(method: &str, path: &str, error: &reqwest::Error) ->
     AppError::Binance(format!("Binance {method} {path} {reason}"))
 }
 
+/// 判断是否为 Binance 时间戳偏移错误，可通过重新同步 server time 后重试。
 pub(super) fn is_timestamp_error(error: &AppError) -> bool {
     matches!(
         error,
@@ -27,6 +34,7 @@ pub(super) fn is_timestamp_error(error: &AppError) -> bool {
     )
 }
 
+/// 判断查询类 GET 请求是否可短退避重试；真实资金/下单动作不能套用这个判断盲目重发。
 pub(super) fn is_transient_query_error(error: &AppError) -> bool {
     matches!(
         error,
@@ -44,6 +52,8 @@ pub(super) fn is_transient_query_error(error: &AppError) -> bool {
 }
 
 /// 构造 Binance 签名原文。
+///
+/// 返回值只用于本次签名和发送请求，调用方不得写入日志、SQLite 或前端事件。
 pub(super) fn encode_query(params: &[(String, String)]) -> String {
     params
         .iter()

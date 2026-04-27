@@ -1,3 +1,8 @@
+//! 账户资产和收益快照派生。
+//!
+//! 这里把期权保证金、现货和 Simple Earn 的真实账户快照转换成前端展示行，并按已保存订单
+//! 派生收益报告。无法估值的资产保留数量事实，但不参与 USDT 汇总。
+
 use std::collections::HashMap;
 
 use chrono::Utc;
@@ -86,6 +91,7 @@ pub fn build_simple_earn_balances(
     earn: &SimpleEarnSnapshot,
     spot_prices: &HashMap<String, Decimal>,
 ) -> Vec<BalanceRow> {
+    // 同一资产可能同时存在多个 Simple Earn 产品，展示时按资产和来源聚合，保留来源口径。
     let mut grouped: HashMap<(String, String), Decimal> = HashMap::new();
     for balance in &earn.balances {
         if balance.amount <= Decimal::ZERO {
@@ -147,6 +153,7 @@ fn asset_usdt_price(asset: &str, spot_prices: &HashMap<String, Decimal>) -> Opti
         return Some(price);
     }
 
+    // 没有直接 USDT 交易对时，尝试通过 BTCUSDT 中转估值；仍失败则标记为暂无估值。
     let btc_symbol = format!("{asset}BTC");
     let asset_btc = positive_price(spot_prices.get(&btc_symbol))?;
     let btc_usdt = positive_price(spot_prices.get("BTCUSDT"))?;
@@ -154,10 +161,12 @@ fn asset_usdt_price(asset: &str, spot_prices: &HashMap<String, Decimal>) -> Opti
 }
 
 fn positive_price(price: Option<&Decimal>) -> Option<Decimal> {
+    // Binance 偶发返回 0 或缺失价格时，不把它当成有效估值来源。
     price.copied().filter(|value| *value > Decimal::ZERO)
 }
 
 fn is_simple_earn_ledger_asset(asset: &str) -> bool {
+    // 现货账户中的 LD* 是理财镜像资产，真实理财数量由 Simple Earn 接口单独提供。
     if asset.starts_with("LD") && asset.len() > 4 {
         return true;
     }
@@ -200,6 +209,7 @@ pub fn pnl_report_from_orders_with_spot(
 
 /// 统计当天订单权利金。
 fn today_option_premium(orders: &[StrategyOrder]) -> Decimal {
+    // 收益报告的“今日”使用后端 UTC 日期，与订单创建时间字段保持同一时间基准。
     let today = Utc::now().date_naive();
     orders
         .iter()

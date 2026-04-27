@@ -1,3 +1,9 @@
+<!--
+Binance 期权持仓接管面板。
+
+这里仅展示交易所当前义务仓和本地可接管判断。接管入口不下单、不移动资金，但接管后的
+订单会继续进入同步、到期结算和必要的现货补齐流程，因此仍要求显式确认。
+-->
 <script setup lang="ts">
 import type { AdoptableOptionPositionView } from '@/types/domain'
 import { DownloadCloud, RefreshCw } from '@lucide/vue'
@@ -18,6 +24,7 @@ const selectedCount = computed(() => selectedSymbols.value.length)
 const canAdoptSelected = computed(() => selectedCount.value > 0 && !store.isLoading('adopt'))
 
 watch(rows, (next) => {
+  // 刷新 Binance 持仓后移除已不可接管的旧选择，避免提交过期 symbol。
   const selectable = new Set(next.filter(row => row.adoptable).map(row => row.symbol))
   selectedSymbols.value = selectedSymbols.value.filter(symbol => selectable.has(symbol))
 })
@@ -50,6 +57,7 @@ function adoptSelected() {
   if (!window.confirm('确认接管选中的 Binance 期权持仓？到期 ITM 后本机会继续执行现货补齐流程。')) {
     return
   }
+  // confirmLive 表示用户确认接管真实 Binance 持仓；这里只写入本地跟踪，不重放历史下单。
   void store.adoptOptionPositions({
     symbols: selectedSymbols.value,
     confirmLive: true,

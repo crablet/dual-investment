@@ -1,3 +1,8 @@
+// 总览指标和收益构成的展示派生。
+//
+// 这些函数只把后端快照整理成卡片/图表模型，不做真实金融决策。金额求和使用
+// Decimal 字符串工具，避免为了 UI 汇总先转成 JavaScript number。
+
 import type { AppSettings, AppSnapshot } from '@/types/domain'
 import type { MetricCardModel, PnlBreakdownItem } from '@/types/view'
 import {
@@ -10,6 +15,7 @@ const metricMoneyFormatter = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 2,
 })
 
+/** 根据连接状态、账户资产和收益快照构造总览顶部指标卡。 */
 export function buildMetrics(
   settings: AppSettings | undefined,
   balances: AppSnapshot['balances'],
@@ -63,7 +69,7 @@ export function buildMetrics(
   ]
 }
 
-/** 从收益报告派生图表构成。 */
+/** 从收益报告派生图表构成；颜色按标签固定，正负只影响数值文字样式。 */
 export function buildPnlBreakdown(report: AppSnapshot['pnl'] | undefined): PnlBreakdownItem[] {
   if (!report || (isZeroDecimalString(report.cumulative) && isZeroDecimalString(report.optionPremium))) {
     return []
@@ -86,6 +92,7 @@ export function buildPnlBreakdown(report: AppSnapshot['pnl'] | undefined): PnlBr
 }
 
 function formatMetricMoney(value: string) {
+  // 指标卡格式化允许转 number；汇总本身已经由 Decimal 字符串工具完成。
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) {
     return `${value} USDT`

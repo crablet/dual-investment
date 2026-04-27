@@ -1,3 +1,8 @@
+//! 风控快照派生。
+//!
+//! 风险值从 Binance 期权账户快照和 Rust 侧规则计算，前端只展示结果。默认保证金占用
+//! 上限在这里定义，调整时需要同步更新 README/AGENTS 中的业务约束。
+
 use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;

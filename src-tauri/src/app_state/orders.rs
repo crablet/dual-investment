@@ -1,3 +1,8 @@
+//! 订单恢复、同步和展示快照辅助逻辑。
+//!
+//! 这些函数把交易所回报或当前持仓应用到本地订单字段。真实下单/补齐失败后的恢复必须
+//! 先查询 Binance 事实，不能靠这里重放请求。
+
 use std::collections::HashMap;
 
 use chrono::{NaiveDate, Utc};

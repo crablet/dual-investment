@@ -1,3 +1,8 @@
+//! 策略层 Decimal 数学工具。
+//!
+//! 这里提供收益率、绝对值和 tick/step 对齐等纯函数，调用方负责传入业务字段和处理
+//! 分母为零等语义默认值。
+
 use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 
@@ -17,6 +22,7 @@ pub(super) fn abs_decimal(value: Decimal) -> Decimal {
     if value < Decimal::ZERO { -value } else { value }
 }
 
+/// 向下对齐到交易所 step/tick 网格。
 pub(super) fn align_decimal_down_to_step(value: Decimal, step: Decimal) -> Decimal {
     if step <= Decimal::ZERO {
         return value;

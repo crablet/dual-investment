@@ -1,3 +1,9 @@
+//! 应用状态层校验规则。
+//!
+//! 本模块在真实下单、自动执行和到期补齐前校验业务边界、Binance 合约过滤器、
+//! 精度、保证金和本地风控。前端传入的字段只能作为请求意图，最终以这里和 Binance
+//! 返回的事实为准。
+
 use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -265,6 +271,7 @@ pub(super) fn should_consume_auto_day_after_error(error: &AppError) -> bool {
     }
 }
 
+/// 判断下单/现货补齐请求是否处于结果不确定状态，需要先查交易所事实再恢复。
 pub(super) fn is_uncertain_submit_error(error: &AppError) -> bool {
     matches!(
         error,
@@ -276,6 +283,7 @@ pub(super) fn is_uncertain_submit_error(error: &AppError) -> bool {
     )
 }
 
+/// 判断本地订单是否有可用于查询 Binance 的订单引用。
 pub(super) fn has_exchange_order_ref(order: &StrategyOrder) -> bool {
     order
         .exchange_order_id
@@ -284,6 +292,7 @@ pub(super) fn has_exchange_order_ref(order: &StrategyOrder) -> bool {
         || !order.client_order_id.trim().is_empty()
 }
 
+/// 判断订单是否可继续跟踪；接管订单可以没有交易所订单号。
 pub(super) fn is_trackable_order(order: &StrategyOrder) -> bool {
     has_exchange_order_ref(order) || order.source == StrategyOrderSource::AdoptedPosition
 }

@@ -39,7 +39,8 @@ impl Persistence {
     /// 初始化本地表结构。
     ///
     /// `strategy_orders` 和 `auto_rule` 使用 JSON payload，是为了让领域结构演进时减少
-    /// 迁移成本；`order_attempts` 单独拆列，是因为恢复流程需要稳定按状态和订单号查询。
+    /// 迁移成本；`order_attempts` 和 `funding_attempts` 单独拆列，是因为恢复流程需要
+    /// 稳定按状态、订单号、资金动作引用和查询时间推进。
     fn init(&self) -> AppResult<()> {
         self.connection
             .execute_batch(
@@ -106,7 +107,7 @@ impl Persistence {
 
     /// 保存本地策略订单快照。
     ///
-    /// 订单必须已绑定真实交易所订单号或来自恢复查询结果。
+    /// 订单必须来自本机下单、恢复查询，或 Binance 当前持仓接管；不能由前端凭空创建。
     pub fn save_order(&self, order: &StrategyOrder) -> AppResult<()> {
         let payload =
             serde_json::to_string(order).map_err(|error| AppError::Storage(error.to_string()))?;
@@ -471,11 +472,13 @@ fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
 }
 
 fn parse_decimal(value: &str) -> AppResult<Decimal> {
+    // 恢复记录里的金额必须保持 Decimal 可解析；解析失败说明本地事实表已损坏。
     Decimal::from_str(value)
         .map_err(|error| AppError::Storage(format!("恢复记录金额无法解析：{error}")))
 }
 
 fn parse_nonnegative_u32(value: i64, field: &str) -> AppResult<u32> {
+    // send/query 计数只允许非负值，避免损坏数据绕过恢复重试上限。
     u32::try_from(value)
         .map_err(|error| AppError::Storage(format!("资金恢复记录 {field} 无法解析：{error}")))
 }

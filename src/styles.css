@@ -259,6 +259,7 @@ input {
   color: var(--muted);
 }
 
+/* 通用列表组：保持账户、待办、设置和义务仓等信息块的垂直节奏一致。 */
 .account-list,
 .task-list,
 .scan-list,
@@ -1576,6 +1577,7 @@ button.opportunity-row.selected:hover {
   gap: 10px;
 }
 
+/* 通用操作按钮组，允许换行以保护窄宽度下的按钮文字。 */
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -1678,6 +1680,7 @@ button.opportunity-row.selected:hover {
   overflow-wrap: anywhere;
 }
 
+/* 轻量条形图样式；真实风险/收益计算都在组件脚本或 Rust 快照中完成。 */
 .bar-list {
   display: grid;
   gap: 16px;
@@ -1803,6 +1806,7 @@ button.opportunity-row.selected:hover {
   background: rgba(245, 182, 37, 0.1);
 }
 
+/* 窄桌面优先保持可读性：模块改为 6 栅格，表格继续由横向滚动承接。 */
 @media (max-width: 1200px) {
   .view-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));

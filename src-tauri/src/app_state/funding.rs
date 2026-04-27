@@ -1,3 +1,8 @@
+//! 资金准备与补齐金额计算。
+//!
+//! 本模块只计算缺口、可赎回金额和 Binance 资金动作所需精度。真正的 Simple Earn
+//! 赎回、申购和 Universal Transfer 必须先写恢复记录，再由 `AppState` 串行发送。
+
 use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 
@@ -11,6 +16,9 @@ use crate::strategy;
 const SELL_PUT_REBALANCE_USDT_BUFFER: Decimal = dec!(1.10);
 const BINANCE_FUNDING_AMOUNT_SCALE: u32 = 8;
 
+/// 计算下单前需要补入期权保证金账户的 USDT 缺口。
+///
+/// 缺口同时覆盖 Binance 可用保证金需求和本地保证金占用率风控所需的权益缓冲。
 pub(super) fn option_funding_shortfall(
     account: &OptionAccountSnapshot,
     contract: &OptionContract,
@@ -34,6 +42,7 @@ pub(super) fn option_funding_shortfall(
     max_decimal(margin_shortfall, positive_decimal(target_equity - equity))
 }
 
+/// 计算期权保证金账户可归集回 Simple Earn 的闲置 USDT。
 pub(super) fn option_idle_usdt_sweep_amount(account: &OptionAccountSnapshot) -> Decimal {
     let Some(usdt) = account.asset("USDT") else {
         return Decimal::ZERO;
@@ -45,6 +54,7 @@ pub(super) fn option_idle_usdt_sweep_amount(account: &OptionAccountSnapshot) -> 
     min_decimal(usdt.available, excess_equity)
 }
 
+/// 选取 Binance 期权账户 USDT 权益口径，优先使用调整后权益。
 pub(super) fn option_usdt_equity(usdt: &crate::domain::OptionAssetBalance) -> Decimal {
     if usdt.adjusted_equity > Decimal::ZERO {
         usdt.adjusted_equity
@@ -53,6 +63,7 @@ pub(super) fn option_usdt_equity(usdt: &crate::domain::OptionAssetBalance) -> De
     }
 }
 
+/// 根据保证金占用率上限反推需要保留的账户权益。
 pub(super) fn risk_equity_target(margin: Decimal, max_usage_percent: Decimal) -> Decimal {
     if margin <= Decimal::ZERO || max_usage_percent <= Decimal::ZERO {
         return Decimal::ZERO;
@@ -60,6 +71,7 @@ pub(super) fn risk_equity_target(margin: Decimal, max_usage_percent: Decimal) ->
     margin * dec!(100) / max_usage_percent
 }
 
+/// 到期 ITM 后现货补齐所需资产；卖 Put 需要 USDT 缓冲，卖 Call 需要 BTC。
 pub(super) fn spot_rebalance_required_asset(order: &StrategyOrder) -> (&'static str, Decimal) {
     match order.direction {
         StrategyDirection::SellPut => (
@@ -70,10 +82,12 @@ pub(super) fn spot_rebalance_required_asset(order: &StrategyOrder) -> (&'static 
     }
 }
 
+/// 查询现货账户某资产可用余额，缺失资产按 0 处理。
 pub(super) fn spot_asset_free(account: &SpotAccountSnapshot, asset: &str) -> Decimal {
     account.asset(asset).map_or(Decimal::ZERO, |row| row.free)
 }
 
+/// 汇总 Simple Earn 活期且可赎回的指定资产数量。
 pub(super) fn flexible_earn_asset_amount(earn: &SimpleEarnSnapshot, asset: &str) -> Decimal {
     earn.balances
         .iter()
@@ -82,6 +96,7 @@ pub(super) fn flexible_earn_asset_amount(earn: &SimpleEarnSnapshot, asset: &str)
         .sum()
 }
 
+/// 资金准备时向上取整，避免小数截断导致真实可用余额仍不足。
 pub(super) fn round_up_funding_amount(value: Decimal) -> Decimal {
     if value <= Decimal::ZERO {
         return Decimal::ZERO;
@@ -89,6 +104,7 @@ pub(super) fn round_up_funding_amount(value: Decimal) -> Decimal {
     value.round_dp_with_strategy(2, RoundingStrategy::ToPositiveInfinity)
 }
 
+/// 资金归集/申购前向下对齐到 Binance 接受的小数位，避免超额划转或请求被拒。
 pub(super) fn round_down_funding_amount(value: Decimal) -> Decimal {
     if value <= Decimal::ZERO {
         return Decimal::ZERO;

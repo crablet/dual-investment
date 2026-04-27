@@ -69,6 +69,7 @@ export const api = {
   clearLogFiles: () => call<LogSnapshot>('clear_log_files'),
   listenOrderProgress: (handler: (event: OrderProgressEvent) => void) => {
     if (!isTauriRuntime()) {
+      // 普通浏览器只用于布局检查；没有事件源时返回空清理函数，而不是模拟进度事件。
       return Promise.resolve(() => undefined)
     }
     return listen<OrderProgressEvent>('order-progress', event => handler(event.payload))

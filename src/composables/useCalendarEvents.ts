@@ -78,11 +78,13 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
     const end = startOfDay(toValue(options.endDate))
     const rows: CalendarEvent[] = []
 
+    // 日历事件是快照的展示索引，不持久化；刷新后会重新从订单/恢复记录生成。
     for (const order of store.orders) {
       rows.push(...eventsFromOrder(order))
     }
 
     if (store.settings?.autoEnabled && store.autoRule?.enabled) {
+      // 自动复投计划事件只是提醒用户扫描时间，不表示当天一定会下单。
       rows.push(...autoEventsBetween(start, end, store.autoRule.schedule, store.autoRule.quantity, store.autoRule.minAnnualized))
     }
 
@@ -256,6 +258,7 @@ function autoEventsBetween(
 }
 
 function hasRebalanceEvent(order: StrategyOrder) {
+  // 只要出现过现货补齐订单引用或成交数量，就展示补齐事件，方便追踪 ITM 后续动作。
   return order.status === 'rebalanceFailed'
     || Boolean(order.spotOrderId)
     || Boolean(order.spotOrderStatus)
@@ -281,5 +284,6 @@ function isDateInRange(dateKey: string, start: Date, end: Date) {
 
 /** 判断 Decimal 字符串是否有非零值。 */
 function decimalStringHasValue(value: string) {
+  // Decimal 字符串可能带小数零；用正则避免为了布尔判断引入 number 精度问题。
   return !/^0(?:\.0+)?$/.test(value)
 }

@@ -1,3 +1,8 @@
+// 双币赢候选列表的前端交互状态。
+//
+// Rust 策略层已经完成实盘合约过滤、方向硬约束和推荐等级计算；这个 composable 只负责
+// 页面上的方向切换、到期/年化筛选、稳定排序、默认选中和下单卡片展示估算。
+
 import type { StrategyCandidate, StrategyDirection } from '@/types/domain'
 import { computed, reactive, shallowRef, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
@@ -11,6 +16,7 @@ interface CandidateFilterForm {
 type CandidateSortKey = 'strike' | 'annualized' | 'expiry' | 'limitPrice' | 'exerciseProbability'
 type CandidateSortDirection = 'asc' | 'desc'
 
+// 到期筛选按自然天展示；实际期权到期和下单请求仍使用 Rust 返回的精确 expiryAt。
 const dayMs = 86_400_000
 
 export const expiryFilters = [
@@ -40,6 +46,7 @@ const candidateSortDefaultDirection: Record<CandidateSortKey, CandidateSortDirec
 
 type ExpiryFilter = typeof expiryFilters[number]['id']
 
+/** 组合候选浏览、筛选、排序和右侧下单卡片所需的状态。 */
 export function useDualInvestmentCandidates() {
   const store = useAppStore()
   const selectedCandidateId = shallowRef<string>()
@@ -157,6 +164,7 @@ export function useDualInvestmentCandidates() {
   })
 
   const projectedBreakeven = computed(() => {
+    // 保本价预览帮助用户理解下单意图，不会写入订单事实；成交后以后端快照为准。
     if (!selectedCandidate.value)
       return 0
     const strike = Number(selectedCandidate.value.strike)
@@ -166,15 +174,17 @@ export function useDualInvestmentCandidates() {
       : strike + price
   })
 
-  const canSubmit = computed(() =>
-    Boolean(store.settings?.connected)
-    && Boolean(selectedCandidate.value)
-    && form.quantity >= 0.01,
-  )
+  const canSubmit = computed(() => {
+    // 前端只做基本可用性判断，真实合约精度、保证金和风控仍在 Rust 下单链路校验。
+    return Boolean(store.settings?.connected)
+      && Boolean(selectedCandidate.value)
+      && form.quantity >= 0.01
+  })
 
   watch(
     sortedCandidates,
     (candidates) => {
+      // 候选刷新或筛选变化后尽量保留用户选择；原选项消失时再自动选中第一项。
       if (selectedCandidateId.value && candidates.some(candidate => candidate.id === selectedCandidateId.value)) {
         return
       }
@@ -207,6 +217,7 @@ export function useDualInvestmentCandidates() {
   function selectCandidate(candidate: StrategyCandidate) {
     selectedCandidateId.value = candidate.id
     form.direction = candidate.direction
+    // 后端候选数量是 Binance 期权“张”口径，前端只承接默认值，真实校验仍在 Rust。
     form.quantity = Number(candidate.quantity)
   }
 
@@ -240,11 +251,13 @@ export function useDualInvestmentCandidates() {
   }
 }
 
+/** 计算展示用剩余天数；真实到期判断以后端 expiryAt 和结算扫描为准。 */
 function daysUntil(expiry: string) {
   const target = expiry.includes('T') ? new Date(expiry) : new Date(`${expiry}T00:00:00`)
   return Math.max(0, Math.ceil((target.getTime() - Date.now()) / dayMs))
 }
 
+/** 根据页面到期筛选项判断候选是否可见。 */
 function matchesExpiryFilter(candidate: StrategyCandidate, expiryFilter: ExpiryFilter) {
   const days = daysUntil(candidate.expiryAt)
   if (expiryFilter === 'lt3')
@@ -260,6 +273,7 @@ function matchesExpiryFilter(candidate: StrategyCandidate, expiryFilter: ExpiryF
   return true
 }
 
+/** 应用前端轻量筛选；这些筛选不会放宽 Rust 已执行的实盘硬约束。 */
 function matchesCandidateFilters(
   candidate: StrategyCandidate,
   candidateFilter: CandidateFilterForm,
@@ -283,6 +297,7 @@ function matchesCandidateFilters(
   return true
 }
 
+/** 读取排序字段的数值表示，非法值排到列表后面。 */
 function candidateSortNumber(candidate: StrategyCandidate, key: CandidateSortKey) {
   if (key === 'expiry') {
     return new Date(candidate.expiryAt).getTime()
@@ -295,6 +310,7 @@ function compareCandidateSortValue(
   right: StrategyCandidate,
   key: CandidateSortKey,
 ) {
+  // 非法数值排在后面，但不丢弃候选，方便用户看到后端返回的异常数据形态。
   const leftValue = candidateSortNumber(left, key)
   const rightValue = candidateSortNumber(right, key)
   if (!Number.isFinite(leftValue) && !Number.isFinite(rightValue))

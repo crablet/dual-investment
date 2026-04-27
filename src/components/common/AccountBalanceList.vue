@@ -1,7 +1,10 @@
+<!--
+账户余额聚合列表。
+
+把现货、期权保证金和 Simple Earn 同名资产按 ticker 汇总，hover 展示真实来源数量。
+-->
 <script setup lang="ts">
 import type { BalanceRow, DecimalString } from '@/types/domain'
-// 账户余额聚合列表。
-// 把现货、期权保证金和 Simple Earn 同名资产按 ticker 汇总，hover 展示真实来源数量。
 import { NTooltip } from 'naive-ui'
 import { computed } from 'vue'
 import { useFormat } from '@/composables/useFormat'
@@ -57,6 +60,7 @@ function aggregateBalances(balances: BalanceRow[]): AggregatedBalance[] {
   return [...grouped.entries()].map(([asset, details]) => ({
     asset,
     details,
+    // 同名资产可能来自现货、期权保证金和 Simple Earn。列表展示聚合值，tooltip 保留来源明细。
     free: sumDecimalStrings(details.map(detail => detail.free)),
     usdtValue: sumDecimalStrings(details.map(detail => detail.usdtValue)),
     usdtValueKnown: details.every(detail => detail.usdtValueKnown),

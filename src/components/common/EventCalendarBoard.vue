@@ -1,7 +1,11 @@
+<!--
+事件日历看板。
+
+组件只负责月份、类型筛选和详情列表交互；事件本身由 `useCalendarEvents`
+从当前快照派生，不从日志文件或其他旁路数据源推断。
+-->
 <script setup lang="ts">
 import type { CalendarEvent, CalendarEventTone, CalendarEventType } from '@/composables/useCalendarEvents'
-// 事件日历看板。
-// 组件只负责月份、类型筛选和详情列表交互；事件本身由 `useCalendarEvents` 从快照派生。
 import {
   ChevronLeft,
   ChevronRight,
@@ -10,7 +14,6 @@ import {
 import { NButton, NIcon } from 'naive-ui'
 import { computed, shallowRef } from 'vue'
 import {
-
   calendarEventTypes,
   useCalendarEvents,
 } from '@/composables/useCalendarEvents'
@@ -38,12 +41,15 @@ const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '�
 const today = new Date()
 const todayKey = formatDateKey(today)
 
+// 月历状态只控制可见窗口和选中日期，不会创建或修改任何真实待办。
 const currentMonth = shallowRef(startOfMonth(today))
 const selectedDate = shallowRef(todayKey)
 const activeType = shallowRef<CalendarEventType | 'all'>('all')
 
 const visibleStart = computed(() => startOfWeek(currentMonth.value))
 const visibleEnd = computed(() => addDays(visibleStart.value, 41))
+
+// 只请求当前 6 周网格范围内的派生事件，避免模板里重复扫描全量订单/恢复记录。
 const { events } = useCalendarEvents({
   startDate: visibleStart,
   endDate: visibleEnd,
@@ -57,6 +63,7 @@ const filteredEvents = computed(() => {
 })
 
 const eventsByDate = computed(() => {
+  // 先按当前筛选类型分组，右侧详情和月历角标才能保持同一口径。
   const map = new Map<string, CalendarEvent[]>()
   for (const event of filteredEvents.value) {
     const rows = map.get(event.date) ?? []
@@ -116,6 +123,7 @@ function selectToday() {
 }
 
 function setCurrentMonth(date: Date) {
+  // 切到本月时回到今天；切到其他月份时选中月初，避免保留一个不可见的旧日期。
   currentMonth.value = startOfMonth(date)
   selectedDate.value = isSameMonth(today, currentMonth.value)
     ? todayKey

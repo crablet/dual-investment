@@ -1,7 +1,10 @@
+<!--
+收益/资产构成环形图。
+
+输入项是展示模型；组件负责稳定排序、稳定取色和交互态，不负责业务归因。
+-->
 <script setup lang="ts">
 import type { PnlBreakdownItem } from '@/types/view'
-// 收益/资产构成环形图。
-// 输入项是展示模型；组件负责稳定排序、稳定取色和交互态，不负责业务归因。
 import { computed, shallowRef } from 'vue'
 import { isNegativeDecimalString, isZeroDecimalString, sumDecimalStrings } from '@/utils/decimal'
 
@@ -39,6 +42,7 @@ const props = withDefaults(defineProps<{
 
 const hoverKey = shallowRef<string>()
 
+// 业务上有稳定含义的标签固定顺序，避免接口返回顺序变化导致扇区位置跳动。
 const stableLabelOrder = new Map<string, number>([
   ['期权权利金', 10],
   ['现货补齐浮动盈亏', 20],
@@ -99,6 +103,7 @@ const sortedItems = computed(() => {
       keyCounts.set(baseKey, occurrence + 1)
       return {
         ...item,
+        // 渲染 key 必须唯一，但颜色和排序仍使用业务 key，避免同资产拆分时颜色漂移。
         key: occurrence === 0 ? baseKey : `${baseKey}#${occurrence + 1}`,
         colorKey: baseKey,
         sortKey: baseKey,
@@ -116,9 +121,10 @@ const sortedItems = computed(() => {
     })
 })
 
-const absoluteTotal = computed(() =>
-  sortedItems.value.reduce((sum, item) => sum + Math.abs(decimalToNumber(item.value)), 0),
-)
+const absoluteTotal = computed(() => {
+  // 饼图用绝对值计算占比，负收益仍以颜色/文案标识，不让负数抵消总占比。
+  return sortedItems.value.reduce((sum, item) => sum + Math.abs(decimalToNumber(item.value)), 0)
+})
 
 const hasItems = computed(() => absoluteTotal.value > 0)
 
@@ -178,6 +184,7 @@ const centerDisplay = computed(() => {
 })
 
 function setHover(key: string) {
+  // 只保留临时 hover/focus 状态；不支持点击后永久选中，鼠标离开即可恢复总览。
   hoverKey.value = key
 }
 
@@ -209,6 +216,7 @@ function colorFromLabel(label: string) {
   for (const char of label) {
     hash = (hash * 31 + char.charCodeAt(0)) >>> 0
   }
+  // 未登记的新资产也用确定性 hash 取色，刷新或接口顺序变化不会改变颜色。
   return fallbackPalette[hash % fallbackPalette.length]
 }
 
@@ -227,6 +235,7 @@ function formatValue(value: string) {
 }
 
 function svgNumber(value: number) {
+  // SVG dash 值保留有限小数，减少刷新时由浮点尾差造成的属性抖动。
   return Number(value.toFixed(4)).toString()
 }
 </script>

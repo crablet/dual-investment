@@ -1,7 +1,10 @@
+<!--
+总览视图。
+
+组合账户、收益、待办、事件日历和活跃策略；具体数据都来自 Pinia 快照派生。
+-->
 <script setup lang="ts">
 import type { AppViewId } from '@/stores/app'
-// 总览视图。
-// 组合账户、收益、待办、事件日历和活跃策略；具体数据都来自 Pinia 快照派生。
 import { computed } from 'vue'
 import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
@@ -20,8 +23,11 @@ interface PendingTask {
 
 const store = useAppStore()
 
+// 总览只展示最近几条活跃策略作为入口；完整订单事实仍在订单页和后端快照中。
 const activeStrategies = computed(() => store.runningOrders.slice(0, 4))
+
 const expiringOrdersCount = computed(() => {
+  // 7 天内到期是看板提醒口径，不参与结算判断；结算扫描只看 Rust 的 expiryAt。
   const today = new Date()
   const threshold = new Date(today.getTime() + 7 * 86400_000)
   return store.orders.filter((order) => {
@@ -29,7 +35,9 @@ const expiringOrdersCount = computed(() => {
     return expiry >= today && expiry <= threshold
   }).length
 })
+
 const runtimeHealthAttention = computed(() => {
+  // health 只表示后台同步运行状况。订单、资金和日历事实不从 health 推断。
   const health = store.health
   return Boolean(
     health
@@ -37,6 +45,7 @@ const runtimeHealthAttention = computed(() => {
     && (health.status === 'degraded' || health.status === 'attention'),
   )
 })
+
 const runtimeHealthText = computed(() => {
   const health = store.health
   if (!health) {
@@ -47,6 +56,7 @@ const runtimeHealthText = computed(() => {
   }
   return `后台同步已跳过 ${health.skippedTicks} 轮`
 })
+
 // 待办只从当前快照派生，不新增独立任务存储，避免和订单/候选状态漂移。
 const pendingTasks = computed<PendingTask[]>(() => {
   const tasks: PendingTask[] = [
@@ -81,6 +91,7 @@ const pendingTasks = computed<PendingTask[]>(() => {
   ]
   return tasks.filter(item => item.visible)
 })
+
 const runtimeHealthLabel = computed(() => {
   const health = store.health
   if (!health || health.status === 'idle')
@@ -91,7 +102,9 @@ const runtimeHealthLabel = computed(() => {
     return '需要关注'
   return '待处理'
 })
+
 const autoStatusItems = computed(() => [
+  // 这里是导航状态摘要，不是自动策略执行条件；真正门禁仍在 Rust 后台 tick 中判断。
   {
     label: '后台同步',
     value: runtimeHealthLabel.value,

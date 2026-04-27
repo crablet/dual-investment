@@ -19,12 +19,19 @@ export type StrategyStatus
     | 'expired'
     | 'partiallyFilled'
     | 'rebalanceFailed'
+/** 候选推荐等级，只用于前端筛选和提示，不代表下单许可。 */
 export type RecommendationLevel = 'recommended' | 'watch' | 'reject'
+/** 风险提醒严重程度；具体风险规则由 Rust Decimal 规则计算。 */
 export type RiskSeverity = 'low' | 'medium' | 'high'
+/** 文件日志等级；日志内容必须是后端脱敏摘要。 */
 export type LogLevel = 'info' | 'warn' | 'error'
+/** 手动下单进度阶段，和 Rust 发出的脱敏进度事件保持一致。 */
 export type OrderProgressStage = 'validate' | 'funding' | 'risk' | 'submit' | 'persist'
+/** 手动下单进度状态，仅用于 UI 反馈，不作为订单事实。 */
 export type OrderProgressStatus = 'pending' | 'running' | 'success' | 'error'
+/** 后台同步健康状态，用于提醒和观测，不参与订单/资金事实判断。 */
 export type RuntimeHealthStatus = 'idle' | 'healthy' | 'degraded' | 'attention'
+/** 本地跟踪订单来源；接管仓位和本机下单不能用订单号是否存在来推断。 */
 export type StrategyOrderSource = 'liveOrder' | 'adoptedPosition'
 
 /** 前端可见运行设置，不包含明文 API Secret。 */

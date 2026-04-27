@@ -1,3 +1,8 @@
+//! Binance JSON 响应解析。
+//!
+//! 本模块把交易所返回的字段转换为领域 DTO，并在缺少关键字段时返回明确错误。解析阶段
+//! 不保留原始响应体，金额字段统一走 `Decimal`。
+
 use std::{collections::HashMap, str::FromStr};
 
 use chrono::{DateTime, Utc};
@@ -293,6 +298,7 @@ fn parse_simple_earn_redemption_record(value: &Value) -> AppResult<SimpleEarnRed
 }
 
 fn decimal_from_any_field(value: &Value, keys: &[&str]) -> AppResult<Option<Decimal>> {
+    // Binance Simple Earn 不同端点对同一金额使用不同字段名，按优先级取第一个有效值。
     for key in keys {
         if let Some(amount) = optional_decimal_field(value, key)? {
             return Ok(Some(amount));
@@ -302,6 +308,7 @@ fn decimal_from_any_field(value: &Value, keys: &[&str]) -> AppResult<Option<Deci
 }
 
 fn date_time_from_any_millis_field(value: &Value, keys: &[&str]) -> Option<DateTime<Utc>> {
+    // 历史记录时间字段也会随接口变化；解析失败时返回 None，让调用方保留可选时间语义。
     keys.iter().find_map(|key| {
         value
             .get(*key)
@@ -374,6 +381,7 @@ fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
 }
 
 fn exchange_info_filter<'a>(value: &'a Value, filter_type: &str) -> AppResult<&'a Value> {
+    // 价格 tickSize 和数量 stepSize 是下单硬约束，缺失时必须暴露为数据契约错误。
     value
         .get("filters")
         .and_then(Value::as_array)
@@ -466,6 +474,7 @@ pub(super) fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
 
 /// 从现货订单累计成交额反推均价。
 fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> Option<Decimal> {
+    // 现货市价单常只返回累计成交额，均价需要用 quoteQty / executedQty 反推。
     if executed_qty <= Decimal::ZERO {
         return None;
     }
@@ -486,6 +495,7 @@ fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> Option<D
 
 /// 从现货 fills 汇总手续费。
 fn fee_from_fills(value: &Value) -> Option<Decimal> {
+    // 现货 fills 里可能逐笔返回手续费；这里只汇总数值，不保留逐笔原始响应。
     value
         .get("fills")
         .and_then(Value::as_array)

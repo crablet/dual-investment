@@ -81,6 +81,7 @@ fn ensure_keyring_store() -> AppResult<()> {
     if KEYRING_STORE_READY.get().is_some() {
         return Ok(());
     }
+    // 初始化失败不写入 OnceLock，后续连接或读取凭据时仍可重试系统 keyring。
     configure_keyring_store().map_err(AppError::Config)?;
     let _ = KEYRING_STORE_READY.set(());
     Ok(())

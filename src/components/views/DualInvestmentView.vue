@@ -1,6 +1,9 @@
+<!--
+双币赢工作台。
+
+统一承载候选浏览、手动下单和自动复投规则；没有独立自动复投页面或 mock 数据路径。
+-->
 <script setup lang="ts">
-// 双币赢工作台。
-// 统一承载候选浏览、手动下单和自动复投规则；没有独立自动复投页面或 mock 数据路径。
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -87,6 +90,7 @@ watchEffect(() => {
   if (!store.autoRule) {
     return
   }
+  // 后端 DTO 用 Decimal 字符串承接金融值；本地表单转 number 只是为了 Naive UI 控件交互。
   Object.assign(ruleForm, {
     ...store.autoRule,
     quantity: Number(store.autoRule.quantity),
@@ -97,6 +101,7 @@ watchEffect(() => {
 })
 
 function signedPercent(value: string | number) {
+  // 展示用百分比允许 number；真实年化和风控阈值提交前会回到字符串契约。
   const numeric = Number(value)
   if (!Number.isFinite(numeric))
     return '--'

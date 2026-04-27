@@ -1,3 +1,8 @@
+//! 运行期辅助函数。
+//!
+//! 这里封装 Binance 客户端重建、异步查询任务、计划时间解析和客户端订单号生成。
+//! 它只处理内存中的运行状态，不直接读取或写入 keyring。
+
 use std::future::Future;
 
 use chrono::{NaiveTime, Utc};
@@ -27,6 +32,7 @@ pub(super) async fn verify_binance_access(client: &BinanceClient) -> AppResult<(
     Ok(())
 }
 
+/// 在 Tauri 异步运行时里启动一个 Binance 查询任务。
 pub(super) fn spawn_binance_request<T, F>(
     future: F,
 ) -> tauri::async_runtime::JoinHandle<AppResult<T>>

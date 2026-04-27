@@ -1,9 +1,12 @@
+<!--
+风险控制视图。
+
+展示 Rust 风控快照和义务仓暴露概览；下单拦截仍由 Rust 在实盘下单前执行。
+-->
 <script setup lang="ts">
 import type { RiskSeverity } from '@/types/domain'
 import { Activity, AlertTriangle, Gauge, ShieldCheck } from '@lucide/vue'
 import { NButton, NIcon, NProgress, NTag } from 'naive-ui'
-// 风险控制视图。
-// 展示 Rust 风控快照和义务仓暴露概览；下单拦截仍由 Rust 在实盘下单前执行。
 import { computed } from 'vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
@@ -15,6 +18,7 @@ const { money, percent } = useFormat()
 const riskLevelLabel = computed(() => store.risk?.level ?? '未同步')
 
 const exposureRows = computed(() => {
+  // 暴露条形图用于扫描相对大小，风控拦截仍以后端 RiskSnapshot 和下单前校验为准。
   const rows = [
     { label: '卖出看涨义务仓', value: exposureByDirection('sellCall') },
     { label: '卖出看跌义务仓', value: exposureByDirection('sellPut') },
@@ -26,7 +30,11 @@ const exposureRows = computed(() => {
   }))
 })
 
-/** 计算方向维度的名义暴露，用于 UI 条形图。 */
+/**
+ * 计算方向维度的名义暴露，用于 UI 条形图。
+ *
+ * Number 只用于展示比例；不要把这里的结果作为保证金或真实风险计算输入。
+ */
 function exposureByDirection(direction: 'sellPut' | 'sellCall') {
   return store.orders
     .filter(order => order.direction === direction)

@@ -483,6 +483,7 @@ impl BinanceClient {
         amount_keys: &[&str],
         flexible: bool,
     ) -> AppResult<Vec<SimpleEarnAssetBalance>> {
+        // Simple Earn 活期和定期接口分页结构相近，但金额字段不同；调用方传入候选字段名。
         let mut balances = Vec::new();
         let mut current = 1_u32;
         let size = 100_u32;
@@ -525,6 +526,7 @@ impl BinanceClient {
         params: &[(String, String)],
     ) -> AppResult<Value> {
         let signed = self.signed_params(params.to_vec())?;
+        // 签名 query 只交给 reqwest 发送；响应 body 立即解码，不向日志或上层返回原文。
         let response = self
             .http
             .get(format!("{base}{path}"))
@@ -542,6 +544,7 @@ impl BinanceClient {
     }
 
     async fn public_get_once(&self, base: &str, path: &str) -> AppResult<Value> {
+        // 公共行情查询没有凭据，但仍统一走 decode_response，避免错误文本夹带完整响应体。
         let response = self
             .http
             .get(format!("{base}{path}"))
@@ -561,6 +564,7 @@ impl BinanceClient {
         F: FnMut() -> Fut,
         Fut: Future<Output = AppResult<T>>,
     {
+        // 只给查询类请求短退避重试；下单和资金 POST 只允许时间戳校正后重试一次。
         let mut synced_time = false;
         let mut transient_failures = 0_usize;
         loop {
@@ -583,6 +587,7 @@ impl BinanceClient {
     }
 
     async fn sync_server_time(&self) -> AppResult<()> {
+        // Binance 时间戳错误通常来自本机时钟偏移。只缓存偏移量，不修改系统时间。
         let response = self
             .public_get_once(&self.spot_base, "/api/v3/time")
             .await?;
@@ -619,6 +624,7 @@ impl BinanceClient {
         params: &[(String, String)],
     ) -> AppResult<ExchangeOrderAck> {
         let signed = self.signed_params(params.to_vec())?;
+        // POST 可能产生真实订单，因此这里只发送一次；重试策略由 signed_post 外层严格控制。
         let response = self
             .http
             .post(format!("{base}{path}"))
@@ -662,6 +668,7 @@ impl BinanceClient {
         params: &[(String, String)],
     ) -> AppResult<Value> {
         let signed = self.signed_params(params.to_vec())?;
+        // 资金 POST 同样不能盲目重放；返回 JSON 后只提取交易所引用或状态字段。
         let response = self
             .http
             .post(format!("{base}{path}"))
@@ -698,6 +705,7 @@ impl BinanceClient {
     }
 
     fn funding_amount_param(action: &str, amount: Decimal) -> AppResult<String> {
+        // Binance 资金接口对小数位更敏感，调用方必须先按动作方向完成取整。
         let normalized = amount.normalize();
         if normalized <= Decimal::ZERO {
             return Err(AppError::Config(format!(
@@ -738,6 +746,7 @@ impl BinanceClient {
 }
 
 fn response_id(value: &Value, key: &str, operation: &str) -> AppResult<String> {
+    // 资金接口成功后必须拿到交易所引用，后续恢复只能靠它或脱敏匹配条件查询历史。
     value
         .get(key)
         .map(value_to_string)

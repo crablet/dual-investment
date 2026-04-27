@@ -1,7 +1,10 @@
+<!--
+根组件负责全局 UI provider、异步视图路由和后台静默同步。
+
+业务状态全部放在 Pinia store，视图组件只消费当前快照和触发显式操作。
+-->
 <script setup lang="ts">
 import type { GlobalThemeOverrides } from 'naive-ui'
-// 根组件负责全局 UI provider、异步视图路由和后台静默同步。
-// 业务状态全部放在 Pinia store，视图组件只消费当前快照和触发显式操作。
 import { darkTheme, dateZhCN, NConfigProvider, NDialogProvider, NMessageProvider, zhCN } from 'naive-ui'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue'
 import AppShell from '@/components/layout/AppShell.vue'
@@ -100,6 +103,12 @@ function scheduleBackgroundSync(delay = syncDelay) {
   }, delay)
 }
 
+/**
+ * 后台同步调度器。
+ *
+ * 同步只刷新快照、推进恢复和尝试已保存凭据重连；它不能自动开启策略或绕过用户确认。
+ * 连续失败时增加间隔，成功后恢复基础轮询，避免网络抖动时堆积 IPC 请求。
+ */
 async function runBackgroundSync() {
   syncTimer = undefined
   if (store.isLoading('snapshot') || store.isLoading('connect')) {

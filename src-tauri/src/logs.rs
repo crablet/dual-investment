@@ -157,6 +157,7 @@ impl LogStore {
     }
 
     fn recent_entries(paths: &[PathBuf], limit: usize) -> AppResult<Vec<LogEntry>> {
+        // 文件名倒序读取，再把单文件内容反转，得到最新日志优先的设置页列表。
         let mut entries = Vec::new();
         for path in paths {
             let mut file_entries = read_entries(path)?;
@@ -181,6 +182,7 @@ fn read_entries(path: &Path) -> AppResult<Vec<LogEntry>> {
         if line.trim().is_empty() {
             continue;
         }
+        // 单行 JSON 损坏时跳过该行，避免一个坏日志条目让设置页整体打不开。
         if let Ok(entry) = serde_json::from_str::<LogEntry>(&line) {
             entries.push(entry);
         }

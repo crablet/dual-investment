@@ -165,6 +165,7 @@ export const useAppStore = defineStore('app', () => {
     task: () => Promise<T>,
     options: RunOptions = {},
   ): Promise<T | undefined> {
+    // 前台错误和后台错误分开保存：静默刷新/重连失败不应覆盖用户正在处理的表单或交易错误。
     const silent = options.silent ?? false
     setPending(key, 1)
     if (silent) {
@@ -223,6 +224,7 @@ export const useAppStore = defineStore('app', () => {
       return
     }
     try {
+      // 普通浏览器环境下 `api.listenOrderProgress` 会返回空取消函数，不模拟真实下单进度。
       unlistenOrderProgress.value = await api.listenOrderProgress(applyOrderProgressEvent)
     }
     catch (caught) {
@@ -246,6 +248,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function applyOrderProgressEvent(event: OrderProgressEvent) {
+    // Tauri 事件可能先于 `placeStrategy` 的本地进度对象到达，先建临时视图再等最终快照校正。
     const current = orderProgress.value?.flowId === event.flowId
       ? orderProgress.value
       : {
@@ -279,6 +282,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function finishOrderProgressSuccess(flowId: string, order: StrategyOrder) {
+    // 进度面板只做即时反馈；订单事实仍以随后刷新到的 Rust 快照和本地恢复记录为准。
     const now = new Date().toISOString()
     const current = orderProgress.value?.flowId === flowId
       ? orderProgress.value
@@ -374,6 +378,7 @@ export const useAppStore = defineStore('app', () => {
     const next = await run('connect', () => api.connectSavedBinance(), options)
     patchSettings(next)
     if (next?.connected) {
+      // 自动重连只恢复连接和同步快照，不会开启自动策略或发起资金/订单动作。
       resetAutoReconnect()
       await syncLiveState(options)
       return true
@@ -405,6 +410,7 @@ export const useAppStore = defineStore('app', () => {
     const message = backgroundError.value ?? '自动连接 Binance 失败'
     lastAutoReconnectError.value = message
     if (isPermanentSavedConnectionError(message)) {
+      // 凭据缺失、权限不足等人工错误需要暂停，避免后台持续打扰 Binance 接口。
       autoReconnectState.value = 'paused'
       autoReconnectDelayMs.value = reconnectBackoffDelays.at(-1) ?? reconnectBackoffDelays[0]
       return false
@@ -476,6 +482,7 @@ export const useAppStore = defineStore('app', () => {
     const next = await run('settlement', () => api.runSettlementScan())
     if (next && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: mergeOrders(next, snapshot.value.orders) }
+      // 结算扫描可能产生风险状态、恢复记录或资金结果，完成后拉完整快照校正局部合并。
       await refresh()
     }
   }
@@ -492,6 +499,7 @@ export const useAppStore = defineStore('app', () => {
     const order = await run('recover', () => api.recoverOrderAttempt(attemptId))
     if (order && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: mergeOrders([order], snapshot.value.orders) }
+      // 订单恢复先由 Rust 重新查询 Binance 事实；前端只刷新展示，不触发重放下单。
       await refresh()
     }
   }
@@ -499,6 +507,7 @@ export const useAppStore = defineStore('app', () => {
   async function recoverFundingAttempt(attemptId: string) {
     const attempt = await run('recover', () => api.recoverFundingAttempt(attemptId))
     if (attempt) {
+      // 资金恢复会阻断后续自动资金动作，直到后端确认终态或人工解除 blocked。
       await refresh()
     }
   }
@@ -511,6 +520,7 @@ export const useAppStore = defineStore('app', () => {
         confirmManual: true,
       }))
     if (attempt) {
+      // 人工解除只更新恢复记录；真实 Simple Earn/Universal Transfer 请求不能由这里重发。
       await refresh()
     }
   }
@@ -525,6 +535,7 @@ export const useAppStore = defineStore('app', () => {
   async function adoptOptionPositions(request: AdoptOptionPositionsRequest) {
     const orders = await run('adopt', () => api.adoptOptionPositions(request))
     if (orders && snapshot.value) {
+      // 接管只把 Binance 当前义务仓转成本地跟踪订单，不混入 order_attempts 恢复记录。
       snapshot.value = { ...snapshot.value, orders: mergeOrders(orders, snapshot.value.orders) }
       adoptableOptionPositions.value = adoptableOptionPositions.value.map(row =>
         request.symbols.includes(row.symbol)
@@ -547,6 +558,7 @@ export const useAppStore = defineStore('app', () => {
       return
     }
     finishOrderProgressError(flowId, error.value ?? '下单失败，请查看错误提示和恢复记录')
+    // 下单失败后的静默刷新用于暴露后端保存的恢复记录；不在前端重试真实订单。
     await refresh({ silent: true })
   }
 
@@ -561,6 +573,7 @@ export const useAppStore = defineStore('app', () => {
     const next = await run('rule', () => api.toggleAutoStrategy(request))
     patchSettings(next)
     if (snapshot.value?.autoRule) {
+      // 前端先同步开关展示；二次确认、待恢复阻断和真实执行门禁都在 Rust 侧兜底。
       snapshot.value = {
         ...snapshot.value,
         autoRule: { ...snapshot.value.autoRule, enabled: request.enabled },

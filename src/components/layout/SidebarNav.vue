@@ -1,8 +1,11 @@
+<!--
+侧边导航。
+
+点击入口统一调用 `store.openView`，让重复点击也能触发对应页面刷新逻辑。
+-->
 <script setup lang="ts">
 import type { Component } from 'vue'
 import type { AppViewId } from '@/stores/app'
-// 侧边导航。
-// 点击入口统一调用 `store.openView`，让重复点击也能触发对应页面刷新逻辑。
 import {
   BarChart3,
   Bitcoin,

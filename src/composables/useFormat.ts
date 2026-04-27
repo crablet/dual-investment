@@ -39,6 +39,7 @@ function percentFormatter(digits: number) {
 
 /** 返回组件常用的格式化函数和状态映射。 */
 export function useFormat() {
+  // 这里的 Number 转换只用于 Intl 展示格式化；不要把返回值再作为计算输入。
   const money = (value: string | number, currency = 'USDT') =>
     `${moneyFormatter.format(Number(value))} ${currency}`
 

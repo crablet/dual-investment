@@ -1,3 +1,9 @@
+<!--
+设置页日志面板。
+
+日志只用于本机排障展示，删除日志不会影响订单、恢复记录或 keyring 凭据。所有文件操作
+都通过 Rust command 执行，普通浏览器环境不提供 fallback。
+-->
 <script setup lang="ts">
 import type { LogFileInfo } from '@/types/domain'
 import { FileText, FolderOpen, RefreshCw, Trash2 } from '@lucide/vue'
@@ -22,6 +28,7 @@ async function clearLogs() {
   await logs.clear()
 }
 
+/** 以二进制单位格式化文件大小，避免日志文件列表出现长数字。 */
 function fileSizeLabel(bytes: number) {
   if (bytes < 1024) {
     return `${bytes} B`
@@ -32,6 +39,7 @@ function fileSizeLabel(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+/** 日志文件可能来自旧版本或异常状态，缺少修改时间时使用明确占位。 */
 function modifiedLabel(file: LogFileInfo) {
   return file.modifiedAt ? localDateTimeLabel(file.modifiedAt) : '暂无修改时间'
 }

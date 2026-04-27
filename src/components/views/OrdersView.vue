@@ -1,3 +1,8 @@
+<!--
+策略订单视图。
+
+展示真实订单、同步/结算操作和恢复记录；恢复动作会回到 Rust 重新查询 Binance。
+-->
 <script setup lang="ts">
 import type {
   FundingAttemptManualResolution,
@@ -5,8 +10,6 @@ import type {
   OrderAttemptView,
   StrategyOrder,
 } from '@/types/domain'
-// 策略订单视图。
-// 展示真实订单、同步/结算操作和恢复记录；恢复动作会回到 Rust 重新查询 Binance。
 import { CheckCircle2, RefreshCw, ScanLine, XCircle } from '@lucide/vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
 import { computed, shallowRef, watchEffect } from 'vue'
@@ -48,14 +51,17 @@ watchEffect(() => {
 })
 
 const selected = computed(() => store.orders.find(order => order.id === selectedId.value) ?? store.orders[0])
-const totalPremium = computed(() =>
-  store.orders.reduce((sum, order) => sum + Number(order.premium), 0),
-)
+const totalPremium = computed(() => {
+  // 这里只是订单页摘要展示；收益报表事实来自 Rust 返回的 pnl 快照。
+  return store.orders.reduce((sum, order) => sum + Number(order.premium), 0)
+})
 const todayExpiryCount = computed(() => {
+  // “今日到期”按本地日期展示，真实结算触发仍以后端 expiryAt 毫秒时间戳为准。
   const today = localDateKey(new Date().toISOString())
   return store.orders.filter(order => localDateKey(order.expiryAt) === today).length
 })
 const recoveryRows = computed(() => [
+  // 两类恢复记录共用列表只是为了页面扫描；执行时仍分派到不同后端 command。
   ...store.orderAttempts.map(orderAttemptRecoveryRow),
   ...store.fundingAttempts.map(fundingAttemptRecoveryRow),
 ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 10))
@@ -96,6 +102,8 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
 }
 
 function orderAttemptRecoveryRow(attempt: OrderAttemptView): RecoveryRow {
+  // 订单恢复和资金恢复共用表格模型，但操作语义不同：订单恢复会重新查订单，
+  // 资金恢复会查 Binance 历史或等待人工核对。
   return {
     id: attempt.id,
     source: 'order',
@@ -114,6 +122,7 @@ function orderAttemptRecoveryRow(attempt: OrderAttemptView): RecoveryRow {
 }
 
 function fundingAttemptRecoveryRow(attempt: FundingAttemptView): RecoveryRow {
+  // 资金恢复行直接展示后端给出的 factSource/nextAction，前端不推断 Binance 历史结果。
   return {
     id: attempt.id,
     source: 'funding',
@@ -140,10 +149,12 @@ function recoveryStatusLabel(row: RecoveryRow) {
 }
 
 function canRecover(row: RecoveryRow) {
+  // 终态记录只展示事实，不再触发恢复；blocked 资金记录仍允许“重查”。
   return !['persisted', 'spot_persisted', 'confirmed', 'failed'].includes(row.status)
 }
 
 function canManuallyResolve(row: RecoveryRow) {
+  // 只有 blocked 资金动作允许人工解除阻断，订单恢复不能被前端直接改终态。
   return row.source === 'funding' && row.status === 'blocked'
 }
 

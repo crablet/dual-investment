@@ -1,3 +1,8 @@
+//! Binance 外部期权持仓接管辅助逻辑。
+//!
+//! 接管只允许从 Binance 当前义务仓和合约信息创建本地跟踪订单，不会重放历史下单，
+//! 也不会把接管状态混入 `order_attempts` 恢复记录。
+
 use std::collections::HashSet;
 
 use chrono::Utc;
@@ -26,6 +31,7 @@ pub(super) fn normalized_unique_symbols(symbols: &[String]) -> AppResult<Vec<Str
     Ok(normalized)
 }
 
+/// 构造前端接管列表中的一行，包含当前是否可接管和原因。
 pub(super) fn adoptable_position_view(
     position: &OptionPosition,
     contract: &OptionContract,
@@ -51,6 +57,7 @@ pub(super) fn adoptable_position_view(
     })
 }
 
+/// 接管提交前再次校验仓位仍然满足接管条件。
 pub(super) fn ensure_position_can_be_adopted(
     position: &OptionPosition,
     contract: &OptionContract,
@@ -69,6 +76,7 @@ pub(super) fn ensure_position_can_be_adopted(
     }
 }
 
+/// 判断当前 Binance 持仓是否可接管，并给出可展示原因。
 pub(super) fn adoptable_position_state(
     position: &OptionPosition,
     contract: &OptionContract,
@@ -95,6 +103,7 @@ pub(super) fn adoptable_position_state(
     (true, "可接管".to_string())
 }
 
+/// 判断同一合约是否已经存在未终态的本地跟踪订单。
 pub(super) fn has_tracked_option_symbol(orders: &[StrategyOrder], option_symbol: &str) -> bool {
     orders.iter().any(|order| {
         order.option_symbol == option_symbol
@@ -108,6 +117,7 @@ pub(super) fn has_tracked_option_symbol(orders: &[StrategyOrder], option_symbol:
     })
 }
 
+/// 从 Binance 合约方向映射成本地策略方向。
 pub(super) fn direction_from_contract(contract: &OptionContract) -> AppResult<StrategyDirection> {
     match contract.side.as_str() {
         "PUT" => Ok(StrategyDirection::SellPut),
@@ -118,6 +128,7 @@ pub(super) fn direction_from_contract(contract: &OptionContract) -> AppResult<St
     }
 }
 
+/// 仅接管卖方义务仓，避免把买方权利仓误纳入到期补齐流程。
 pub(super) fn is_short_position(position: &OptionPosition) -> bool {
     matches!(
         position.side.to_ascii_uppercase().as_str(),

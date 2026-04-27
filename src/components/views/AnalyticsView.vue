@@ -1,6 +1,9 @@
+<!--
+收益分析视图。
+
+使用订单和收益快照做展示维度拆分，不在前端重算真实 PnL 事实。
+-->
 <script setup lang="ts">
-// 收益分析视图。
-// 使用订单和收益快照做展示维度拆分，不在前端重算真实 PnL 事实。
 import { computed } from 'vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
@@ -10,6 +13,7 @@ const store = useAppStore()
 const { money, percent } = useFormat()
 
 const strategyPerformance = computed(() => {
+  // 条形图只比较当前前端订单快照中的权利金展示宽度，不替代 Rust 的收益报表事实。
   const rows = [
     { label: '卖 Put 抄底', value: totalPremiumByDirection('sellPut') },
     { label: '卖 Call 止盈', value: totalPremiumByDirection('sellCall') },
@@ -21,7 +25,11 @@ const strategyPerformance = computed(() => {
   }))
 })
 
-/** 按策略方向汇总权利金，用于图形展示。 */
+/**
+ * 按策略方向汇总权利金，用于图形展示。
+ *
+ * 这里转成 number 只影响 UI 宽度和标签格式；真实金额仍以后端 Decimal 字符串为准。
+ */
 function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
   return store.orders
     .filter(order => order.direction === direction)

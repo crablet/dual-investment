@@ -1,7 +1,10 @@
+<!--
+手动下单进度面板。
+
+只展示前端接收到的脱敏阶段事件；真实订单事实仍以策略订单列表和后端快照为准。
+-->
 <script setup lang="ts">
 import type { OrderProgressStepView, OrderProgressView } from '@/types/view'
-// 手动下单进度面板。
-// 只展示前端接收到的脱敏阶段事件；真实订单事实仍以策略订单列表和后端快照为准。
 import {
   AlertTriangle,
   CheckCircle2,

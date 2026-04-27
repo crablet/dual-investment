@@ -74,6 +74,9 @@ struct LiveAccounts {
     spot_prices: HashMap<String, Decimal>,
 }
 
+/// 待发送的资金动作请求。
+///
+/// 真实请求发送前会先转成 `funding_attempts` 记录；字段只保存恢复所需的脱敏事实。
 #[derive(Clone, Debug)]
 struct FundingRequest {
     chain_id: String,
@@ -85,6 +88,9 @@ struct FundingRequest {
     product_id: Option<String>,
 }
 
+/// 查询 Binance 历史后得到的资金动作事实。
+///
+/// `NotFound` 和 `Ambiguous` 都不能直接重发真实资金动作，必须继续查询或进入阻断。
 enum FundingHistoryOutcome {
     Confirmed(String, String),
     Pending(Option<String>, String),
@@ -132,6 +138,9 @@ impl OrderProgressEmitter {
         }
     }
 
+    /// 向前端发送脱敏进度事件。
+    ///
+    /// 自动策略没有前端 flow id，因此使用 disabled emitter 静默执行。
     fn emit(
         &self,
         stage: OrderProgressStage,
@@ -158,6 +167,7 @@ impl OrderProgressEmitter {
 }
 
 fn funding_history_window(created_at: chrono::DateTime<Utc>) -> (i64, i64) {
+    // 历史查询窗口从本地写入恢复记录的时间开始，兼顾接口延迟又限制扫描范围。
     let start = created_at - Duration::minutes(FUNDING_HISTORY_LOOKBACK_MINUTES);
     let max_end = start + Duration::days(FUNDING_HISTORY_LOOKAHEAD_DAYS);
     let near_now = Utc::now() + Duration::minutes(5);
@@ -172,6 +182,7 @@ fn funding_history_window(created_at: chrono::DateTime<Utc>) -> (i64, i64) {
     (start.timestamp_millis(), end.timestamp_millis())
 }
 
+/// 用交易所引用或脱敏匹配条件确认 Universal Transfer 事实。
 fn match_universal_transfer_record(
     attempt: &FundingAttempt,
     records: &[UniversalTransferRecord],
@@ -197,6 +208,7 @@ fn match_universal_transfer_record(
     unique_history_match(&matches, universal_transfer_outcome)
 }
 
+/// 把 Binance Universal Transfer 历史状态归一化为本地恢复结果。
 fn universal_transfer_outcome(record: &UniversalTransferRecord) -> FundingHistoryOutcome {
     match record.status.as_str() {
         "CONFIRMED" => {
@@ -209,6 +221,7 @@ fn universal_transfer_outcome(record: &UniversalTransferRecord) -> FundingHistor
     }
 }
 
+/// 用交易所引用或脱敏匹配条件确认 Simple Earn 申购事实。
 fn match_simple_earn_subscription_record(
     attempt: &FundingAttempt,
     records: &[SimpleEarnSubscriptionRecord],
@@ -237,6 +250,7 @@ fn match_simple_earn_subscription_record(
     unique_history_match(&matches, simple_earn_subscription_outcome)
 }
 
+/// 把 Simple Earn 申购历史状态归一化为本地恢复结果。
 fn simple_earn_subscription_outcome(
     record: &SimpleEarnSubscriptionRecord,
 ) -> FundingHistoryOutcome {
@@ -253,6 +267,7 @@ fn simple_earn_subscription_outcome(
     }
 }
 
+/// 用交易所引用或脱敏匹配条件确认 Simple Earn 赎回事实。
 fn match_simple_earn_redemption_record(
     attempt: &FundingAttempt,
     records: &[SimpleEarnRedemptionRecord],
@@ -281,6 +296,7 @@ fn match_simple_earn_redemption_record(
     unique_history_match(&matches, simple_earn_redemption_outcome)
 }
 
+/// 把 Simple Earn 赎回历史状态归一化为本地恢复结果。
 fn simple_earn_redemption_outcome(record: &SimpleEarnRedemptionRecord) -> FundingHistoryOutcome {
     match record.status.as_str() {
         "PAID" => FundingHistoryOutcome::Confirmed(record.redeem_id.clone(), record.status.clone()),
@@ -291,6 +307,7 @@ fn simple_earn_redemption_outcome(record: &SimpleEarnRedemptionRecord) -> Fundin
     }
 }
 
+/// 只有唯一匹配才允许继续推进资金恢复；多条候选必须阻断等待人工核对。
 fn unique_history_match<T>(
     matches: &[&T],
     outcome: impl Fn(&T) -> FundingHistoryOutcome,
@@ -302,6 +319,7 @@ fn unique_history_match<T>(
     }
 }
 
+/// 判断资金请求是否可能已经到达 Binance，需要走历史查询确认。
 fn is_uncertain_funding_error(error: &AppError) -> bool {
     is_uncertain_submit_error(error)
         || matches!(
@@ -385,7 +403,8 @@ impl AppState {
 
     /// 从持久化层恢复状态。
     ///
-    /// 启动时只加载已经绑定交易所订单号的订单，并强制关闭自动策略，避免应用重启后自动下单。
+    /// 启动时只加载仍可跟踪的订单，包括没有原始订单号的接管订单；自动策略强制关闭，
+    /// 避免应用重启后直接自动下单。
     fn from_persistence(persistence: Persistence, logs: LogStore) -> AppResult<Self> {
         let orders = persistence
             .list_orders()?
@@ -1008,6 +1027,7 @@ impl AppState {
         pending_recovery_count: usize,
     ) -> RuntimeHealth {
         let health = self.health.read().await.clone();
+        // health 是运行观测信号：恢复记录和连续失败会提升状态，但不改变交易事实。
         let status = if !connected {
             RuntimeHealthStatus::Idle
         } else if pending_recovery_count > 0 || health.consecutive_failures >= 3 {
@@ -1029,11 +1049,13 @@ impl AppState {
     }
 
     async fn record_background_tick_started(&self) {
+        // tick 开始时间用于观测后台是否仍在运行，不代表本轮已成功同步。
         let mut health = self.health.write().await;
         health.last_tick_at = Some(Utc::now());
     }
 
     async fn record_background_tick_success(&self) {
+        // 成功完成一整轮维护后清空失败/跳过计数，避免旧错误持续污染健康状态。
         let mut health = self.health.write().await;
         health.last_success_at = Some(Utc::now());
         health.consecutive_failures = 0;
@@ -1042,6 +1064,7 @@ impl AppState {
     }
 
     async fn record_background_tick_failure(&self, error: &AppError) {
+        // 只记录脱敏错误文本；下次 tick 仍会继续尝试，除非恢复记录阻断自动动作。
         let mut health = self.health.write().await;
         health.consecutive_failures = health.consecutive_failures.saturating_add(1);
         health.last_error = Some(error.to_string());
@@ -1584,6 +1607,7 @@ impl AppState {
         let orders = self.orders.read().await.clone();
         let mut updated = Vec::new();
 
+        // 单个订单同步失败不阻断其他订单，避免一个外部异常拖住整批状态刷新。
         for order in orders.into_iter().filter(should_sync_option_order) {
             match self.sync_single_order(&client, order.clone()).await {
                 Ok(Some(order)) => updated.push(order),
@@ -1732,6 +1756,7 @@ impl AppState {
         client: &BinanceClient,
         order: &StrategyOrder,
     ) -> AppResult<Option<Decimal>> {
+        // 到期结算价只来自 Binance 行权记录。现货价不能替代，否则会污染现金结算事实。
         let expiry_at = order.expiry_at;
         let start = (expiry_at - Duration::hours(1)).timestamp_millis();
         let end = (expiry_at + Duration::days(2)).timestamp_millis();
@@ -1913,6 +1938,7 @@ impl AppState {
     /// 执行一次自动策略：扫描候选并选择第一条推荐机会下单。
     async fn execute_auto_strategy(&self) -> AppResult<Option<StrategyOrder>> {
         let result = self.scan_candidates().await?;
+        // 自动策略只接受 Rust 策略层标记为 Recommended 的第一条候选，不在前端重新排名。
         let Some(candidate) = result.candidates.into_iter().find(|candidate| {
             candidate.recommendation == crate::domain::RecommendationLevel::Recommended
         }) else {
@@ -1921,6 +1947,7 @@ impl AppState {
         };
 
         let _trade_guard = self.trade_lock.lock().await;
+        // 进入 place_live_strategy 后不再逐笔确认；是否允许自动下单由开启自动策略时的门禁决定。
         let order = self
             .place_live_strategy(
                 StrategyRequest {
@@ -2013,6 +2040,7 @@ impl AppState {
             loop {
                 interval.tick().await;
                 let Ok(_maintenance_guard) = state.maintenance_lock.try_lock() else {
+                    // 后台维护不排队堆积；上一轮未结束时直接跳过并记录健康状态。
                     if let Err(error) = state.record_background_tick_skipped().await {
                         let _ = state
                             .record_error("background.tick_skip_log_failed", &error.to_string());
@@ -2187,6 +2215,7 @@ impl AppState {
 
         for attempt in attempts {
             let _trade_guard = self.trade_lock.lock().await;
+            // 资金恢复和新资金动作共用 trade_lock，防止恢复查询期间并发发送新的资金请求。
             if let Err(error) = self.recover_funding_attempt_inner(&client, attempt).await {
                 self.record_warning(
                     "funding.recovery.failed",
@@ -2202,6 +2231,7 @@ impl AppState {
         client: &BinanceClient,
         attempt: FundingAttempt,
     ) -> AppResult<FundingAttempt> {
+        // 从未发送过的 attempted 记录可以继续发送一次；其他状态只能查询历史推进。
         if attempt.status.is_terminal() {
             return Ok(attempt);
         }
@@ -2216,6 +2246,7 @@ impl AppState {
         client: &BinanceClient,
         request: FundingRequest,
     ) -> AppResult<FundingAttempt> {
+        // 先落库再发送真实资金请求，确保请求结果不确定时有可恢复的本地事实。
         let now = Utc::now();
         let attempt = FundingAttempt {
             id: Uuid::new_v4().to_string(),
@@ -2301,6 +2332,7 @@ impl AppState {
                 self.query_funding_attempt(client, attempt).await
             }
             Err(error) if is_uncertain_funding_error(&error) => {
+                // 结果不确定时不重发资金动作，改为按 Binance 历史确认。
                 attempt.status = FundingAttemptStatus::Uncertain;
                 attempt.message = format!("资金请求结果不确定，正在按 Binance 历史确认：{error}");
                 attempt.query_after_at = Some(Utc::now());
@@ -2324,6 +2356,7 @@ impl AppState {
         client: &BinanceClient,
         mut attempt: FundingAttempt,
     ) -> AppResult<FundingAttempt> {
+        // 查询次数也是恢复事实的一部分；多次无法唯一确认后会进入 blocked。
         attempt.query_count = attempt.query_count.saturating_add(1);
         attempt.updated_at = Utc::now();
         self.save_funding_attempt(&attempt)?;
@@ -2370,6 +2403,7 @@ impl AppState {
             }
             FundingHistoryOutcome::NotFound | FundingHistoryOutcome::Ambiguous => {
                 let ambiguous = matches!(outcome, FundingHistoryOutcome::Ambiguous);
+                // 多条匹配比查不到更危险：无法判断哪条是本机请求，继续自动动作可能重复移动资金。
                 if attempt.query_count >= FUNDING_QUERY_RETRY_LIMIT {
                     attempt.status = FundingAttemptStatus::Blocked;
                     attempt.query_after_at = None;
@@ -2401,6 +2435,7 @@ impl AppState {
         client: &BinanceClient,
         attempt: &FundingAttempt,
     ) -> AppResult<FundingHistoryOutcome> {
+        // 每种资金动作走对应 Binance 历史接口，不能把日志或前端进度当作资金事实。
         let (start_time_ms, end_time_ms) = funding_history_window(attempt.created_at);
         match attempt.kind {
             FundingAttemptKind::UniversalTransfer => {
@@ -2448,6 +2483,7 @@ impl AppState {
         asset: &str,
         amount: Decimal,
     ) -> AppResult<()> {
+        // 统一走 execute_funding_request，保证划转前一定有 funding_attempts 可恢复事实。
         self.execute_funding_request(
             client,
             FundingRequest {
@@ -2473,6 +2509,7 @@ impl AppState {
         asset: &str,
         amount: Decimal,
     ) -> AppResult<()> {
+        // Simple Earn 赎回是真实资金动作，不能绕过恢复记录和历史确认流程。
         self.execute_funding_request(
             client,
             FundingRequest {
@@ -2498,6 +2535,7 @@ impl AppState {
         asset: &str,
         amount: Decimal,
     ) -> AppResult<()> {
+        // 归集后的申购也写入同一恢复链路，避免收尾动作结果不确定时丢失上下文。
         self.execute_funding_request(
             client,
             FundingRequest {
@@ -2555,6 +2593,7 @@ impl AppState {
         request: &StrategyRequest,
         transferred_amount: Decimal,
     ) -> AppResult<OptionAccountSnapshot> {
+        // 划转后 Binance 账户快照可能短暂延迟；等待期间只查询账户，不重复发送资金动作。
         let mut account = client.option_account().await?;
         for attempt_index in 0..OPTION_ACCOUNT_FUNDING_REFRESH_ATTEMPTS {
             if option_funding_shortfall(&account, contract, request) <= Decimal::ZERO {
@@ -2634,6 +2673,7 @@ impl AppState {
             return Ok(());
         }
         let earn = client.simple_earn_snapshot().await?;
+        // 多个活期产品可赎回时优先选余额最大的产品，减少同一资金链路的请求次数。
         let position = earn
             .balances
             .iter()
@@ -2673,6 +2713,7 @@ impl AppState {
     }
 
     async fn sweep_option_idle_usdt_best_effort(&self, client: &BinanceClient, purpose: &str) {
+        // 归集是收尾优化，失败时只写脱敏告警，不回滚已经完成的下单或结算事实。
         if let Err(error) = self.sweep_option_idle_usdt(client, purpose).await {
             let _ = self.record_warning("funding.sweep.failed", &format!("{purpose}失败：{error}"));
         }
@@ -2702,6 +2743,7 @@ impl AppState {
         client: &BinanceClient,
         direction: StrategyDirection,
     ) {
+        // 现货补齐后的归集失败不应把已完成补齐改成失败，只提示后续人工处理。
         if let Err(error) = self.sweep_spot_rebalance_assets(client, direction).await {
             let _ = self.record_warning(
                 "funding.sweep.failed",
@@ -2722,6 +2764,7 @@ impl AppState {
         };
         let chain_id = Uuid::new_v4().to_string();
         for asset in assets {
+            // 这里只归集本策略会触碰的 BTC/USDT，避免误移动用户其他现货资产。
             let amount = spot_asset_free(&spot_account, asset);
             if amount <= Decimal::ZERO {
                 continue;

@@ -25,6 +25,11 @@ export function useLogSnapshot() {
     return currentFile.split(/[\\/]/).at(-1) ?? currentFile
   })
 
+  /**
+   * 包装日志相关 Tauri command。
+   *
+   * 日志操作属于设置页局部状态，失败只写入本 composable 的 error，不覆盖全局交易错误。
+   */
   async function run<T>(action: LogAction, task: () => Promise<T>) {
     pendingAction.value = action
     error.value = undefined
@@ -48,6 +53,7 @@ export function useLogSnapshot() {
   }
 
   async function openCurrentFile() {
+    // 打开文件可能会由系统外部程序修改日志目录，返回后刷新一次保持文件列表同步。
     await run('openFile', () => api.openCurrentLogFile())
     await refresh()
   }

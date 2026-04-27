@@ -1,3 +1,9 @@
+<!--
+Binance 凭据连接面板。
+
+API Secret 只在提交时短暂存在于表单状态，随后交给 Rust 写入系统 keyring 并立即清空。
+组件只展示连接/凭据状态，不保存或回显敏感字段。
+-->
 <script setup lang="ts">
 import { KeyRound } from '@lucide/vue'
 import { NAlert, NButton, NIcon, NInput } from 'naive-ui'

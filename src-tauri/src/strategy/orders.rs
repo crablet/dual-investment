@@ -1,3 +1,8 @@
+//! 策略订单快照构造。
+//!
+//! 本模块把用户请求、Binance 订单回报或当前期权持仓转换成本地 `StrategyOrder`。
+//! 订单一旦持久化，其中的年化、权利金、成交数量等字段就是展示事实，前端不得重算。
+
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use uuid::Uuid;

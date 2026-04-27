@@ -1,8 +1,11 @@
+<!--
+持仓与现货视图。
+
+展示期权义务仓和现货资产；所有资金事实来自后端快照，前端仅做展示聚合。
+-->
 <script setup lang="ts">
 import type { BalanceRow } from '@/types/domain'
 import type { PnlBreakdownItem } from '@/types/view'
-// 持仓与现货视图。
-// 展示期权义务仓和现货资产；所有资金事实来自后端快照，前端仅做展示聚合。
 import { computed } from 'vue'
 import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
@@ -42,6 +45,7 @@ function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
   const grouped = new Map<string, string[]>()
   for (const balance of balances) {
     if (!balance.usdtValueKnown) {
+      // 后端无法定价的资产不能参与比例图；账户概览仍会显示“暂无估值”。
       continue
     }
     const asset = balance.asset.trim().toUpperCase()

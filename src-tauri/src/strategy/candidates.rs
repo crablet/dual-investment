@@ -1,3 +1,8 @@
+//! 双币赢候选扫描与推荐排序。
+//!
+//! 输入数据来自 Binance 合约、mark price、账户快照和本地真实订单。这里只构造可展示候选
+//! 和推荐等级，不发送订单，也不把规则不命中的候选直接隐藏成“没有机会”。
+
 use std::collections::HashMap;
 
 use chrono::Utc;
