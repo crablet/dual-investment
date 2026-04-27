@@ -54,7 +54,7 @@ const pendingTasks = computed<PendingTask[]>(() => {
     {
       id: 'pending-recovery',
       tone: 'warning',
-      text: `${store.pendingRecoveryCount} 条下单恢复记录待确认`,
+      text: `${store.pendingRecoveryCount} 条恢复记录待确认`,
       view: 'orders',
       visible: store.pendingRecoveryCount > 0,
     },

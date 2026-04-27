@@ -11,8 +11,10 @@ import type {
   AutoInvestmentRule,
   CandidateScanResult,
   ConnectBinanceRequest,
+  FundingAttemptView,
   LogSnapshot,
   OrderProgressEvent,
+  ResolveFundingAttemptRequest,
   StrategyOrder,
   StrategyRequest,
   ToggleAutoRequest,
@@ -50,6 +52,10 @@ export const api = {
     call<AppSettings>('toggle_auto_strategy', { request }),
   recoverOrderAttempt: (attemptId: string) =>
     call<StrategyOrder>('recover_order_attempt', { attemptId }),
+  recoverFundingAttempt: (attemptId: string) =>
+    call<FundingAttemptView>('recover_funding_attempt', { attemptId }),
+  resolveFundingAttempt: (request: ResolveFundingAttemptRequest) =>
+    call<FundingAttemptView>('resolve_funding_attempt', { request }),
   listAdoptableOptionPositions: () =>
     call<AdoptableOptionPositionView[]>('list_adoptable_option_positions'),
   adoptOptionPositions: (request: AdoptOptionPositionsRequest) =>

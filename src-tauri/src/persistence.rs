@@ -7,10 +7,12 @@ use std::path::Path;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
+use rust_decimal::Decimal;
+use std::str::FromStr;
 
 use crate::domain::{
-    AppError, AppResult, AutoInvestmentRule, OrderAttempt, OrderAttemptStatus, StrategyDirection,
-    StrategyOrder,
+    AppError, AppResult, AutoInvestmentRule, FundingAttempt, FundingAttemptKind,
+    FundingAttemptStatus, OrderAttempt, OrderAttemptStatus, StrategyDirection, StrategyOrder,
 };
 
 pub struct Persistence {
@@ -61,6 +63,25 @@ impl Persistence {
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS funding_attempts (
+                    id TEXT PRIMARY KEY,
+                    chain_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    purpose TEXT NOT NULL,
+                    asset TEXT NOT NULL,
+                    amount TEXT NOT NULL,
+                    transfer_type TEXT,
+                    product_id TEXT,
+                    exchange_ref TEXT,
+                    status TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    query_after_at TEXT,
+                    send_count INTEGER NOT NULL,
+                    query_count INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS auto_rule (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     payload TEXT NOT NULL,
@@ -71,6 +92,12 @@ impl Persistence {
                     ON strategy_orders (updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_order_attempts_updated_at
                     ON order_attempts (updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_funding_attempts_updated_at
+                    ON funding_attempts (updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_funding_attempts_status
+                    ON funding_attempts (status, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_funding_attempts_chain
+                    ON funding_attempts (chain_id, kind);
                 ",
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
@@ -122,6 +149,51 @@ impl Persistence {
                     attempt.status.as_str(),
                     attempt.exchange_order_id.as_deref(),
                     attempt.message,
+                    attempt.created_at.to_rfc3339(),
+                    attempt.updated_at.to_rfc3339(),
+                ],
+            )
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        Ok(())
+    }
+
+    /// 保存真实资金动作恢复记录。
+    pub fn save_funding_attempt(&self, attempt: &FundingAttempt) -> AppResult<()> {
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO funding_attempts (
+                    id,
+                    chain_id,
+                    kind,
+                    purpose,
+                    asset,
+                    amount,
+                    transfer_type,
+                    product_id,
+                    exchange_ref,
+                    status,
+                    message,
+                    query_after_at,
+                    send_count,
+                    query_count,
+                    created_at,
+                    updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                params![
+                    attempt.id,
+                    attempt.chain_id,
+                    attempt.kind.as_str(),
+                    attempt.purpose,
+                    attempt.asset,
+                    attempt.amount.normalize().to_string(),
+                    attempt.transfer_type.as_deref(),
+                    attempt.product_id.as_deref(),
+                    attempt.exchange_ref.as_deref(),
+                    attempt.status.as_str(),
+                    attempt.message,
+                    attempt.query_after_at.as_ref().map(DateTime::to_rfc3339),
+                    i64::from(attempt.send_count),
+                    i64::from(attempt.query_count),
                     attempt.created_at.to_rfc3339(),
                     attempt.updated_at.to_rfc3339(),
                 ],
@@ -257,6 +329,85 @@ impl Persistence {
         Ok(attempts)
     }
 
+    /// 按更新时间倒序读取资金动作恢复记录。
+    pub fn list_funding_attempts(&self, limit: usize) -> AppResult<Vec<FundingAttempt>> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT id, chain_id, kind, purpose, asset, amount, transfer_type, product_id,
+                        exchange_ref, status, message, query_after_at, send_count, query_count,
+                        created_at, updated_at
+                 FROM funding_attempts
+                 ORDER BY updated_at DESC
+                 LIMIT ?1",
+            )
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        let mapped = statement
+            .query_map([limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, i64>(13)?,
+                    row.get::<_, String>(14)?,
+                    row.get::<_, String>(15)?,
+                ))
+            })
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+
+        let mut attempts = Vec::new();
+        for row in mapped {
+            let (
+                id,
+                chain_id,
+                kind,
+                purpose,
+                asset,
+                amount,
+                transfer_type,
+                product_id,
+                exchange_ref,
+                status,
+                message,
+                query_after_at,
+                send_count,
+                query_count,
+                created_at,
+                updated_at,
+            ) = row.map_err(|error| AppError::Storage(error.to_string()))?;
+            attempts.push(FundingAttempt {
+                id,
+                chain_id,
+                kind: parse_funding_kind(&kind)?,
+                purpose,
+                asset,
+                amount: parse_decimal(&amount)?,
+                transfer_type,
+                product_id,
+                exchange_ref,
+                status: parse_funding_status(&status)?,
+                message,
+                query_after_at: query_after_at.as_deref().map(parse_time).transpose()?,
+                send_count: parse_nonnegative_u32(send_count, "send_count")?,
+                query_count: parse_nonnegative_u32(query_count, "query_count")?,
+                created_at: parse_time(&created_at)?,
+                updated_at: parse_time(&updated_at)?,
+            });
+        }
+        Ok(attempts)
+    }
+
     /// 统计仍需要人工确认或恢复的下单记录。
     pub fn count_pending_order_attempts(&self) -> AppResult<usize> {
         let count = self
@@ -265,6 +416,21 @@ impl Persistence {
                 "SELECT COUNT(*)
                  FROM order_attempts
                  WHERE status NOT IN ('persisted', 'failed', 'spot_persisted')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        usize::try_from(count).map_err(|error| AppError::Storage(error.to_string()))
+    }
+
+    /// 统计仍需要自动恢复或人工处理的资金动作记录。
+    pub fn count_pending_funding_attempts(&self) -> AppResult<usize> {
+        let count = self
+            .connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM funding_attempts
+                 WHERE status NOT IN ('confirmed', 'failed')",
                 [],
                 |row| row.get::<_, i64>(0),
             )
@@ -301,5 +467,39 @@ fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
         "spot_persisted" => Ok(OrderAttemptStatus::SpotPersisted),
         "spot_persist_failed" => Ok(OrderAttemptStatus::SpotPersistFailed),
         _ => Err(AppError::Storage(format!("未知订单尝试状态：{value}"))),
+    }
+}
+
+fn parse_decimal(value: &str) -> AppResult<Decimal> {
+    Decimal::from_str(value)
+        .map_err(|error| AppError::Storage(format!("恢复记录金额无法解析：{error}")))
+}
+
+fn parse_nonnegative_u32(value: i64, field: &str) -> AppResult<u32> {
+    u32::try_from(value)
+        .map_err(|error| AppError::Storage(format!("资金恢复记录 {field} 无法解析：{error}")))
+}
+
+/// 解析 `SQLite` 中持久化的资金动作类型。
+fn parse_funding_kind(value: &str) -> AppResult<FundingAttemptKind> {
+    match value {
+        "universal_transfer" => Ok(FundingAttemptKind::UniversalTransfer),
+        "simple_earn_redeem" => Ok(FundingAttemptKind::SimpleEarnRedeem),
+        "simple_earn_subscribe" => Ok(FundingAttemptKind::SimpleEarnSubscribe),
+        _ => Err(AppError::Storage(format!("未知资金动作类型：{value}"))),
+    }
+}
+
+/// 解析 `SQLite` 中持久化的资金恢复状态。
+fn parse_funding_status(value: &str) -> AppResult<FundingAttemptStatus> {
+    match value {
+        "attempted" => Ok(FundingAttemptStatus::Attempted),
+        "exchange_ack" => Ok(FundingAttemptStatus::ExchangeAck),
+        "uncertain" => Ok(FundingAttemptStatus::Uncertain),
+        "pending" => Ok(FundingAttemptStatus::Pending),
+        "confirmed" => Ok(FundingAttemptStatus::Confirmed),
+        "failed" => Ok(FundingAttemptStatus::Failed),
+        "blocked" => Ok(FundingAttemptStatus::Blocked),
+        _ => Err(AppError::Storage(format!("未知资金恢复状态：{value}"))),
     }
 }

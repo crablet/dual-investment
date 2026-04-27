@@ -19,8 +19,8 @@ use commands::{
     adopt_option_positions, clear_log_files, connect_binance, connect_saved_binance,
     forget_binance_credentials, get_app_snapshot, get_log_snapshot,
     list_adoptable_option_positions, open_current_log_file, open_log_folder, place_manual_strategy,
-    recover_order_attempt, run_auto_once, run_settlement_scan, save_auto_rule, scan_candidates,
-    sync_live_state, toggle_auto_strategy,
+    recover_funding_attempt, recover_order_attempt, resolve_funding_attempt, run_auto_once,
+    run_settlement_scan, save_auto_rule, scan_candidates, sync_live_state, toggle_auto_strategy,
 };
 use tauri::Manager;
 
@@ -45,6 +45,8 @@ pub fn run() {
             save_auto_rule,
             toggle_auto_strategy,
             recover_order_attempt,
+            recover_funding_attempt,
+            resolve_funding_attempt,
             list_adoptable_option_positions,
             adopt_option_positions,
             sync_live_state,

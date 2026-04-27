@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import type { StrategyOrder } from '@/types/domain'
+import type {
+  FundingAttemptManualResolution,
+  FundingAttemptView,
+  OrderAttemptView,
+  StrategyOrder,
+} from '@/types/domain'
 // 策略订单视图。
 // 展示真实订单、同步/结算操作和恢复记录；恢复动作会回到 Rust 重新查询 Binance。
-import { RefreshCw, ScanLine } from '@lucide/vue'
+import { CheckCircle2, RefreshCw, ScanLine, XCircle } from '@lucide/vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
 import { computed, shallowRef, watchEffect } from 'vue'
 import Panel from '@/components/common/Panel.vue'
@@ -10,6 +15,7 @@ import AdoptOptionPositionsPanel from '@/components/orders/AdoptOptionPositionsP
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
+import { attemptStatusText, fundingAttemptStatusText, recoveryStatusTone } from '@/utils/labels'
 
 const store = useAppStore()
 const { directionText, directionTone, money, statusText, statusTone } = useFormat()
@@ -18,6 +24,20 @@ const selectedId = shallowRef<string>()
 interface OrderDetailRow {
   label: string
   value: string
+}
+
+interface RecoveryRow {
+  id: string
+  source: 'order' | 'funding'
+  updatedAt: string
+  type: string
+  target: string
+  amount: string
+  exchangeRef: string
+  status: string
+  factSource: string
+  nextAction: string
+  message: string
 }
 
 watchEffect(() => {
@@ -35,7 +55,10 @@ const todayExpiryCount = computed(() => {
   const today = localDateKey(new Date().toISOString())
   return store.orders.filter(order => localDateKey(order.expiryAt) === today).length
 })
-const attemptRows = computed(() => store.orderAttempts.slice(0, 5))
+const recoveryRows = computed(() => [
+  ...store.orderAttempts.map(orderAttemptRecoveryRow),
+  ...store.fundingAttempts.map(fundingAttemptRecoveryRow),
+].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 10))
 const detailRows = computed(() => {
   if (!selected.value) {
     return []
@@ -70,6 +93,78 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
     { label: '到期补齐', value: order.settlementAction },
     { label: '补齐结果', value: order.rebalanceMessage || '--' },
   ]
+}
+
+function orderAttemptRecoveryRow(attempt: OrderAttemptView): RecoveryRow {
+  return {
+    id: attempt.id,
+    source: 'order',
+    updatedAt: attempt.updatedAt,
+    type: attempt.status.startsWith('spot_') ? '现货补齐' : '期权订单',
+    target: attempt.optionSymbol,
+    amount: attempt.symbol,
+    exchangeRef: attempt.exchangeOrderId ?? attempt.clientOrderId,
+    status: attempt.status,
+    factSource: attempt.exchangeOrderId ? `Binance 订单 ${attempt.exchangeOrderId}` : `客户端订单 ${attempt.clientOrderId}`,
+    nextAction: attempt.status === 'persisted' || attempt.status === 'spot_persisted'
+      ? '无需处理'
+      : '重新查询 Binance 订单',
+    message: attempt.message,
+  }
+}
+
+function fundingAttemptRecoveryRow(attempt: FundingAttemptView): RecoveryRow {
+  return {
+    id: attempt.id,
+    source: 'funding',
+    updatedAt: attempt.updatedAt,
+    type: attempt.kindLabel,
+    target: attempt.transferType ?? attempt.productId ?? attempt.asset,
+    amount: `${attempt.amount} ${attempt.asset}`,
+    exchangeRef: attempt.exchangeRef ?? '--',
+    status: attempt.status,
+    factSource: attempt.factSource,
+    nextAction: attempt.nextAction,
+    message: attempt.message,
+  }
+}
+
+function recoveryTimeLabel(value: string) {
+  return value.slice(0, 19).replace('T', ' ')
+}
+
+function recoveryStatusLabel(row: RecoveryRow) {
+  return row.source === 'funding'
+    ? fundingAttemptStatusText(row.status)
+    : attemptStatusText(row.status)
+}
+
+function canRecover(row: RecoveryRow) {
+  return !['persisted', 'spot_persisted', 'confirmed', 'failed'].includes(row.status)
+}
+
+function canManuallyResolve(row: RecoveryRow) {
+  return row.source === 'funding' && row.status === 'blocked'
+}
+
+function recoverActionLabel(row: RecoveryRow) {
+  return row.status === 'blocked' ? '重查' : '恢复'
+}
+
+async function recoverRow(row: RecoveryRow) {
+  if (row.source === 'order') {
+    await store.recoverAttempt(row.id)
+    return
+  }
+  await store.recoverFundingAttempt(row.id)
+}
+
+async function resolveFundingRow(row: RecoveryRow, resolution: FundingAttemptManualResolution) {
+  const label = resolution === 'confirmed' ? '已在 Binance 核实该资金动作成功' : '已在 Binance 核实该资金动作失败或未发生'
+  if (!window.confirm(`确认${label}？该操作只解除恢复阻断，不会重新发送资金请求。`)) {
+    return
+  }
+  await store.resolveFundingAttempt(row.id, resolution)
 }
 </script>
 
@@ -151,42 +246,78 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
 
     <AdoptOptionPositionsPanel class="span-12" />
 
-    <Panel title="恢复记录" class="span-12">
+    <Panel title="恢复中心" class="span-12">
       <div class="table-wrap">
         <table class="data-table">
           <thead>
             <tr>
               <th>时间</th>
-              <th>客户端订单号</th>
-              <th>合约</th>
-              <th>交易所订单号</th>
+              <th>类型</th>
+              <th>对象</th>
+              <th>金额/标的</th>
+              <th>交易所引用</th>
               <th>状态</th>
+              <th>事实来源</th>
+              <th>下一步</th>
               <th>说明</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="attempt in attemptRows" :key="attempt.id">
-              <td>{{ attempt.updatedAt.slice(0, 19).replace('T', ' ') }}</td>
-              <td>{{ attempt.clientOrderId }}</td>
-              <td>{{ attempt.optionSymbol }}</td>
-              <td>{{ attempt.exchangeOrderId ?? '--' }}</td>
-              <td>{{ attempt.status }}</td>
-              <td>{{ attempt.message }}</td>
+            <tr v-for="row in recoveryRows" :key="`${row.source}-${row.id}`">
+              <td>{{ recoveryTimeLabel(row.updatedAt) }}</td>
+              <td>{{ row.type }}</td>
+              <td>{{ row.target }}</td>
+              <td>{{ row.amount }}</td>
+              <td>{{ row.exchangeRef }}</td>
               <td>
-                <NButton
-                  size="small"
-                  secondary
-                  :disabled="attempt.status === 'persisted' || attempt.status === 'spot_persisted'"
-                  @click="store.recoverAttempt(attempt.id)"
-                >
-                  恢复
-                </NButton>
+                <NTag :type="recoveryStatusTone(row.status)" size="small">
+                  {{ recoveryStatusLabel(row) }}
+                </NTag>
+              </td>
+              <td>{{ row.factSource }}</td>
+              <td>{{ row.nextAction }}</td>
+              <td>{{ row.message }}</td>
+              <td>
+                <div class="button-row compact">
+                  <NButton
+                    size="small"
+                    secondary
+                    :loading="store.isLoading('recover')"
+                    :disabled="!canRecover(row)"
+                    @click="recoverRow(row)"
+                  >
+                    <template #icon><NIcon :component="RefreshCw" /></template>
+                    {{ recoverActionLabel(row) }}
+                  </NButton>
+                  <template v-if="canManuallyResolve(row)">
+                    <NButton
+                      size="small"
+                      type="success"
+                      secondary
+                      :loading="store.isLoading('recover')"
+                      @click="resolveFundingRow(row, 'confirmed')"
+                    >
+                      <template #icon><NIcon :component="CheckCircle2" /></template>
+                      核实成功
+                    </NButton>
+                    <NButton
+                      size="small"
+                      type="error"
+                      secondary
+                      :loading="store.isLoading('recover')"
+                      @click="resolveFundingRow(row, 'failed')"
+                    >
+                      <template #icon><NIcon :component="XCircle" /></template>
+                      核实失败
+                    </NButton>
+                  </template>
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
-        <p v-if="attemptRows.length === 0" class="empty-state">暂无需要恢复的订单尝试记录</p>
+        <p v-if="recoveryRows.length === 0" class="empty-state">暂无恢复记录</p>
       </div>
     </Panel>
   </div>

@@ -4,7 +4,7 @@
 
 import type { MaybeRefOrGetter } from 'vue'
 import type { AppViewId } from '@/stores/app'
-import type { OrderAttemptView, RiskAlert, StrategyOrder } from '@/types/domain'
+import type { FundingAttemptView, OrderAttemptView, RiskAlert, StrategyOrder } from '@/types/domain'
 import { computed, toValue } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
@@ -16,7 +16,7 @@ import {
   scheduleTimeLabel,
   startOfDay,
 } from '@/utils/date'
-import { attemptStatusText, strategyStatusText } from '@/utils/labels'
+import { attemptStatusText, fundingAttemptStatusText, strategyStatusText } from '@/utils/labels'
 
 export type CalendarEventType
   = | 'order'
@@ -92,6 +92,13 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
 
     for (const attempt of store.orderAttempts) {
       const event = eventFromOrderAttempt(attempt)
+      if (event) {
+        rows.push(event)
+      }
+    }
+
+    for (const attempt of store.fundingAttempts) {
+      const event = eventFromFundingAttempt(attempt)
       if (event) {
         rows.push(event)
       }
@@ -197,6 +204,25 @@ function eventFromOrderAttempt(attempt: OrderAttemptView): CalendarEvent | undef
     tone: attempt.status.includes('failed') ? 'red' : 'gray',
     targetView: 'orders',
     priority: attempt.status.includes('failed') ? 92 : 52,
+  }
+}
+
+/** 从资金恢复记录派生日历事件；已确认和明确失败的终态不再提示待办。 */
+function eventFromFundingAttempt(attempt: FundingAttemptView): CalendarEvent | undefined {
+  if (attempt.status === 'confirmed' || attempt.status === 'failed') {
+    return undefined
+  }
+
+  return {
+    id: `funding-recovery-${attempt.id}`,
+    type: 'recovery',
+    date: localDateKey(attempt.updatedAt),
+    timeLabel: localTimeLabel(attempt.updatedAt),
+    title: attempt.status === 'blocked' ? '资金恢复待办' : '资金恢复记录',
+    detail: `${attempt.kindLabel} ${attempt.amount} ${attempt.asset}，${fundingAttemptStatusText(attempt.status)}，${attempt.message}`,
+    tone: attempt.status === 'blocked' ? 'red' : 'gray',
+    targetView: 'orders',
+    priority: attempt.status === 'blocked' ? 94 : 54,
   }
 }
 

@@ -10,8 +10,8 @@ use tauri_plugin_opener::OpenerExt;
 use crate::app_state::AppState;
 use crate::domain::{
     AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppSettings, AppSnapshot,
-    AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest, LogSnapshot, StrategyOrder,
-    StrategyRequest, ToggleAutoRequest,
+    AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest, FundingAttemptView,
+    LogSnapshot, ResolveFundingAttemptRequest, StrategyOrder, StrategyRequest, ToggleAutoRequest,
 };
 
 /// 获取应用完整快照。
@@ -99,6 +99,29 @@ pub async fn recover_order_attempt(
     state
         .recover_order_attempt(attempt_id)
         .await
+        .map_err(to_command_error)
+}
+
+/// 按资金恢复记录重新查询 Binance 历史并推进状态。
+#[tauri::command]
+pub async fn recover_funding_attempt(
+    state: State<'_, AppState>,
+    attempt_id: String,
+) -> Result<FundingAttemptView, String> {
+    state
+        .recover_funding_attempt(attempt_id)
+        .await
+        .map_err(to_command_error)
+}
+
+/// 人工核对 Binance 事实后解除已阻断的资金恢复记录。
+#[tauri::command]
+pub fn resolve_funding_attempt(
+    state: State<'_, AppState>,
+    request: ResolveFundingAttemptRequest,
+) -> Result<FundingAttemptView, String> {
+    state
+        .resolve_funding_attempt(&request)
         .map_err(to_command_error)
 }
 

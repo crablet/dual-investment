@@ -10,6 +10,7 @@ import type {
   AppSnapshot,
   AutoInvestmentRule,
   ConnectBinanceRequest,
+  FundingAttemptManualResolution,
   OrderProgressEvent,
   OrderProgressStatus,
   StrategyOrder,
@@ -123,6 +124,7 @@ export const useAppStore = defineStore('app', () => {
   const autoRule = computed(() => snapshot.value?.autoRule)
   const health = computed(() => snapshot.value?.health)
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
+  const fundingAttempts = computed(() => snapshot.value?.fundingAttempts ?? [])
   const pendingRecoveryCount = computed(() => health.value?.pendingRecoveryCount ?? 0)
   const runningOrders = computed(() =>
     orders.value.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
@@ -494,6 +496,25 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function recoverFundingAttempt(attemptId: string) {
+    const attempt = await run('recover', () => api.recoverFundingAttempt(attemptId))
+    if (attempt) {
+      await refresh()
+    }
+  }
+
+  async function resolveFundingAttempt(attemptId: string, resolution: FundingAttemptManualResolution) {
+    const attempt = await run('recover', () =>
+      api.resolveFundingAttempt({
+        attemptId,
+        resolution,
+        confirmManual: true,
+      }))
+    if (attempt) {
+      await refresh()
+    }
+  }
+
   async function loadAdoptableOptionPositions() {
     const rows = await run('adopt', () => api.listAdoptableOptionPositions())
     if (rows) {
@@ -605,6 +626,7 @@ export const useAppStore = defineStore('app', () => {
     autoRule,
     health,
     orderAttempts,
+    fundingAttempts,
     pendingRecoveryCount,
     runningOrders,
     isLoading,
@@ -623,6 +645,8 @@ export const useAppStore = defineStore('app', () => {
     runSettlementScan,
     runAutoOnce,
     recoverAttempt,
+    recoverFundingAttempt,
+    resolveFundingAttempt,
     loadAdoptableOptionPositions,
     adoptOptionPositions,
     placeStrategy,

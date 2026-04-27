@@ -495,6 +495,192 @@ impl From<OrderAttempt> for OrderAttemptView {
     }
 }
 
+/// 真实资金动作恢复记录类型。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FundingAttemptKind {
+    UniversalTransfer,
+    SimpleEarnRedeem,
+    SimpleEarnSubscribe,
+}
+
+impl FundingAttemptKind {
+    /// 返回持久化到 `SQLite` 的稳定类型字符串。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UniversalTransfer => "universal_transfer",
+            Self::SimpleEarnRedeem => "simple_earn_redeem",
+            Self::SimpleEarnSubscribe => "simple_earn_subscribe",
+        }
+    }
+
+    /// 返回前端展示用的中文类型名称。
+    pub const fn display(self) -> &'static str {
+        match self {
+            Self::UniversalTransfer => "账户划转",
+            Self::SimpleEarnRedeem => "活期赎回",
+            Self::SimpleEarnSubscribe => "活期申购",
+        }
+    }
+}
+
+/// 真实资金动作恢复状态。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FundingAttemptStatus {
+    Attempted,
+    ExchangeAck,
+    Uncertain,
+    Pending,
+    Confirmed,
+    Failed,
+    Blocked,
+}
+
+impl FundingAttemptStatus {
+    /// 返回持久化到 `SQLite` 的稳定状态字符串。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Attempted => "attempted",
+            Self::ExchangeAck => "exchange_ack",
+            Self::Uncertain => "uncertain",
+            Self::Pending => "pending",
+            Self::Confirmed => "confirmed",
+            Self::Failed => "failed",
+            Self::Blocked => "blocked",
+        }
+    }
+
+    /// 已确认不会再自动推进的终态。
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Confirmed | Self::Failed)
+    }
+}
+
+/// 人工核对资金恢复记录后的处置结果。
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum FundingAttemptManualResolution {
+    Confirmed,
+    Failed,
+}
+
+impl FundingAttemptManualResolution {
+    /// 返回用户可读的处置结果。
+    pub const fn display(self) -> &'static str {
+        match self {
+            Self::Confirmed => "已确认",
+            Self::Failed => "已失败",
+        }
+    }
+}
+
+/// 本地资金动作恢复记录。
+///
+/// 该记录只保存脱敏、可恢复的业务事实，不保存签名 query 或 Binance 原始响应。
+#[derive(Clone, Debug)]
+pub struct FundingAttempt {
+    pub id: String,
+    pub chain_id: String,
+    pub kind: FundingAttemptKind,
+    pub purpose: String,
+    pub asset: String,
+    pub amount: Decimal,
+    pub transfer_type: Option<String>,
+    pub product_id: Option<String>,
+    pub exchange_ref: Option<String>,
+    pub status: FundingAttemptStatus,
+    pub message: String,
+    pub query_after_at: Option<DateTime<Utc>>,
+    pub send_count: u32,
+    pub query_count: u32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 人工解除资金恢复阻断的请求。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveFundingAttemptRequest {
+    pub attempt_id: String,
+    pub resolution: FundingAttemptManualResolution,
+    pub confirm_manual: bool,
+}
+
+/// 前端可展示的资金动作恢复记录。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FundingAttemptView {
+    pub id: String,
+    pub chain_id: String,
+    pub kind: String,
+    pub kind_label: String,
+    pub purpose: String,
+    pub asset: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub amount: Decimal,
+    pub transfer_type: Option<String>,
+    pub product_id: Option<String>,
+    pub exchange_ref: Option<String>,
+    pub status: String,
+    pub message: String,
+    pub fact_source: String,
+    pub next_action: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<FundingAttempt> for FundingAttemptView {
+    fn from(attempt: FundingAttempt) -> Self {
+        let fact_source = match (&attempt.exchange_ref, attempt.status) {
+            (Some(exchange_ref), FundingAttemptStatus::Confirmed) => {
+                format!("Binance 历史记录 {exchange_ref}")
+            }
+            (
+                Some(exchange_ref),
+                FundingAttemptStatus::ExchangeAck | FundingAttemptStatus::Pending,
+            ) => {
+                format!("Binance 已返回引用 {exchange_ref}")
+            }
+            (Some(exchange_ref), _) => format!("Binance 引用 {exchange_ref}"),
+            (None, FundingAttemptStatus::Attempted) if attempt.send_count == 0 => {
+                "本地预写记录，尚未开始发送".to_string()
+            }
+            (None, FundingAttemptStatus::Confirmed) => "人工核对 Binance 事实已确认".to_string(),
+            (None, FundingAttemptStatus::Failed) => "Binance 明确拒绝或人工核对失败".to_string(),
+            (None, _) => "按 Binance 历史与账户事实待确认".to_string(),
+        };
+        let next_action = match attempt.status {
+            FundingAttemptStatus::Attempted if attempt.send_count == 0 => {
+                "自动发送首次请求".to_string()
+            }
+            FundingAttemptStatus::Attempted
+            | FundingAttemptStatus::ExchangeAck
+            | FundingAttemptStatus::Uncertain
+            | FundingAttemptStatus::Pending => "自动查询 Binance 历史确认".to_string(),
+            FundingAttemptStatus::Confirmed => "无需处理".to_string(),
+            FundingAttemptStatus::Failed => "已失败，检查原因后重新触发业务流程".to_string(),
+            FundingAttemptStatus::Blocked => "需要人工核对 Binance 事实".to_string(),
+        };
+        Self {
+            id: attempt.id,
+            chain_id: attempt.chain_id,
+            kind: attempt.kind.as_str().to_string(),
+            kind_label: attempt.kind.display().to_string(),
+            purpose: attempt.purpose,
+            asset: attempt.asset,
+            amount: attempt.amount,
+            transfer_type: attempt.transfer_type,
+            product_id: attempt.product_id,
+            exchange_ref: attempt.exchange_ref,
+            status: attempt.status.as_str().to_string(),
+            message: attempt.message,
+            fact_source,
+            next_action,
+            created_at: attempt.created_at,
+            updated_at: attempt.updated_at,
+        }
+    }
+}
+
 /// 手动下单进度阶段。
 ///
 /// 这些事件只用于前端展示当前流程，不作为交易事实来源。
@@ -598,6 +784,36 @@ pub struct SimpleEarnFlexibleProduct {
     pub is_sold_out: bool,
     pub status: String,
     pub min_purchase_amount: Decimal,
+}
+
+/// Binance Universal Transfer 历史记录。
+#[derive(Clone, Debug)]
+pub struct UniversalTransferRecord {
+    pub transfer_type: String,
+    pub asset: String,
+    pub amount: Decimal,
+    pub status: String,
+    pub tran_id: String,
+}
+
+/// Binance Simple Earn 活期申购历史记录。
+#[derive(Clone, Debug)]
+pub struct SimpleEarnSubscriptionRecord {
+    pub product_id: String,
+    pub asset: String,
+    pub amount: Decimal,
+    pub status: String,
+    pub purchase_id: String,
+}
+
+/// Binance Simple Earn 活期赎回历史记录。
+#[derive(Clone, Debug)]
+pub struct SimpleEarnRedemptionRecord {
+    pub product_id: String,
+    pub asset: String,
+    pub amount: Decimal,
+    pub status: String,
+    pub redeem_id: String,
 }
 
 /// 期权保证金资产余额。
@@ -747,6 +963,7 @@ pub struct AppSnapshot {
     pub risk: RiskSnapshot,
     pub auto_rule: AutoInvestmentRule,
     pub order_attempts: Vec<OrderAttemptView>,
+    pub funding_attempts: Vec<FundingAttemptView>,
 }
 
 /// 连接 Binance 的请求。

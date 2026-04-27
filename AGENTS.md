@@ -6,21 +6,24 @@
 - 本项目只保留实盘路径；不要恢复模式切换、离线占位数据或浏览器数据 fallback。普通浏览器只用于布局检查，缺少 Tauri runtime 时应暴露明确错误。
 - 不要把 API Secret、签名 query、Binance 原始响应或敏感上下文写入日志、SQLite、前端 store 或导出文件。API Key/Secret 只允许通过 `src-tauri/src/secrets.rs` 写入系统 keyring。
 - 金额、价格、数量、权利金、手续费、保证金和收益率不要用 `f64`；Rust 侧使用 `rust_decimal::Decimal`，前端以字符串承接。
-- 所有下单、Simple Earn 申购/赎回、现货-期权划转和到期补齐都是真实资金动作，必须有明确门禁、后端串行保护和脱敏日志。
+- 所有下单、Simple Earn 申购/赎回、现货-期权划转和到期补齐都是真实资金动作，必须有明确门禁、后端串行保护、恢复记录和脱敏日志。
 
 ## 业务边界
 
 - 业务数据只来自 Binance 实盘接口或本地 SQLite 中已记录的真实交易事件；日志只用于排障展示，不作为交易事实来源。
 - v1 只支持 `BTC/USDT`。新增标的前必须补齐合约过滤器、保证金估算、风险规则和测试。
 - 已保存凭据可在启动和运行中自动连接 Binance；连接失败可静默退避重试，但不得自动开启自动策略、下单或移动资金。凭据缺失、权限不足、账户不可交易等人工错误应暂停自动重连并明确提示。
-- 自动策略默认关闭，开启必须二次确认；开启后自动单不逐笔确认，应用重启后自动执行仍保持关闭。存在待恢复记录时必须暂停自动执行。
+- 自动策略默认关闭，开启必须二次确认；开启后自动单不逐笔确认，应用重启后自动执行仍保持关闭。存在 `order_attempts` 或 `funding_attempts` 待恢复记录时必须暂停自动执行。
 - 接管 Binance 订单是独立于 `order_attempts` 的外部持仓接管功能：只允许从 Binance 当前期权义务仓和 `exchangeInfo` 重建本地跟踪订单，不得把它混入恢复记录，也不得重放历史下单。
 - Binance 期权是现金结算；到期 ITM 后现货补齐失败必须进入失败状态，停止相关自动动作并发出风险通知。
 - 期权到期、行权和本地合成交割以 Binance `exchangeInfo.expiryDate` 毫秒时间戳为准；订单和请求必须携带精确 `expiryAt`，缺字段是数据契约错误。到期结算价格只来自 Binance 行权记录接口，不得用现货价替代。
 - 期权下单价格和数量必须满足 Binance 精度和过滤器字段：价格按 `PRICE_FILTER.tickSize` 对齐，数量按 `LOT_SIZE.stepSize` 校验。
 - 默认保证金占用率风控上限为 60%；调整时只改 Rust 侧 `Decimal` 风控规则，并同步更新 README/AGENTS。
 - 候选扫描使用 `BTCUSDT` 现货价过滤方向：低买只保留执行价低于现货的 Put，高卖只保留执行价高于现货的 Call；候选浏览范围保持到期 `1-90` 天。
-- 下单或补齐需要资金时，先检查现货/期权可用余额；不足时只从 Simple Earn 活期真实持仓赎回，必要时再划转到期权保证金账户。卖 Put 到期 ITM 的现货补齐 USDT 缓冲由 `SELL_PUT_REBALANCE_USDT_BUFFER` 控制。
+- 下单或补齐需要资金时，先检查现货/期权可用余额；不足时只从 Simple Earn 活期真实持仓赎回，必要时再划转到期权保证金账户。期权保证金准备必须同时覆盖可用保证金缺口和 60% 风控所需的权益缓冲；现货到期权划转确认后，必须重新查询并短时间等待期权账户快照反映到账，再执行可用保证金和占用率风控。等待期间只允许查询，不得重复发送资金动作；超时后按最新账户事实拒绝并归集空闲资金。卖 Put 到期 ITM 的现货补齐 USDT 缓冲由 `SELL_PUT_REBALANCE_USDT_BUFFER` 控制。
+- Simple Earn 活期申购/赎回和 Universal Transfer 必须先写入 `funding_attempts` 再发送 Binance；本地只保存可恢复的脱敏事实、交易所引用和状态，不保存签名 query、原始响应或敏感上下文。
+- 资金动作请求结果不确定时，不要盲目重发真实资金动作；必须先按 `funding_attempts` 中的 `tranId`、`purchaseId`、`redeemId` 或脱敏匹配条件查询 Binance 历史。历史确认成功后才允许继续后续资金链路；多次查询仍无法唯一确认时必须进入 `blocked` 并阻断自动资金动作。
+- `blocked` 资金恢复记录可以在人工核对 Binance 账户事实后解除为 `confirmed` 或 `failed`；解除入口必须要求显式确认，只更新恢复记录和脱敏日志，不得重新发送 Simple Earn 或 Universal Transfer 请求，也不得保存 Binance 原始响应。
 - 下单或现货补齐请求结果不确定时，不要盲目重发真实订单；必须先按 `clientOrderId` 或交易所订单号重新查询 Binance，并保留 `order_attempts` 恢复记录。交易所已接单但本地保存失败时，恢复也必须重新查询 Binance 事实。
 - 期权订单如果被 Binance 确认为 `EXPIRED`、`REJECTED`、`CANCELED` 或 `CANCELLED` 且成交数量为 0，必须视为下单失败：`order_attempts` 记录为 `failed`，不得创建、恢复或继续跟踪为活跃 `StrategyOrder`，也不得进入同步、结算或现货补齐流程。
 - 接管后的订单会进入同步、到期结算和现货补齐流程；接管入口本身不下单、不移动资金，但后续 ITM 补齐仍是真实资金动作，必须保留显式确认和脱敏日志。
@@ -29,7 +32,7 @@
 
 - 前端使用 Vue 3、`<script setup lang="ts">`、Pinia、Naive UI、Vite；跨页面状态放 Pinia，route/view 级组件只做组合。
 - 双币赢和自动复投共用 `src/components/views/DualInvestmentView.vue`；候选筛选和下单入口只放在“双币赢”页。不要恢复已删除的离线路径、独立自动复投入口、总览快捷下单、旧风险/收益展示或旧订单快捷动作。
-- 订单页可以提供 Binance 当前期权持仓接管入口；接管列表只展示 Binance 查询结果和本地可接管判断，不把接管状态展示成“恢复记录”。
+- 订单页可以提供 Binance 当前期权持仓接管入口；接管列表只展示 Binance 查询结果和本地可接管判断，不把接管状态展示成“恢复记录”。恢复中心可以同时展示 `order_attempts` 和 `funding_attempts`，但不得把接管记录混入恢复记录。
 - 双币赢下单数量按 Binance 期权“张”计算。候选列表表头写“标记价格”，展示 Binance mark price；右侧下单卡片只允许编辑下单张数。
 - 手动下单必须保留明确交互反馈：按钮 loading 按 `order` 维度展示，右侧下单卡片展示校验、资金准备、风控、发送 Binance、保存订单等阶段进度。
 - 下单进度事件只承载脱敏阶段摘要、合约号和交易所订单号；不要把进度事件当交易事实来源。
@@ -45,8 +48,9 @@
 ## Rust 与 Tauri 约定
 
 - 金融领域类型集中在 `src-tauri/src/domain.rs`；策略计算放在 `strategy.rs` 及 `src-tauri/src/strategy/` 子模块，状态编排放在 `app_state.rs` 及 `src-tauri/src/app_state/` 子模块。
-- Binance 接口只放在 `binance.rs` 及 `src-tauri/src/binance/` 子模块，不要让前端或策略层拼签名；Simple Earn、Universal Transfer 和期权持仓查询也必须在这里封装。
+- Binance 接口只放在 `binance.rs` 及 `src-tauri/src/binance/` 子模块，不要让前端或策略层拼签名；Simple Earn、Universal Transfer、对应历史查询和期权持仓查询也必须在这里封装。
 - Binance 查询类 GET 请求可以短退避重试；下单、Simple Earn 申购/赎回和 Universal Transfer 不得在网络失败时盲目重试，结果不确定时先走交易所查询恢复。
+- `funding_attempts` 是资金动作恢复事实表，覆盖 `universal_transfer`、`simple_earn_redeem` 和 `simple_earn_subscribe`。`confirmed` 和 `failed` 是终态；`blocked` 需要人工核对 Binance 事实，仍应计入待恢复并阻断新的自动资金动作，直到人工解除为终态。
 - `StrategyOrder.source` 是订单跟踪语义的一部分：本机下单/恢复订单使用 `liveOrder`，外部持仓接管订单使用 `adoptedPosition`。不要用 ID 前缀或订单号缺失来推断来源。
 - `StrategyOrder.annualized` 是订单快照事实字段，必须由 Rust 使用 `Decimal` 计算并持久化。本机订单使用实际权利金、执行价、实际成交数量、交易所订单创建时间到 `expiryAt` 的天数计算；接管订单使用当前持仓 entry price、数量和 Binance 持仓更新时间到 `expiryAt` 的天数计算。
 - 启动加载、快照同步和可跟踪订单判断必须保留 `adoptedPosition`；接管订单可以没有 `exchangeOrderId` 和 `clientOrderId`，不得再用订单号是否存在作为唯一加载条件。

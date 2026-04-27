@@ -7,7 +7,8 @@ use serde_json::Value;
 use crate::domain::{
     AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot,
     OptionAssetBalance, OptionContract, OptionMarkPrice, OptionPosition, SimpleEarnAssetBalance,
-    SimpleEarnFlexibleProduct, SpotAccountSnapshot, SpotAssetBalance,
+    SimpleEarnFlexibleProduct, SimpleEarnRedemptionRecord, SimpleEarnSubscriptionRecord,
+    SpotAccountSnapshot, SpotAssetBalance, UniversalTransferRecord,
 };
 
 /// 解析期权账户快照，字段名保持贴近 Binance EAPI 响应。
@@ -209,6 +210,86 @@ pub(super) fn ensure_success_response(value: &Value, operation: &str) -> AppResu
             "{operation}响应缺少 success 字段"
         ))),
     }
+}
+
+/// 解析 Universal Transfer 历史分页。
+pub(super) fn parse_universal_transfer_records(
+    value: &Value,
+) -> AppResult<Vec<UniversalTransferRecord>> {
+    value
+        .get("rows")
+        .and_then(Value::as_array)
+        .ok_or_else(|| AppError::Binance("Binance 划转历史响应缺少 rows 字段".to_string()))?
+        .iter()
+        .map(parse_universal_transfer_record)
+        .collect()
+}
+
+fn parse_universal_transfer_record(value: &Value) -> AppResult<UniversalTransferRecord> {
+    Ok(UniversalTransferRecord {
+        transfer_type: string_field(value, "type")?,
+        asset: string_field(value, "asset")?,
+        amount: decimal_field(value, "amount")?,
+        status: string_field(value, "status")?,
+        tran_id: string_field(value, "tranId")?,
+    })
+}
+
+/// 解析 Simple Earn 活期申购历史分页。
+pub(super) fn parse_simple_earn_subscription_records(
+    value: &Value,
+) -> AppResult<Vec<SimpleEarnSubscriptionRecord>> {
+    value
+        .get("rows")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            AppError::Binance("Binance Simple Earn 申购历史响应缺少 rows 字段".to_string())
+        })?
+        .iter()
+        .map(parse_simple_earn_subscription_record)
+        .collect()
+}
+
+fn parse_simple_earn_subscription_record(value: &Value) -> AppResult<SimpleEarnSubscriptionRecord> {
+    Ok(SimpleEarnSubscriptionRecord {
+        product_id: string_field(value, "productId")?,
+        asset: string_field(value, "asset")?,
+        amount: decimal_field(value, "amount")?,
+        status: string_field(value, "status")?,
+        purchase_id: string_field(value, "purchaseId")?,
+    })
+}
+
+/// 解析 Simple Earn 活期赎回历史分页。
+pub(super) fn parse_simple_earn_redemption_records(
+    value: &Value,
+) -> AppResult<Vec<SimpleEarnRedemptionRecord>> {
+    value
+        .get("rows")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            AppError::Binance("Binance Simple Earn 赎回历史响应缺少 rows 字段".to_string())
+        })?
+        .iter()
+        .map(parse_simple_earn_redemption_record)
+        .collect()
+}
+
+fn parse_simple_earn_redemption_record(value: &Value) -> AppResult<SimpleEarnRedemptionRecord> {
+    Ok(SimpleEarnRedemptionRecord {
+        product_id: value
+            .get("productId")
+            .or_else(|| value.get("projectId"))
+            .map(value_to_string)
+            .filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::Binance("Binance 赎回历史响应缺少 productId 字段".to_string())
+            })?,
+        asset: string_field(value, "asset")?,
+        amount: decimal_field(value, "amount")?,
+        status: string_field(value, "status")?,
+        redeem_id: string_field(value, "redeemId")?,
+    })
 }
 
 fn decimal_from_any_field(value: &Value, keys: &[&str]) -> AppResult<Option<Decimal>> {

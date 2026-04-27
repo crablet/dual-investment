@@ -33,7 +33,8 @@ use self::adoption::{
 };
 use self::funding::{
     flexible_earn_asset_amount, option_funding_shortfall, option_idle_usdt_sweep_amount,
-    round_up_funding_amount, spot_asset_free, spot_rebalance_required_asset,
+    round_down_funding_amount, round_up_funding_amount, spot_asset_free,
+    spot_rebalance_required_asset,
 };
 use self::orders::{
     apply_option_ack, apply_option_position, apply_spot_ack, combined_balances, is_spot_attempt,
@@ -53,11 +54,13 @@ use crate::binance::BinanceClient;
 use crate::domain::{
     AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppError, AppResult, AppSettings,
     AppSnapshot, AutoInvestmentRule, CandidateScanDiagnostics, CandidateScanResult,
-    ConnectBinanceRequest, LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract,
-    OrderAttempt, OrderAttemptStatus, OrderAttemptView, OrderProgressEvent, OrderProgressStage,
-    OrderProgressStatus, RuntimeHealth, RuntimeHealthStatus, SimpleEarnSnapshot,
-    SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder, StrategyRequest,
-    StrategyStatus, ToggleAutoRequest,
+    ConnectBinanceRequest, FundingAttempt, FundingAttemptKind, FundingAttemptManualResolution,
+    FundingAttemptStatus, FundingAttemptView, LogLevel, LogSnapshot, OptionAccountSnapshot,
+    OptionContract, OrderAttempt, OrderAttemptStatus, OrderAttemptView, OrderProgressEvent,
+    OrderProgressStage, OrderProgressStatus, ResolveFundingAttemptRequest, RuntimeHealth,
+    RuntimeHealthStatus, SimpleEarnRedemptionRecord, SimpleEarnSnapshot,
+    SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate, StrategyDirection,
+    StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest, UniversalTransferRecord,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -71,6 +74,25 @@ struct LiveAccounts {
     spot_prices: HashMap<String, Decimal>,
 }
 
+#[derive(Clone, Debug)]
+struct FundingRequest {
+    chain_id: String,
+    kind: FundingAttemptKind,
+    purpose: String,
+    asset: String,
+    amount: Decimal,
+    transfer_type: Option<String>,
+    product_id: Option<String>,
+}
+
+enum FundingHistoryOutcome {
+    Confirmed(String, String),
+    Pending(Option<String>, String),
+    Failed(Option<String>, String),
+    NotFound,
+    Ambiguous,
+}
+
 #[derive(Clone, Debug, Default)]
 struct RuntimeHealthState {
     last_tick_at: Option<chrono::DateTime<Utc>>,
@@ -81,6 +103,11 @@ struct RuntimeHealthState {
 }
 
 const ORDER_PROGRESS_EVENT: &str = "order-progress";
+const FUNDING_HISTORY_LOOKBACK_MINUTES: i64 = 5;
+const FUNDING_HISTORY_LOOKAHEAD_DAYS: i64 = 30;
+const FUNDING_QUERY_RETRY_LIMIT: u32 = 3;
+const OPTION_ACCOUNT_FUNDING_REFRESH_ATTEMPTS: usize = 6;
+const OPTION_ACCOUNT_FUNDING_REFRESH_DELAY_MS: u64 = 700;
 
 struct OrderProgressEmitter {
     app: Option<AppHandle>,
@@ -128,6 +155,159 @@ impl OrderProgressEmitter {
         };
         let _ = app.emit(ORDER_PROGRESS_EVENT, event);
     }
+}
+
+fn funding_history_window(created_at: chrono::DateTime<Utc>) -> (i64, i64) {
+    let start = created_at - Duration::minutes(FUNDING_HISTORY_LOOKBACK_MINUTES);
+    let max_end = start + Duration::days(FUNDING_HISTORY_LOOKAHEAD_DAYS);
+    let near_now = Utc::now() + Duration::minutes(5);
+    let mut end = if near_now < max_end {
+        near_now
+    } else {
+        max_end
+    };
+    if end <= start {
+        end = start + Duration::minutes(1);
+    }
+    (start.timestamp_millis(), end.timestamp_millis())
+}
+
+fn match_universal_transfer_record(
+    attempt: &FundingAttempt,
+    records: &[UniversalTransferRecord],
+) -> FundingHistoryOutcome {
+    if let Some(exchange_ref) = attempt.exchange_ref.as_deref() {
+        return records
+            .iter()
+            .find(|record| record.tran_id == exchange_ref)
+            .map_or(FundingHistoryOutcome::NotFound, universal_transfer_outcome);
+    }
+
+    let matches = records
+        .iter()
+        .filter(|record| {
+            attempt
+                .transfer_type
+                .as_ref()
+                .is_some_and(|transfer_type| record.transfer_type == *transfer_type)
+                && record.asset == attempt.asset
+                && record.amount == attempt.amount
+        })
+        .collect::<Vec<_>>();
+    unique_history_match(&matches, universal_transfer_outcome)
+}
+
+fn universal_transfer_outcome(record: &UniversalTransferRecord) -> FundingHistoryOutcome {
+    match record.status.as_str() {
+        "CONFIRMED" => {
+            FundingHistoryOutcome::Confirmed(record.tran_id.clone(), record.status.clone())
+        }
+        "FAILED" => {
+            FundingHistoryOutcome::Failed(Some(record.tran_id.clone()), record.status.clone())
+        }
+        _ => FundingHistoryOutcome::Pending(Some(record.tran_id.clone()), record.status.clone()),
+    }
+}
+
+fn match_simple_earn_subscription_record(
+    attempt: &FundingAttempt,
+    records: &[SimpleEarnSubscriptionRecord],
+) -> FundingHistoryOutcome {
+    if let Some(exchange_ref) = attempt.exchange_ref.as_deref() {
+        return records
+            .iter()
+            .find(|record| record.purchase_id == exchange_ref)
+            .map_or(
+                FundingHistoryOutcome::NotFound,
+                simple_earn_subscription_outcome,
+            );
+    }
+
+    let matches = records
+        .iter()
+        .filter(|record| {
+            attempt
+                .product_id
+                .as_ref()
+                .is_none_or(|product_id| record.product_id == *product_id)
+                && record.asset == attempt.asset
+                && record.amount == attempt.amount
+        })
+        .collect::<Vec<_>>();
+    unique_history_match(&matches, simple_earn_subscription_outcome)
+}
+
+fn simple_earn_subscription_outcome(
+    record: &SimpleEarnSubscriptionRecord,
+) -> FundingHistoryOutcome {
+    match record.status.as_str() {
+        "SUCCESS" => {
+            FundingHistoryOutcome::Confirmed(record.purchase_id.clone(), record.status.clone())
+        }
+        "FAILED" => {
+            FundingHistoryOutcome::Failed(Some(record.purchase_id.clone()), record.status.clone())
+        }
+        _ => {
+            FundingHistoryOutcome::Pending(Some(record.purchase_id.clone()), record.status.clone())
+        }
+    }
+}
+
+fn match_simple_earn_redemption_record(
+    attempt: &FundingAttempt,
+    records: &[SimpleEarnRedemptionRecord],
+) -> FundingHistoryOutcome {
+    if let Some(exchange_ref) = attempt.exchange_ref.as_deref() {
+        return records
+            .iter()
+            .find(|record| record.redeem_id == exchange_ref)
+            .map_or(
+                FundingHistoryOutcome::NotFound,
+                simple_earn_redemption_outcome,
+            );
+    }
+
+    let matches = records
+        .iter()
+        .filter(|record| {
+            attempt
+                .product_id
+                .as_ref()
+                .is_none_or(|product_id| record.product_id == *product_id)
+                && record.asset == attempt.asset
+                && record.amount == attempt.amount
+        })
+        .collect::<Vec<_>>();
+    unique_history_match(&matches, simple_earn_redemption_outcome)
+}
+
+fn simple_earn_redemption_outcome(record: &SimpleEarnRedemptionRecord) -> FundingHistoryOutcome {
+    match record.status.as_str() {
+        "PAID" => FundingHistoryOutcome::Confirmed(record.redeem_id.clone(), record.status.clone()),
+        "FAILED" => {
+            FundingHistoryOutcome::Failed(Some(record.redeem_id.clone()), record.status.clone())
+        }
+        _ => FundingHistoryOutcome::Pending(Some(record.redeem_id.clone()), record.status.clone()),
+    }
+}
+
+fn unique_history_match<T>(
+    matches: &[&T],
+    outcome: impl Fn(&T) -> FundingHistoryOutcome,
+) -> FundingHistoryOutcome {
+    match matches {
+        [] => FundingHistoryOutcome::NotFound,
+        [record] => outcome(*record),
+        _ => FundingHistoryOutcome::Ambiguous,
+    }
+}
+
+fn is_uncertain_funding_error(error: &AppError) -> bool {
+    is_uncertain_submit_error(error)
+        || matches!(
+            error,
+            AppError::Binance(message) if message.contains("响应缺少")
+        )
 }
 
 #[derive(Clone, Debug)]
@@ -246,7 +426,7 @@ impl AppState {
         let scan_diagnostics = self.scan_diagnostics.read().await.clone();
         let orders = self.orders.read().await.clone();
         let accounts = self.live_accounts_if_connected().await?;
-        let (order_attempts, pending_recovery_count) = {
+        let (order_attempts, funding_attempts, pending_recovery_count) = {
             let persistence = self
                 .persistence
                 .lock()
@@ -256,8 +436,14 @@ impl AppState {
                 .into_iter()
                 .map(OrderAttemptView::from)
                 .collect::<Vec<_>>();
-            let pending_recovery_count = persistence.count_pending_order_attempts()?;
-            (attempts, pending_recovery_count)
+            let funding_attempts = persistence
+                .list_funding_attempts(20)?
+                .into_iter()
+                .map(FundingAttemptView::from)
+                .collect::<Vec<_>>();
+            let pending_recovery_count = persistence.count_pending_order_attempts()?
+                + persistence.count_pending_funding_attempts()?;
+            (attempts, funding_attempts, pending_recovery_count)
         };
         let health = self
             .health_snapshot(settings.connected, pending_recovery_count)
@@ -290,6 +476,7 @@ impl AppState {
             auto_rule,
             orders,
             order_attempts,
+            funding_attempts,
         })
     }
 
@@ -495,6 +682,18 @@ impl AppState {
             );
             return Err(AppError::RiskRejected("手动下单需要显式确认".to_string()));
         }
+        if self.pending_recovery_count()? > 0 {
+            progress.emit(
+                OrderProgressStage::Validate,
+                OrderProgressStatus::Error,
+                "存在待确认恢复记录，已暂停新的真实下单",
+                request.option_symbol.as_deref(),
+                None,
+            );
+            return Err(AppError::RiskRejected(
+                "存在待确认恢复记录，已暂停新的真实下单".to_string(),
+            ));
+        }
         self.place_live_strategy(request, "manual", &progress).await
     }
 
@@ -528,6 +727,11 @@ impl AppState {
         if request.enabled && !request.confirm_live {
             return Err(AppError::RiskRejected(
                 "自动策略开启需要二次确认".to_string(),
+            ));
+        }
+        if request.enabled && self.pending_recovery_count()? > 0 {
+            return Err(AppError::RiskRejected(
+                "存在待确认恢复记录，已暂停开启自动策略".to_string(),
             ));
         }
         runtime.auto_enabled = request.enabled;
@@ -575,6 +779,82 @@ impl AppState {
         } else {
             self.recover_option_attempt(attempt).await
         }
+    }
+
+    /// 根据资金恢复记录重新查询 Binance 历史并推进状态。
+    pub async fn recover_funding_attempt(
+        &self,
+        attempt_id: String,
+    ) -> AppResult<FundingAttemptView> {
+        let client = self.live_client().await?;
+        let attempt = self
+            .persistence
+            .lock()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+            .list_funding_attempts(500)?
+            .into_iter()
+            .find(|attempt| attempt.id == attempt_id)
+            .ok_or_else(|| AppError::Storage("未找到指定资金恢复记录".to_string()))?;
+
+        let _trade_guard = self.trade_lock.lock().await;
+        let recovered = self.recover_funding_attempt_inner(&client, attempt).await?;
+        Ok(FundingAttemptView::from(recovered))
+    }
+
+    /// 人工核对 Binance 事实后解除已阻断的资金恢复记录。
+    pub fn resolve_funding_attempt(
+        &self,
+        request: &ResolveFundingAttemptRequest,
+    ) -> AppResult<FundingAttemptView> {
+        if !request.confirm_manual {
+            return Err(AppError::RiskRejected(
+                "人工解除资金阻断需要显式确认".to_string(),
+            ));
+        }
+        if request.attempt_id.trim().is_empty() {
+            return Err(AppError::RiskRejected(
+                "资金恢复记录 ID 不能为空".to_string(),
+            ));
+        }
+
+        let mut attempt = self
+            .persistence
+            .lock()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+            .list_funding_attempts(500)?
+            .into_iter()
+            .find(|attempt| attempt.id == request.attempt_id)
+            .ok_or_else(|| AppError::Storage("未找到指定资金恢复记录".to_string()))?;
+
+        if attempt.status != FundingAttemptStatus::Blocked {
+            return Err(AppError::RiskRejected(
+                "只有已阻断的资金恢复记录可以人工解除".to_string(),
+            ));
+        }
+
+        attempt.status = match request.resolution {
+            FundingAttemptManualResolution::Confirmed => FundingAttemptStatus::Confirmed,
+            FundingAttemptManualResolution::Failed => FundingAttemptStatus::Failed,
+        };
+        attempt.query_after_at = None;
+        attempt.updated_at = Utc::now();
+        attempt.message = format!(
+            "人工核对 Binance 事实后标记为{}，未重新发送资金请求",
+            request.resolution.display()
+        );
+        self.save_funding_attempt(&attempt)?;
+        self.record_warning(
+            "funding.recovery.manual_resolved",
+            &format!(
+                "{} {} {} 已人工标记为{}，用于{}",
+                attempt.kind.display(),
+                attempt.amount,
+                attempt.asset,
+                request.resolution.display(),
+                attempt.purpose
+            ),
+        )?;
+        Ok(FundingAttemptView::from(attempt))
     }
 
     /// 列出当前 Binance 期权持仓中可由本机接管监控的记录。
@@ -659,14 +939,23 @@ impl AppState {
     /// 同步订单、执行到期结算，然后返回完整快照。
     pub async fn sync_live_state(&self) -> AppResult<AppSnapshot> {
         let _maintenance_guard = self.maintenance_lock.lock().await;
+        self.recover_due_funding_attempts().await?;
         self.sync_live_orders().await?;
-        self.settle_due_orders().await?;
+        if self.pending_recovery_count()? == 0 {
+            self.settle_due_orders().await?;
+        }
         self.snapshot().await
     }
 
     /// 手动触发到期结算扫描。
     pub async fn run_settlement_scan(&self) -> AppResult<Vec<StrategyOrder>> {
         let _maintenance_guard = self.maintenance_lock.lock().await;
+        self.recover_due_funding_attempts().await?;
+        if self.pending_recovery_count()? > 0 {
+            return Err(AppError::RiskRejected(
+                "存在待确认资金恢复记录，已暂停结算资金动作".to_string(),
+            ));
+        }
         self.sync_live_orders().await?;
         self.settle_due_orders().await
     }
@@ -683,6 +972,12 @@ impl AppState {
             return Err(AppError::RiskRejected("自动定投未启用".to_string()));
         }
         let _maintenance_guard = self.maintenance_lock.lock().await;
+        self.recover_due_funding_attempts().await?;
+        if self.pending_recovery_count()? > 0 {
+            return Err(AppError::RiskRejected(
+                "存在待确认恢复记录，已暂停自动策略".to_string(),
+            ));
+        }
         self.execute_auto_strategy().await
     }
 
@@ -1655,7 +1950,11 @@ impl AppState {
         if !self.runtime.read().await.connected {
             return Ok(());
         }
+        self.recover_due_funding_attempts().await?;
         self.sync_live_orders().await?;
+        if self.pending_recovery_count()? > 0 {
+            return Ok(());
+        }
         self.settle_due_orders().await?;
         if self.should_run_auto_now().await {
             match self.execute_auto_strategy().await {
@@ -1782,10 +2081,12 @@ impl AppState {
     }
 
     fn pending_recovery_count(&self) -> AppResult<usize> {
-        self.persistence
+        let persistence = self
+            .persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
-            .count_pending_order_attempts()
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        Ok(persistence.count_pending_order_attempts()?
+            + persistence.count_pending_funding_attempts()?)
     }
 
     /// 保存下单/补齐恢复记录。
@@ -1794,6 +2095,14 @@ impl AppState {
             .lock()
             .map_err(|error| AppError::Storage(error.to_string()))?
             .save_order_attempt(attempt)
+    }
+
+    /// 保存资金动作恢复记录。
+    fn save_funding_attempt(&self, attempt: &FundingAttempt) -> AppResult<()> {
+        self.persistence
+            .lock()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+            .save_funding_attempt(attempt)
     }
 
     /// 获取可用 Binance 客户端；缓存缺失时从运行期凭据重建。
@@ -1851,6 +2160,360 @@ impl AppState {
         }))
     }
 
+    /// 恢复到期的资金动作记录；该流程只依据 Binance 历史推进，不信任本地日志事实。
+    async fn recover_due_funding_attempts(&self) -> AppResult<()> {
+        if !self.runtime.read().await.connected {
+            return Ok(());
+        }
+        let client = self.live_client().await?;
+        let now = Utc::now();
+        let attempts = {
+            let persistence = self
+                .persistence
+                .lock()
+                .map_err(|error| AppError::Storage(error.to_string()))?;
+            persistence
+                .list_funding_attempts(200)?
+                .into_iter()
+                .filter(|attempt| {
+                    !attempt.status.is_terminal()
+                        && attempt.status != FundingAttemptStatus::Blocked
+                        && attempt
+                            .query_after_at
+                            .is_none_or(|query_after_at| query_after_at <= now)
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for attempt in attempts {
+            let _trade_guard = self.trade_lock.lock().await;
+            if let Err(error) = self.recover_funding_attempt_inner(&client, attempt).await {
+                self.record_warning(
+                    "funding.recovery.failed",
+                    &format!("资金恢复查询失败：{error}"),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn recover_funding_attempt_inner(
+        &self,
+        client: &BinanceClient,
+        attempt: FundingAttempt,
+    ) -> AppResult<FundingAttempt> {
+        if attempt.status.is_terminal() {
+            return Ok(attempt);
+        }
+        if attempt.status == FundingAttemptStatus::Attempted && attempt.send_count == 0 {
+            return self.send_funding_attempt(client, attempt).await;
+        }
+        self.query_funding_attempt(client, attempt).await
+    }
+
+    async fn execute_funding_request(
+        &self,
+        client: &BinanceClient,
+        request: FundingRequest,
+    ) -> AppResult<FundingAttempt> {
+        let now = Utc::now();
+        let attempt = FundingAttempt {
+            id: Uuid::new_v4().to_string(),
+            chain_id: request.chain_id,
+            kind: request.kind,
+            purpose: request.purpose,
+            asset: request.asset,
+            amount: request.amount,
+            transfer_type: request.transfer_type,
+            product_id: request.product_id,
+            exchange_ref: None,
+            status: FundingAttemptStatus::Attempted,
+            message: "已写入资金恢复记录，尚未开始发送 Binance 请求".to_string(),
+            query_after_at: None,
+            send_count: 0,
+            query_count: 0,
+            created_at: now,
+            updated_at: now,
+        };
+        self.save_funding_attempt(&attempt)?;
+        let attempt = self.send_funding_attempt(client, attempt).await?;
+        if attempt.status == FundingAttemptStatus::Confirmed {
+            Ok(attempt)
+        } else {
+            Err(AppError::RiskRejected(format!(
+                "{} {} {} 尚未被 Binance 确认，已暂停后续资金动作",
+                attempt.kind.display(),
+                attempt.amount,
+                attempt.asset
+            )))
+        }
+    }
+
+    async fn send_funding_attempt(
+        &self,
+        client: &BinanceClient,
+        mut attempt: FundingAttempt,
+    ) -> AppResult<FundingAttempt> {
+        attempt.send_count = attempt.send_count.saturating_add(1);
+        attempt.status = FundingAttemptStatus::Attempted;
+        attempt.message = format!(
+            "正在发送 Binance {} 请求，用于{}",
+            attempt.kind.display(),
+            attempt.purpose
+        );
+        attempt.updated_at = Utc::now();
+        self.save_funding_attempt(&attempt)?;
+
+        let result = match attempt.kind {
+            FundingAttemptKind::UniversalTransfer => {
+                let transfer_type = attempt.transfer_type.as_deref().ok_or_else(|| {
+                    AppError::Storage("账户划转恢复记录缺少 transfer_type".to_string())
+                })?;
+                client
+                    .universal_transfer(transfer_type, &attempt.asset, attempt.amount)
+                    .await
+            }
+            FundingAttemptKind::SimpleEarnRedeem => {
+                let product_id = attempt.product_id.as_deref().ok_or_else(|| {
+                    AppError::Storage("活期赎回恢复记录缺少 product_id".to_string())
+                })?;
+                client
+                    .redeem_simple_earn_flexible(product_id, attempt.amount)
+                    .await
+            }
+            FundingAttemptKind::SimpleEarnSubscribe => {
+                let product_id = attempt.product_id.as_deref().ok_or_else(|| {
+                    AppError::Storage("活期申购恢复记录缺少 product_id".to_string())
+                })?;
+                client
+                    .subscribe_simple_earn_flexible(product_id, attempt.amount)
+                    .await
+            }
+        };
+
+        match result {
+            Ok(exchange_ref) => {
+                attempt.status = FundingAttemptStatus::ExchangeAck;
+                attempt.exchange_ref = Some(exchange_ref);
+                attempt.message = "Binance 已返回资金动作引用，正在查询历史确认".to_string();
+                attempt.updated_at = Utc::now();
+                self.save_funding_attempt(&attempt)?;
+                self.query_funding_attempt(client, attempt).await
+            }
+            Err(error) if is_uncertain_funding_error(&error) => {
+                attempt.status = FundingAttemptStatus::Uncertain;
+                attempt.message = format!("资金请求结果不确定，正在按 Binance 历史确认：{error}");
+                attempt.query_after_at = Some(Utc::now());
+                attempt.updated_at = Utc::now();
+                self.save_funding_attempt(&attempt)?;
+                self.query_funding_attempt(client, attempt).await
+            }
+            Err(error) => {
+                attempt.status = FundingAttemptStatus::Failed;
+                attempt.message = format!("Binance 明确拒绝或本地校验失败：{error}");
+                attempt.query_after_at = None;
+                attempt.updated_at = Utc::now();
+                self.save_funding_attempt(&attempt)?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn query_funding_attempt(
+        &self,
+        client: &BinanceClient,
+        mut attempt: FundingAttempt,
+    ) -> AppResult<FundingAttempt> {
+        attempt.query_count = attempt.query_count.saturating_add(1);
+        attempt.updated_at = Utc::now();
+        self.save_funding_attempt(&attempt)?;
+
+        let outcome = self.lookup_funding_history(client, &attempt).await?;
+        match outcome {
+            FundingHistoryOutcome::Confirmed(exchange_ref, status) => {
+                attempt.status = FundingAttemptStatus::Confirmed;
+                attempt.exchange_ref = Some(exchange_ref);
+                attempt.query_after_at = None;
+                attempt.message = format!("已按 Binance 历史确认成功，状态 {status}");
+                attempt.updated_at = Utc::now();
+                self.save_funding_attempt(&attempt)?;
+                self.record_log(
+                    "funding.recovery.confirmed",
+                    &format!(
+                        "{} {} {} 已由 Binance 历史确认，用于{}",
+                        attempt.kind.display(),
+                        attempt.amount,
+                        attempt.asset,
+                        attempt.purpose
+                    ),
+                )?;
+            }
+            FundingHistoryOutcome::Pending(exchange_ref, status) => {
+                if let Some(exchange_ref) = exchange_ref {
+                    attempt.exchange_ref = Some(exchange_ref);
+                }
+                attempt.status = FundingAttemptStatus::Pending;
+                attempt.query_after_at = Some(Utc::now() + Duration::minutes(1));
+                attempt.message = format!("Binance 历史显示仍在处理中，状态 {status}");
+                attempt.updated_at = Utc::now();
+                self.save_funding_attempt(&attempt)?;
+            }
+            FundingHistoryOutcome::Failed(exchange_ref, status) => {
+                if let Some(exchange_ref) = exchange_ref {
+                    attempt.exchange_ref = Some(exchange_ref);
+                }
+                attempt.status = FundingAttemptStatus::Failed;
+                attempt.query_after_at = None;
+                attempt.message = format!("Binance 历史确认失败，状态 {status}");
+                attempt.updated_at = Utc::now();
+                self.save_funding_attempt(&attempt)?;
+            }
+            FundingHistoryOutcome::NotFound | FundingHistoryOutcome::Ambiguous => {
+                let ambiguous = matches!(outcome, FundingHistoryOutcome::Ambiguous);
+                if attempt.query_count >= FUNDING_QUERY_RETRY_LIMIT {
+                    attempt.status = FundingAttemptStatus::Blocked;
+                    attempt.query_after_at = None;
+                    attempt.message = if ambiguous {
+                        "Binance 历史匹配到多条可能记录，无法唯一确认，已阻断自动资金动作"
+                            .to_string()
+                    } else {
+                        "多次查询 Binance 历史仍无法确认该资金动作是否发生，已阻断自动资金动作"
+                            .to_string()
+                    };
+                } else {
+                    attempt.status = FundingAttemptStatus::Uncertain;
+                    attempt.query_after_at = Some(Utc::now() + Duration::minutes(1));
+                    attempt.message = if ambiguous {
+                        "Binance 历史匹配到多条可能记录，稍后重查以避免重复执行".to_string()
+                    } else {
+                        "暂未在 Binance 历史中确认该资金动作，稍后继续查询".to_string()
+                    };
+                }
+                attempt.updated_at = Utc::now();
+                self.save_funding_attempt(&attempt)?;
+            }
+        }
+        Ok(attempt)
+    }
+
+    async fn lookup_funding_history(
+        &self,
+        client: &BinanceClient,
+        attempt: &FundingAttempt,
+    ) -> AppResult<FundingHistoryOutcome> {
+        let (start_time_ms, end_time_ms) = funding_history_window(attempt.created_at);
+        match attempt.kind {
+            FundingAttemptKind::UniversalTransfer => {
+                let transfer_type = attempt.transfer_type.as_deref().ok_or_else(|| {
+                    AppError::Storage("账户划转恢复记录缺少 transfer_type".to_string())
+                })?;
+                let records = client
+                    .universal_transfer_history(transfer_type, start_time_ms, end_time_ms)
+                    .await?;
+                Ok(match_universal_transfer_record(attempt, &records))
+            }
+            FundingAttemptKind::SimpleEarnRedeem => {
+                let records = client
+                    .simple_earn_flexible_redemption_history(
+                        attempt.product_id.as_deref(),
+                        attempt.exchange_ref.as_deref(),
+                        &attempt.asset,
+                        start_time_ms,
+                        end_time_ms,
+                    )
+                    .await?;
+                Ok(match_simple_earn_redemption_record(attempt, &records))
+            }
+            FundingAttemptKind::SimpleEarnSubscribe => {
+                let records = client
+                    .simple_earn_flexible_subscription_history(
+                        attempt.product_id.as_deref(),
+                        attempt.exchange_ref.as_deref(),
+                        &attempt.asset,
+                        start_time_ms,
+                        end_time_ms,
+                    )
+                    .await?;
+                Ok(match_simple_earn_subscription_record(attempt, &records))
+            }
+        }
+    }
+
+    async fn execute_universal_transfer(
+        &self,
+        client: &BinanceClient,
+        chain_id: &str,
+        purpose: &str,
+        transfer_type: &str,
+        asset: &str,
+        amount: Decimal,
+    ) -> AppResult<()> {
+        self.execute_funding_request(
+            client,
+            FundingRequest {
+                chain_id: chain_id.to_string(),
+                kind: FundingAttemptKind::UniversalTransfer,
+                purpose: purpose.to_string(),
+                asset: asset.to_string(),
+                amount,
+                transfer_type: Some(transfer_type.to_string()),
+                product_id: None,
+            },
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn execute_simple_earn_redeem(
+        &self,
+        client: &BinanceClient,
+        chain_id: &str,
+        purpose: &str,
+        product_id: &str,
+        asset: &str,
+        amount: Decimal,
+    ) -> AppResult<()> {
+        self.execute_funding_request(
+            client,
+            FundingRequest {
+                chain_id: chain_id.to_string(),
+                kind: FundingAttemptKind::SimpleEarnRedeem,
+                purpose: purpose.to_string(),
+                asset: asset.to_string(),
+                amount,
+                transfer_type: None,
+                product_id: Some(product_id.to_string()),
+            },
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn execute_simple_earn_subscribe(
+        &self,
+        client: &BinanceClient,
+        chain_id: &str,
+        purpose: &str,
+        product_id: &str,
+        asset: &str,
+        amount: Decimal,
+    ) -> AppResult<()> {
+        self.execute_funding_request(
+            client,
+            FundingRequest {
+                chain_id: chain_id.to_string(),
+                kind: FundingAttemptKind::SimpleEarnSubscribe,
+                purpose: purpose.to_string(),
+                asset: asset.to_string(),
+                amount,
+                transfer_type: None,
+                product_id: Some(product_id.to_string()),
+            },
+        )
+        .await
+        .map(|_| ())
+    }
+
     /// 确保期权保证金账户有足够 USDT 支撑本次订单和当前风控缓冲。
     async fn prepare_option_margin_funding(
         &self,
@@ -1865,16 +2528,63 @@ impl AppState {
         }
 
         let amount = round_up_funding_amount(shortfall);
-        self.ensure_spot_asset_available(client, "USDT", amount, "期权保证金准备")
+        let chain_id = Uuid::new_v4().to_string();
+        self.ensure_spot_asset_available(client, "USDT", amount, "期权保证金准备", &chain_id)
             .await?;
-        client
-            .universal_transfer("MAIN_OPTION", "USDT", amount)
-            .await?;
+        self.execute_universal_transfer(
+            client,
+            &chain_id,
+            "期权保证金准备",
+            "MAIN_OPTION",
+            "USDT",
+            amount,
+        )
+        .await?;
         self.record_log(
             "funding.transfer.main_option",
             &format!("已从现货划转 {amount} USDT 到期权保证金账户，用于期权下单"),
         )?;
-        client.option_account().await
+        self.wait_for_option_account_funding(client, contract, request, amount)
+            .await
+    }
+
+    async fn wait_for_option_account_funding(
+        &self,
+        client: &BinanceClient,
+        contract: &OptionContract,
+        request: &StrategyRequest,
+        transferred_amount: Decimal,
+    ) -> AppResult<OptionAccountSnapshot> {
+        let mut account = client.option_account().await?;
+        for attempt_index in 0..OPTION_ACCOUNT_FUNDING_REFRESH_ATTEMPTS {
+            if option_funding_shortfall(&account, contract, request) <= Decimal::ZERO {
+                if attempt_index > 0 {
+                    self.record_log(
+                        "funding.option_account_refreshed",
+                        "期权保证金账户已反映本次划转，继续执行下单风控",
+                    )?;
+                }
+                return Ok(account);
+            }
+            if attempt_index + 1 == OPTION_ACCOUNT_FUNDING_REFRESH_ATTEMPTS {
+                break;
+            }
+            tokio::time::sleep(StdDuration::from_millis(
+                OPTION_ACCOUNT_FUNDING_REFRESH_DELAY_MS,
+            ))
+            .await;
+            account = client.option_account().await?;
+        }
+
+        let remaining =
+            round_up_funding_amount(option_funding_shortfall(&account, contract, request));
+        self.record_warning(
+            "funding.option_account_refresh_timeout",
+            &format!(
+                "已划转 {transferred_amount} USDT 用于期权下单，但期权账户快照仍显示资金或权益缺口约 {remaining} USDT，将按最新账户快照继续风控"
+            ),
+        )?;
+        Ok(account)
     }
 
     /// 确保现货账户有足够资产执行到期 ITM 补齐。
@@ -1884,7 +2594,8 @@ impl AppState {
         order: &StrategyOrder,
     ) -> AppResult<()> {
         let (asset, required) = spot_rebalance_required_asset(order);
-        self.ensure_spot_asset_available(client, asset, required, "到期现货补齐")
+        let chain_id = format!("spot-rebalance-{}", order.id);
+        self.ensure_spot_asset_available(client, asset, required, "到期现货补齐", &chain_id)
             .await
     }
 
@@ -1895,6 +2606,7 @@ impl AppState {
         asset: &str,
         required: Decimal,
         purpose: &str,
+        chain_id: &str,
     ) -> AppResult<()> {
         if required <= Decimal::ZERO {
             return Ok(());
@@ -1906,7 +2618,7 @@ impl AppState {
         }
 
         let redeem_amount = round_up_funding_amount(required - available);
-        self.redeem_flexible_asset(client, asset, redeem_amount, purpose)
+        self.redeem_flexible_asset(client, asset, redeem_amount, purpose, chain_id)
             .await
     }
 
@@ -1916,6 +2628,7 @@ impl AppState {
         asset: &str,
         amount: Decimal,
         purpose: &str,
+        chain_id: &str,
     ) -> AppResult<()> {
         if amount <= Decimal::ZERO {
             return Ok(());
@@ -1944,9 +2657,15 @@ impl AppState {
             )));
         }
 
-        client
-            .redeem_simple_earn_flexible(&position.product_id, amount)
-            .await?;
+        self.execute_simple_earn_redeem(
+            client,
+            chain_id,
+            purpose,
+            &position.product_id,
+            asset,
+            amount,
+        )
+        .await?;
         self.record_log(
             "funding.earn.redeemed",
             &format!("已从 Simple Earn 活期赎回 {amount} {asset} 至现货账户，用于{purpose}"),
@@ -1962,19 +2681,19 @@ impl AppState {
     /// 把期权账户中不需要继续支撑保证金风控的 USDT 归集回现货并申购活期。
     async fn sweep_option_idle_usdt(&self, client: &BinanceClient, purpose: &str) -> AppResult<()> {
         let account = client.option_account().await?;
-        let amount = option_idle_usdt_sweep_amount(&account);
+        let amount = round_down_funding_amount(option_idle_usdt_sweep_amount(&account));
         if amount < dec!(0.01) {
             return Ok(());
         }
 
-        client
-            .universal_transfer("OPTION_MAIN", "USDT", amount)
+        let chain_id = Uuid::new_v4().to_string();
+        self.execute_universal_transfer(client, &chain_id, purpose, "OPTION_MAIN", "USDT", amount)
             .await?;
         self.record_log(
             "funding.transfer.option_main",
             &format!("已从期权保证金账户归集 {amount} USDT 到现货账户，{purpose}"),
         )?;
-        self.subscribe_spot_asset_to_earn(client, "USDT", amount, purpose)
+        self.subscribe_spot_asset_to_earn(client, "USDT", amount, purpose, &chain_id)
             .await
     }
 
@@ -2001,12 +2720,13 @@ impl AppState {
         let assets = match direction {
             StrategyDirection::SellPut | StrategyDirection::SellCall => ["USDT", "BTC"],
         };
+        let chain_id = Uuid::new_v4().to_string();
         for asset in assets {
             let amount = spot_asset_free(&spot_account, asset);
             if amount <= Decimal::ZERO {
                 continue;
             }
-            self.subscribe_spot_asset_to_earn(client, asset, amount, "现货补齐后归集")
+            self.subscribe_spot_asset_to_earn(client, asset, amount, "现货补齐后归集", &chain_id)
                 .await?;
         }
         Ok(())
@@ -2018,7 +2738,9 @@ impl AppState {
         asset: &str,
         amount: Decimal,
         purpose: &str,
+        chain_id: &str,
     ) -> AppResult<()> {
+        let amount = round_down_funding_amount(amount);
         if amount <= Decimal::ZERO {
             return Ok(());
         }
@@ -2047,9 +2769,15 @@ impl AppState {
 
         // Simple Earn 活期申购/赎回限制为同账户约 3 秒一次；归集是下单后的收尾动作，优先避免触发限频。
         tokio::time::sleep(StdDuration::from_secs(3)).await;
-        client
-            .subscribe_simple_earn_flexible(&product.product_id, amount)
-            .await?;
+        self.execute_simple_earn_subscribe(
+            client,
+            chain_id,
+            purpose,
+            &product.product_id,
+            asset,
+            amount,
+        )
+        .await?;
         self.record_log(
             "funding.earn.subscribed",
             &format!("已把 {amount} {asset} 从现货账户重新申购 Simple Earn 活期，{purpose}"),

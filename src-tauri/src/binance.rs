@@ -27,17 +27,21 @@ use self::http::{encode_query, is_timestamp_error, is_transient_query_error, req
 use self::parsing::{
     decimal_field, ensure_success_response, parse_account_snapshot, parse_exchange_info,
     parse_exercise_records, parse_mark_prices, parse_option_positions, parse_order_ack,
-    parse_simple_earn_flexible_product_page, parse_simple_earn_position_page, parse_spot_account,
-    parse_spot_price_tickers, value_to_string,
+    parse_simple_earn_flexible_product_page, parse_simple_earn_position_page,
+    parse_simple_earn_redemption_records, parse_simple_earn_subscription_records,
+    parse_spot_account, parse_spot_price_tickers, parse_universal_transfer_records,
+    value_to_string,
 };
 use crate::domain::{
     AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot, OptionContract,
     OptionMarkPrice, OptionPosition, SimpleEarnAssetBalance, SimpleEarnFlexibleProduct,
-    SimpleEarnSnapshot, SpotAccountSnapshot, StrategyDirection, StrategyRequest,
+    SimpleEarnRedemptionRecord, SimpleEarnSnapshot, SimpleEarnSubscriptionRecord,
+    SpotAccountSnapshot, StrategyDirection, StrategyRequest, UniversalTransferRecord,
 };
 
 type HmacSha256 = Hmac<Sha256>;
 const QUERY_RETRY_DELAYS: [Duration; 2] = [Duration::from_millis(500), Duration::from_millis(1500)];
+const BINANCE_FUNDING_AMOUNT_SCALE: u32 = 8;
 
 /// Binance HTTP 客户端。
 ///
@@ -223,7 +227,8 @@ impl BinanceClient {
         &self,
         product_id: &str,
         amount: Decimal,
-    ) -> AppResult<()> {
+    ) -> AppResult<String> {
+        let amount = Self::funding_amount_param("Simple Earn 活期赎回", amount)?;
         let response = self
             .signed_post_value(
                 &self.spot_base,
@@ -231,12 +236,13 @@ impl BinanceClient {
                 vec![
                     ("productId".to_string(), product_id.to_string()),
                     ("redeemAll".to_string(), "false".to_string()),
-                    ("amount".to_string(), amount.normalize().to_string()),
+                    ("amount".to_string(), amount),
                     ("destAccount".to_string(), "SPOT".to_string()),
                 ],
             )
             .await?;
-        ensure_success_response(&response, "Simple Earn 活期赎回")
+        ensure_success_response(&response, "Simple Earn 活期赎回")?;
+        response_id(&response, "redeemId", "Simple Earn 活期赎回")
     }
 
     /// 从现货账户申购 Simple Earn 活期。
@@ -244,20 +250,22 @@ impl BinanceClient {
         &self,
         product_id: &str,
         amount: Decimal,
-    ) -> AppResult<()> {
+    ) -> AppResult<String> {
+        let amount = Self::funding_amount_param("Simple Earn 活期申购", amount)?;
         let response = self
             .signed_post_value(
                 &self.spot_base,
                 "/sapi/v1/simple-earn/flexible/subscribe",
                 vec![
                     ("productId".to_string(), product_id.to_string()),
-                    ("amount".to_string(), amount.normalize().to_string()),
+                    ("amount".to_string(), amount),
                     ("autoSubscribe".to_string(), "true".to_string()),
                     ("sourceAccount".to_string(), "SPOT".to_string()),
                 ],
             )
             .await?;
-        ensure_success_response(&response, "Simple Earn 活期申购")
+        ensure_success_response(&response, "Simple Earn 活期申购")?;
+        response_id(&response, "purchaseId", "Simple Earn 活期申购")
     }
 
     /// 在现货账户和期权账户之间划转资金。
@@ -266,7 +274,8 @@ impl BinanceClient {
         transfer_type: &str,
         asset: &str,
         amount: Decimal,
-    ) -> AppResult<()> {
+    ) -> AppResult<String> {
+        let amount = Self::funding_amount_param("Binance 账户划转", amount)?;
         let response = self
             .signed_post_value(
                 &self.spot_base,
@@ -274,15 +283,98 @@ impl BinanceClient {
                 vec![
                     ("type".to_string(), transfer_type.to_string()),
                     ("asset".to_string(), asset.to_string()),
-                    ("amount".to_string(), amount.normalize().to_string()),
+                    ("amount".to_string(), amount),
                 ],
             )
             .await?;
-        if response.get("tranId").is_some() {
-            Ok(())
-        } else {
-            Err(AppError::Binance("Binance 划转响应缺少 tranId".to_string()))
+        response_id(&response, "tranId", "Binance 账户划转")
+    }
+
+    /// 查询 Binance 账户划转历史，用于资金动作恢复。
+    pub async fn universal_transfer_history(
+        &self,
+        transfer_type: &str,
+        start_time_ms: i64,
+        end_time_ms: i64,
+    ) -> AppResult<Vec<UniversalTransferRecord>> {
+        let response = self
+            .signed_get(
+                &self.spot_base,
+                "/sapi/v1/asset/transfer",
+                vec![
+                    ("type".to_string(), transfer_type.to_string()),
+                    ("startTime".to_string(), start_time_ms.to_string()),
+                    ("endTime".to_string(), end_time_ms.to_string()),
+                    ("current".to_string(), "1".to_string()),
+                    ("size".to_string(), "100".to_string()),
+                ],
+            )
+            .await?;
+        parse_universal_transfer_records(&response)
+    }
+
+    /// 查询 Simple Earn 活期申购历史，用于资金动作恢复。
+    pub async fn simple_earn_flexible_subscription_history(
+        &self,
+        product_id: Option<&str>,
+        purchase_id: Option<&str>,
+        asset: &str,
+        start_time_ms: i64,
+        end_time_ms: i64,
+    ) -> AppResult<Vec<SimpleEarnSubscriptionRecord>> {
+        let mut params = vec![
+            ("asset".to_string(), asset.to_string()),
+            ("startTime".to_string(), start_time_ms.to_string()),
+            ("endTime".to_string(), end_time_ms.to_string()),
+            ("current".to_string(), "1".to_string()),
+            ("size".to_string(), "100".to_string()),
+        ];
+        if let Some(product_id) = product_id.filter(|value| !value.trim().is_empty()) {
+            params.push(("productId".to_string(), product_id.to_string()));
         }
+        if let Some(purchase_id) = purchase_id.filter(|value| !value.trim().is_empty()) {
+            params.push(("purchaseId".to_string(), purchase_id.to_string()));
+        }
+        let response = self
+            .signed_get(
+                &self.spot_base,
+                "/sapi/v1/simple-earn/flexible/history/subscriptionRecord",
+                params,
+            )
+            .await?;
+        parse_simple_earn_subscription_records(&response)
+    }
+
+    /// 查询 Simple Earn 活期赎回历史，用于资金动作恢复。
+    pub async fn simple_earn_flexible_redemption_history(
+        &self,
+        product_id: Option<&str>,
+        redeem_id: Option<&str>,
+        asset: &str,
+        start_time_ms: i64,
+        end_time_ms: i64,
+    ) -> AppResult<Vec<SimpleEarnRedemptionRecord>> {
+        let mut params = vec![
+            ("asset".to_string(), asset.to_string()),
+            ("startTime".to_string(), start_time_ms.to_string()),
+            ("endTime".to_string(), end_time_ms.to_string()),
+            ("current".to_string(), "1".to_string()),
+            ("size".to_string(), "100".to_string()),
+        ];
+        if let Some(product_id) = product_id.filter(|value| !value.trim().is_empty()) {
+            params.push(("productId".to_string(), product_id.to_string()));
+        }
+        if let Some(redeem_id) = redeem_id.filter(|value| !value.trim().is_empty()) {
+            params.push(("redeemId".to_string(), redeem_id.to_string()));
+        }
+        let response = self
+            .signed_get(
+                &self.spot_base,
+                "/sapi/v1/simple-earn/flexible/history/redemptionRecord",
+                params,
+            )
+            .await?;
+        parse_simple_earn_redemption_records(&response)
     }
 
     /// 查询现货价格。当前 v1 固定用于 `BTCUSDT`。
@@ -605,6 +697,21 @@ impl BinanceClient {
         Ok(params)
     }
 
+    fn funding_amount_param(action: &str, amount: Decimal) -> AppResult<String> {
+        let normalized = amount.normalize();
+        if normalized <= Decimal::ZERO {
+            return Err(AppError::Config(format!(
+                "{action} amount 必须大于 0，已阻止发送 Binance 资金请求"
+            )));
+        }
+        if normalized.scale() > BINANCE_FUNDING_AMOUNT_SCALE {
+            return Err(AppError::Config(format!(
+                "{action} amount 小数位超过 {BINANCE_FUNDING_AMOUNT_SCALE} 位，已阻止发送 Binance 资金请求"
+            )));
+        }
+        Ok(normalized.to_string())
+    }
+
     /// 解码 Binance HTTP 响应。
     ///
     /// 非 2xx 响应只返回 code/msg 摘要，不把完整响应体带到错误文本里。
@@ -628,6 +735,14 @@ impl BinanceClient {
         }
         serde_json::from_str::<Value>(body).map_err(|error| AppError::Binance(error.to_string()))
     }
+}
+
+fn response_id(value: &Value, key: &str, operation: &str) -> AppResult<String> {
+    value
+        .get(key)
+        .map(value_to_string)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| AppError::Binance(format!("{operation}响应缺少 {key} 字段")))
 }
 
 /// 根据双币赢方向决定现货补齐方向。

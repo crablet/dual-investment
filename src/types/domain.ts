@@ -249,6 +249,35 @@ export interface OrderAttemptView {
   updatedAt: string
 }
 
+/** 资金动作恢复记录视图。 */
+export interface FundingAttemptView {
+  id: string
+  chainId: string
+  kind: string
+  kindLabel: string
+  purpose: string
+  asset: string
+  amount: DecimalString
+  transferType?: string
+  productId?: string
+  exchangeRef?: string
+  status: string
+  message: string
+  factSource: string
+  nextAction: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type FundingAttemptManualResolution = 'confirmed' | 'failed'
+
+/** 人工核对资金恢复记录后的处置请求。 */
+export interface ResolveFundingAttemptRequest {
+  attemptId: string
+  resolution: FundingAttemptManualResolution
+  confirmManual: boolean
+}
+
 /** 手动下单进度事件，只用于前端反馈，不作为交易事实来源。 */
 export interface OrderProgressEvent {
   flowId: string
@@ -273,6 +302,7 @@ export interface AppSnapshot {
   risk: RiskSnapshot
   autoRule: AutoInvestmentRule
   orderAttempts: OrderAttemptView[]
+  fundingAttempts: FundingAttemptView[]
 }
 
 /** 连接 Binance 的表单请求。Secret 只会传给 Rust keyring 写入流程。 */

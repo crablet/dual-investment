@@ -9,6 +9,7 @@ use crate::domain::{
 use crate::strategy;
 
 const SELL_PUT_REBALANCE_USDT_BUFFER: Decimal = dec!(1.10);
+const BINANCE_FUNDING_AMOUNT_SCALE: u32 = 8;
 
 pub(super) fn option_funding_shortfall(
     account: &OptionAccountSnapshot,
@@ -86,4 +87,14 @@ pub(super) fn round_up_funding_amount(value: Decimal) -> Decimal {
         return Decimal::ZERO;
     }
     value.round_dp_with_strategy(2, RoundingStrategy::ToPositiveInfinity)
+}
+
+pub(super) fn round_down_funding_amount(value: Decimal) -> Decimal {
+    if value <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+    value.round_dp_with_strategy(
+        BINANCE_FUNDING_AMOUNT_SCALE,
+        RoundingStrategy::ToNegativeInfinity,
+    )
 }

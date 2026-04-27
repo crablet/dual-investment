@@ -12,8 +12,8 @@ Rust 后端要求 Rust 1.95 或更新版本。
   - 卖 Put 抄底：卖出 BTC 看跌期权，到期价低于执行价时自动买入 BTC。
   - 卖 Call 止盈：卖出 BTC 看涨期权，到期价高于执行价时自动卖出 BTC。
 - 双币赢工作台：低买/高卖方向选择、候选筛选、按张数下单和自动复投设置在同一页面完成。候选范围为到期 `1-90` 天，低买只展示执行价低于现货的 Put，高卖只展示执行价高于现货的 Call。
-- 账户和资金：后端汇总期权保证金、现货账户和 Binance Simple Earn 真实持仓；下单或到期补齐前会检查余额，不足时在确认过的交易流程内赎回活期、划转保证金或归集空闲资金。
-- 订单、恢复和接管：真实期权下单以 Binance 返回的订单号和状态为准；本地保存失败或请求结果不确定时保留 `order_attempts` 恢复线索，恢复时重新查询 Binance。Binance 返回终态且 0 成交的期权订单会记录为下单失败，不会创建或恢复为策略订单。订单快照会保存 Rust 侧按真实成交字段计算的年化收益率。也可以在订单页接管当前 Binance 期权义务仓，让本机继续同步、到期结算和必要的现货补齐。
+- 账户和资金：后端汇总期权保证金、现货账户和 Binance Simple Earn 真实持仓；下单或到期补齐前会检查余额，不足时在确认过的交易流程内赎回活期、划转保证金。期权账户空闲 USDT 或现货补齐后的 BTC/USDT 会在结算收尾流程中归集到 Simple Earn 活期，申购数量低于产品最小申购额时会跳过。
+- 订单、资金恢复和接管：真实期权下单以 Binance 返回的订单号和状态为准；本地保存失败或请求结果不确定时保留 `order_attempts` 恢复线索，恢复时重新查询 Binance。Simple Earn 活期申购/赎回和现货-期权账户划转会先写入 `funding_attempts`，再发送 Binance，并通过 Binance 历史接口确认 `tranId`、`purchaseId` 或 `redeemId`。存在待确认恢复记录时会暂停新的真实下单、自动策略和后续资金动作。订单快照会保存 Rust 侧按真实成交字段计算的年化收益率。也可以在订单页接管当前 Binance 期权义务仓，让本机继续同步、到期结算和必要的现货补齐。
 - 运行观测：后台同步返回健康状态，设置页可查看脱敏日志；总览事件日历从当前快照中的订单、规则、风险和恢复记录派生。
 - 凭据连接：API 凭据保存在系统 keyring。启动或运行中如果已保存凭据暂时连接失败，前端会按退避间隔自动重试；权限错误、凭据缺失等需要人工处理的错误会暂停自动重连。
 
@@ -23,9 +23,13 @@ Rust 后端要求 Rust 1.95 或更新版本。
 
 币安期权是现金结算；到期 ITM 后，本应用会通过额外的现货补齐订单形成类似双币赢的换币结果。期权到期、行权和本地合成交割使用 Binance `exchangeInfo.expiryDate` 的毫秒时间戳；到期结算价格只使用 Binance 行权记录接口，不用现货价替代。
 
-下单前会校验合约状态、数量 `LOT_SIZE.stepSize`、价格 `PRICE_FILTER.tickSize`、Binance 当前价格上下限、可用保证金和下单后保证金占用率；默认保证金占用率风控上限为 60%。卖 Put 到期低买 BTC 时，现货补齐 USDT 需求按结算价和补齐 BTC 数量预留 10% 缓冲。
+下单前会校验合约状态、数量 `LOT_SIZE.stepSize`、价格 `PRICE_FILTER.tickSize`、Binance 当前价格上下限、可用保证金和下单后保证金占用率；默认保证金占用率风控上限为 60%。期权保证金准备会同时覆盖可用保证金缺口和 60% 风控所需的权益缓冲，现货到期权划转确认后会短时间刷新期权账户快照，确认 Binance 已反映到账后再执行本地下单风控；刷新后仍不满足时，按最新账户事实拒绝下单并执行空闲资金归集。卖 Put 到期低买 BTC 时，现货补齐 USDT 需求按结算价和补齐 BTC 数量预留 10% 缓冲。
 
-Binance 查询类请求会做短退避重试；真实下单和资金移动不会在网络失败时盲目重发。请求结果不确定时，应用会先按 `clientOrderId` 或交易所订单号重新查询 Binance。
+Binance 查询类请求会做短退避重试；真实下单和资金移动不会在网络失败时盲目重发。期权下单结果不确定时，应用会先按 `clientOrderId` 或交易所订单号重新查询 Binance。资金动作结果不确定时，应用会按本地 `funding_attempts` 中的脱敏事实查询 Binance Universal Transfer 和 Simple Earn 历史，确认成功、失败、仍在处理中或需要人工核对。
+
+资金恢复记录覆盖三类真实资金动作：`universal_transfer`、`simple_earn_redeem` 和 `simple_earn_subscribe`。记录状态包括 `attempted`、`exchange_ack`、`uncertain`、`pending`、`confirmed`、`failed` 和 `blocked`；`blocked` 表示多次查询仍无法唯一确认或历史记录匹配不唯一，需要人工核对 Binance 事实后再决定是否重新触发业务流程。
+
+恢复中心同时展示订单恢复记录和资金恢复记录。后台同步会先尝试推进到期的资金恢复记录；只要仍有未确认恢复记录，应用会阻断自动策略、手动下单和结算中的后续资金动作，避免在事实不清楚时重复执行真实资金操作。对于 `blocked` 资金恢复记录，用户可在人工核对 Binance 账户事实后标记为已确认或已失败；这个操作只解除恢复阻断，不会重新发送资金请求。
 
 如果 Binance 查询确认期权订单处于 `EXPIRED`、`REJECTED`、`CANCELED` 或 `CANCELLED` 且成交数量为 0，应用会把对应 `order_attempts` 标记为失败并停止后续策略流程；这类订单不是活跃策略，也不会进入到期结算或现货补齐。
 
@@ -85,7 +89,7 @@ src-tauri/
   src/binance/       Binance HTTP 辅助和响应解析
   src/domain.rs      金融领域模型
   src/logs.rs        每日文件日志读写
-  src/persistence.rs SQLite 订单、订单尝试和自动规则存储
+  src/persistence.rs SQLite 订单、订单尝试、资金动作恢复和自动规则存储
   src/secrets.rs     系统 keyring 凭据读写
   src/strategy.rs    策略计算入口
   src/strategy/      候选、订单、余额、风险和 Decimal 工具
