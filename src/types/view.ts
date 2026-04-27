@@ -21,11 +21,12 @@ export interface MetricCardModel {
   tone: string
 }
 
-/** 收益构成图展示项。 */
+/** 构成图展示项。 */
 export interface PnlBreakdownItem {
+  key?: string
   label: string
   value: DecimalString
-  color: string
+  color?: string
 }
 
 /** 手动下单进度步骤展示模型。 */

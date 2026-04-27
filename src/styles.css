@@ -473,66 +473,12 @@ input {
   font-variant-numeric: tabular-nums;
 }
 
-.donut-wrap {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  align-items: center;
-  gap: 18px;
-}
-
-.donut {
-  width: 150px;
-  height: 150px;
-  justify-self: center;
-}
-
-.donut-bg {
-  fill: transparent;
-  stroke: rgba(255, 255, 255, 0.08);
-  stroke-width: 6;
-}
-
-.donut-segment {
-  fill: transparent;
-  stroke-width: 6;
-}
-
-.donut text {
-  fill: var(--text);
-  font-size: 4px;
-}
-
-.donut-legend,
 .payoff-stats,
 .summary-cards,
 .protection-grid {
   display: grid;
   gap: 10px;
   min-width: 0;
-}
-
-.legend-row {
-  display: grid;
-  grid-template-columns: 10px minmax(96px, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.legend-row span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.legend-row p {
-  margin: 0;
-  color: var(--muted);
-  min-width: 0;
-}
-
-.legend-row strong {
-  white-space: nowrap;
 }
 
 .table-wrap {
@@ -1883,6 +1829,16 @@ button.opportunity-row.selected:hover {
 
   .view-grid > .metric-card {
     grid-column: span 3;
+  }
+}
+
+@media (max-width: 1320px) {
+  .obligation-list article {
+    grid-template-columns: minmax(120px, 1fr) minmax(52px, auto);
+  }
+
+  .obligation-list em {
+    grid-column: 1 / -1;
   }
 }
 

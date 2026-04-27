@@ -21,7 +21,6 @@ interface PendingTask {
 const store = useAppStore()
 
 const activeStrategies = computed(() => store.runningOrders.slice(0, 4))
-const pnlCenter = computed(() => Number(store.pnl?.cumulative ?? 0).toLocaleString('zh-CN'))
 const expiringOrdersCount = computed(() => {
   const today = new Date()
   const threshold = new Date(today.getTime() + 7 * 86400_000)
@@ -125,7 +124,13 @@ const autoStatusItems = computed(() => [
     </Panel>
 
     <Panel title="收益构成" class="span-6">
-      <DonutChart v-if="store.pnl" :items="store.pnlBreakdown" :center="pnlCenter" />
+      <DonutChart
+        v-if="store.pnl"
+        :items="store.pnlBreakdown"
+        :center-value="store.pnl.cumulative"
+        center-label="累计收益"
+        empty-text="暂无收益构成数据"
+      />
     </Panel>
 
     <Panel title="待处理事项" class="span-6">

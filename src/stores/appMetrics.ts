@@ -1,7 +1,6 @@
 import type { AppSettings, AppSnapshot } from '@/types/domain'
 import type { MetricCardModel, PnlBreakdownItem } from '@/types/view'
 import {
-  isNegativeDecimalString,
   isZeroDecimalString,
   sumDecimalStrings,
 } from '@/utils/decimal'
@@ -72,14 +71,16 @@ export function buildPnlBreakdown(report: AppSnapshot['pnl'] | undefined): PnlBr
 
   return [
     {
+      key: 'option-premium',
       label: '期权权利金',
       value: report.optionPremium,
       color: '#d89b2b',
     },
     {
+      key: 'floating-spot',
       label: '现货补齐浮动盈亏',
       value: report.floatingSpot,
-      color: isNegativeDecimalString(report.floatingSpot) ? '#cc4b37' : '#2fa66a',
+      color: '#5f8ff5',
     },
   ]
 }

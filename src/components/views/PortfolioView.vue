@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { BalanceRow } from '@/types/domain'
+import type { PnlBreakdownItem } from '@/types/view'
 // 持仓与现货视图。
 // 展示期权义务仓和现货资产；所有资金事实来自后端快照，前端仅做展示聚合。
 import { computed } from 'vue'
@@ -8,6 +10,7 @@ import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { localDateTimeLabel } from '@/utils/date'
+import { sumDecimalStrings } from '@/utils/decimal'
 
 const store = useAppStore()
 const { decimal, money } = useFormat()
@@ -26,16 +29,32 @@ const sellCallQuantity = computed(() =>
     .filter(order => order.direction === 'sellCall')
     .reduce((sum, order) => sum + Number(order.quantity), 0),
 )
-const balanceBreakdown = computed(() =>
-  store.balances.map((balance, index) => ({
-    label: balance.asset,
-    value: balance.usdtValue,
-    color: ['#f5b625', '#5f8ff5', '#52c66f'][index % 3],
-  })),
+const balanceBreakdown = computed<PnlBreakdownItem[]>(() => buildBalanceBreakdown(store.balances))
+const balanceTotalValue = computed(() =>
+  sumDecimalStrings(balanceBreakdown.value.map(item => item.value)),
 )
 
 function expiryLabel(order: { expiryAt: string }) {
   return localDateTimeLabel(order.expiryAt)
+}
+
+function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
+  const grouped = new Map<string, string[]>()
+  for (const balance of balances) {
+    if (!balance.usdtValueKnown) {
+      continue
+    }
+    const asset = balance.asset.trim().toUpperCase()
+    const values = grouped.get(asset) ?? []
+    values.push(balance.usdtValue)
+    grouped.set(asset, values)
+  }
+
+  return [...grouped.entries()].map(([asset, values]) => ({
+    key: asset,
+    label: asset,
+    value: sumDecimalStrings(values),
+  }))
 }
 </script>
 
@@ -62,8 +81,10 @@ function expiryLabel(order: { expiryAt: string }) {
 
     <Panel title="资金与保证金" class="span-4">
       <DonutChart
-        :center="Number(store.risk?.marginUsage ?? 0).toFixed(1)"
         :items="balanceBreakdown"
+        :center-value="balanceTotalValue"
+        center-label="资产估值"
+        empty-text="暂无可估值资产"
       />
     </Panel>
 
@@ -91,7 +112,10 @@ function expiryLabel(order: { expiryAt: string }) {
               <td class="positive">{{ money(order.estimatedPnl) }}</td>
               <td>{{ order.status === 'partiallyFilled' ? '部分成交' : '运行中' }}</td>
             </tr>
-            <tr v-for="balance in store.balances" :key="balance.asset">
+            <tr
+              v-for="(balance, index) in store.balances"
+              :key="`${balance.source}:${balance.asset}:${index}`"
+            >
               <td>{{ balance.asset }}</td>
               <td>现货</td>
               <td>{{ decimal(balance.free) }}</td>
