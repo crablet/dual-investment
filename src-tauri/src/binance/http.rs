@@ -43,6 +43,7 @@ pub(super) fn is_transient_query_error(error: &AppError) -> bool {
                 || message.contains("连接失败")
                 || message.contains("响应体读取失败")
                 || message.contains("网络请求失败")
+                || message.contains("响应缺少 rows 字段")
                 || message.contains("HTTP 429")
                 || message.contains("HTTP 500")
                 || message.contains("HTTP 502")

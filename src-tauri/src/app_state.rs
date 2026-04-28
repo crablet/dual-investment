@@ -99,6 +99,29 @@ enum FundingHistoryOutcome {
     Ambiguous,
 }
 
+#[derive(Debug, Default)]
+struct SettlementSweepPlan {
+    option_idle_usdt_needed: bool,
+    settled_symbols: Vec<String>,
+    deferred_reasons: Vec<String>,
+}
+
+impl SettlementSweepPlan {
+    fn request_option_idle_usdt(&mut self, option_symbol: &str) {
+        self.option_idle_usdt_needed = true;
+        self.settled_symbols.push(option_symbol.to_string());
+    }
+
+    fn defer(&mut self, option_symbol: &str, reason: impl Into<String>) {
+        self.deferred_reasons
+            .push(format!("{option_symbol}：{}", reason.into()));
+    }
+
+    fn has_deferred_work(&self) -> bool {
+        !self.deferred_reasons.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct RuntimeHealthState {
     last_tick_at: Option<chrono::DateTime<Utc>>,
@@ -1690,6 +1713,7 @@ impl AppState {
         let client = self.live_client().await?;
         let orders = self.orders.read().await.clone();
         let mut updated = Vec::new();
+        let mut sweep_plan = SettlementSweepPlan::default();
 
         for mut order in orders.into_iter().filter(should_settle_order) {
             if order.filled_quantity <= Decimal::ZERO {
@@ -1703,12 +1727,16 @@ impl AppState {
 
             let settlement_price = match self.settlement_price(&client, &order).await {
                 Ok(Some(price)) => price,
-                Ok(None) => continue,
+                Ok(None) => {
+                    sweep_plan.defer(&order.option_symbol, "Binance 行权记录暂未给出结算价");
+                    continue;
+                }
                 Err(error) => {
                     self.record_warning(
                         "strategy.settlement.price_failed",
                         &format!("{} 结算价读取失败：{}", order.option_symbol, error),
                     )?;
+                    sweep_plan.defer(&order.option_symbol, "结算价读取失败，等待下一轮重试");
                     continue;
                 }
             };
@@ -1726,18 +1754,19 @@ impl AppState {
                     "strategy.settlement.otm",
                     &format!("{} 到期 OTM，无需现货补齐", order.option_symbol),
                 )?;
-                let _trade_guard = self.trade_lock.lock().await;
-                self.sweep_option_idle_usdt_best_effort(&client, "期权到期结算后归集")
-                    .await;
+                sweep_plan.request_option_idle_usdt(&order.option_symbol);
                 updated.push(order);
                 continue;
             }
 
+            let option_symbol = order.option_symbol.clone();
             match self.rebalance_spot_if_needed(&client, order).await {
                 Ok(order) => {
-                    let _trade_guard = self.trade_lock.lock().await;
-                    self.sweep_option_idle_usdt_best_effort(&client, "期权到期补齐后归集")
-                        .await;
+                    if order.status == StrategyStatus::Settled {
+                        sweep_plan.request_option_idle_usdt(&order.option_symbol);
+                    } else {
+                        sweep_plan.defer(&order.option_symbol, "现货补齐未完成，暂不归集期权资金");
+                    }
                     updated.push(order);
                 }
                 Err(error) => {
@@ -1745,10 +1774,59 @@ impl AppState {
                         "strategy.rebalance.scan_failed",
                         &format!("到期补齐流程失败：{error}"),
                     )?;
+                    sweep_plan.defer(&option_symbol, "现货补齐流程失败，等待人工或下一轮恢复");
                 }
             }
         }
+        self.sweep_settlement_option_idle_usdt_once(&client, &sweep_plan)
+            .await?;
         Ok(updated)
+    }
+
+    async fn sweep_settlement_option_idle_usdt_once(
+        &self,
+        client: &BinanceClient,
+        plan: &SettlementSweepPlan,
+    ) -> AppResult<()> {
+        if !plan.option_idle_usdt_needed {
+            return Ok(());
+        }
+        if plan.has_deferred_work() {
+            self.record_warning(
+                "funding.settlement_sweep.deferred",
+                &format!(
+                    "本轮到期结算仍有未完成项，暂不归集期权账户 USDT：{}",
+                    plan.deferred_reasons.join("；")
+                ),
+            )?;
+            return Ok(());
+        }
+        if self.pending_recovery_count()? > 0 {
+            self.record_warning(
+                "funding.settlement_sweep.deferred",
+                "存在待确认恢复记录，暂不执行本轮结算后的期权 USDT 归集",
+            )?;
+            return Ok(());
+        }
+
+        let _trade_guard = self.trade_lock.lock().await;
+        if self.pending_recovery_count()? > 0 {
+            self.record_warning(
+                "funding.settlement_sweep.deferred",
+                "等待归集锁期间出现待确认恢复记录，已跳过本轮结算后的期权 USDT 归集",
+            )?;
+            return Ok(());
+        }
+        self.record_log(
+            "funding.settlement_sweep.started",
+            &format!(
+                "本轮到期结算已完成，准备归集期权账户闲置 USDT，涉及 {}",
+                plan.settled_symbols.join("、")
+            ),
+        )?;
+        self.sweep_option_idle_usdt_best_effort(client, "期权到期结算后归集")
+            .await;
+        Ok(())
     }
 
     async fn settlement_price(

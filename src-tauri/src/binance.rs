@@ -297,20 +297,19 @@ impl BinanceClient {
         start_time_ms: i64,
         end_time_ms: i64,
     ) -> AppResult<Vec<UniversalTransferRecord>> {
-        let response = self
-            .signed_get(
-                &self.spot_base,
-                "/sapi/v1/asset/transfer",
-                vec![
-                    ("type".to_string(), transfer_type.to_string()),
-                    ("startTime".to_string(), start_time_ms.to_string()),
-                    ("endTime".to_string(), end_time_ms.to_string()),
-                    ("current".to_string(), "1".to_string()),
-                    ("size".to_string(), "100".to_string()),
-                ],
-            )
-            .await?;
-        parse_universal_transfer_records(&response)
+        self.signed_get_parsed(
+            &self.spot_base,
+            "/sapi/v1/asset/transfer",
+            vec![
+                ("type".to_string(), transfer_type.to_string()),
+                ("startTime".to_string(), start_time_ms.to_string()),
+                ("endTime".to_string(), end_time_ms.to_string()),
+                ("current".to_string(), "1".to_string()),
+                ("size".to_string(), "100".to_string()),
+            ],
+            parse_universal_transfer_records,
+        )
+        .await
     }
 
     /// 查询 Simple Earn 活期申购历史，用于资金动作恢复。
@@ -335,14 +334,13 @@ impl BinanceClient {
         if let Some(purchase_id) = purchase_id.filter(|value| !value.trim().is_empty()) {
             params.push(("purchaseId".to_string(), purchase_id.to_string()));
         }
-        let response = self
-            .signed_get(
-                &self.spot_base,
-                "/sapi/v1/simple-earn/flexible/history/subscriptionRecord",
-                params,
-            )
-            .await?;
-        parse_simple_earn_subscription_records(&response)
+        self.signed_get_parsed(
+            &self.spot_base,
+            "/sapi/v1/simple-earn/flexible/history/subscriptionRecord",
+            params,
+            parse_simple_earn_subscription_records,
+        )
+        .await
     }
 
     /// 查询 Simple Earn 活期赎回历史，用于资金动作恢复。
@@ -367,14 +365,13 @@ impl BinanceClient {
         if let Some(redeem_id) = redeem_id.filter(|value| !value.trim().is_empty()) {
             params.push(("redeemId".to_string(), redeem_id.to_string()));
         }
-        let response = self
-            .signed_get(
-                &self.spot_base,
-                "/sapi/v1/simple-earn/flexible/history/redemptionRecord",
-                params,
-            )
-            .await?;
-        parse_simple_earn_redemption_records(&response)
+        self.signed_get_parsed(
+            &self.spot_base,
+            "/sapi/v1/simple-earn/flexible/history/redemptionRecord",
+            params,
+            parse_simple_earn_redemption_records,
+        )
+        .await
     }
 
     /// 查询现货价格。当前 v1 固定用于 `BTCUSDT`。
@@ -473,6 +470,25 @@ impl BinanceClient {
     ) -> AppResult<Value> {
         self.query_with_retry(|| self.signed_get_once(base, path, &params))
             .await
+    }
+
+    async fn signed_get_parsed<T>(
+        &self,
+        base: &str,
+        path: &str,
+        params: Vec<(String, String)>,
+        parse: fn(&Value) -> AppResult<T>,
+    ) -> AppResult<T> {
+        // 历史接口偶尔会返回 2xx 但缺少 rows；解析必须纳入查询重试闭包，
+        // 否则 transient 的响应结构异常会直接制造恢复记录噪声。
+        self.query_with_retry(|| {
+            let params = params.clone();
+            async move {
+                let response = self.signed_get_once(base, path, &params).await?;
+                parse(&response)
+            }
+        })
+        .await
     }
 
     /// 分页查询 Simple Earn 持仓。

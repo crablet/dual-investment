@@ -221,10 +221,7 @@ pub(super) fn ensure_success_response(value: &Value, operation: &str) -> AppResu
 pub(super) fn parse_universal_transfer_records(
     value: &Value,
 ) -> AppResult<Vec<UniversalTransferRecord>> {
-    value
-        .get("rows")
-        .and_then(Value::as_array)
-        .ok_or_else(|| AppError::Binance("Binance 划转历史响应缺少 rows 字段".to_string()))?
+    history_rows(value, "Binance 划转历史")?
         .iter()
         .map(parse_universal_transfer_record)
         .collect()
@@ -244,12 +241,7 @@ fn parse_universal_transfer_record(value: &Value) -> AppResult<UniversalTransfer
 pub(super) fn parse_simple_earn_subscription_records(
     value: &Value,
 ) -> AppResult<Vec<SimpleEarnSubscriptionRecord>> {
-    value
-        .get("rows")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            AppError::Binance("Binance Simple Earn 申购历史响应缺少 rows 字段".to_string())
-        })?
+    history_rows(value, "Binance Simple Earn 申购历史")?
         .iter()
         .map(parse_simple_earn_subscription_record)
         .collect()
@@ -269,15 +261,23 @@ fn parse_simple_earn_subscription_record(value: &Value) -> AppResult<SimpleEarnS
 pub(super) fn parse_simple_earn_redemption_records(
     value: &Value,
 ) -> AppResult<Vec<SimpleEarnRedemptionRecord>> {
-    value
-        .get("rows")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            AppError::Binance("Binance Simple Earn 赎回历史响应缺少 rows 字段".to_string())
-        })?
+    history_rows(value, "Binance Simple Earn 赎回历史")?
         .iter()
         .map(parse_simple_earn_redemption_record)
         .collect()
+}
+
+fn history_rows<'a>(value: &'a Value, operation: &str) -> AppResult<&'a [Value]> {
+    if let Some(rows) = value.get("rows").and_then(Value::as_array) {
+        return Ok(rows.as_slice());
+    }
+    let total_is_zero = value.get("total").is_some_and(|total| {
+        total.as_u64() == Some(0) || total.as_str().is_some_and(|text| text == "0")
+    });
+    if total_is_zero {
+        return Ok(&[]);
+    }
+    Err(AppError::Binance(format!("{operation}响应缺少 rows 字段")))
 }
 
 fn parse_simple_earn_redemption_record(value: &Value) -> AppResult<SimpleEarnRedemptionRecord> {
