@@ -5,7 +5,7 @@
 -->
 <script setup lang="ts">
 import type { RiskSeverity } from '@/types/domain'
-import { Activity, AlertTriangle, Gauge, ShieldCheck } from '@lucide/vue'
+import { Activity, Gauge, ShieldCheck } from '@lucide/vue'
 import { NButton, NIcon, NProgress, NTag } from 'naive-ui'
 import { computed } from 'vue'
 import Panel from '@/components/common/Panel.vue'
@@ -120,7 +120,7 @@ function tagType(severity: RiskSeverity) {
           <tbody>
             <tr v-for="alert in store.risk?.alerts" :key="alert.id">
               <td>{{ alert.createdAt.slice(11, 19) }}</td>
-              <td><NIcon :component="AlertTriangle" /> 风险预警</td>
+              <td>风险预警</td>
               <td>{{ alert.message }}</td>
               <td>{{ alert.severity }}</td>
               <td><NTag :type="tagType(alert.severity)" size="small">预警中</NTag></td>
