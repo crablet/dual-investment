@@ -6,7 +6,7 @@
 <script setup lang="ts">
 import type { BalanceRow } from '@/types/domain'
 import type { PnlBreakdownItem } from '@/types/view'
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
 import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
 import Panel from '@/components/common/Panel.vue'
@@ -17,9 +17,28 @@ import { sumDecimalStrings } from '@/utils/decimal'
 
 const store = useAppStore()
 const { decimal, money } = useFormat()
+const currentTimeMs = shallowRef(Date.now())
+let currentTimeTimer: number | undefined
+
+onMounted(() => {
+  currentTimeTimer = window.setInterval(() => {
+    currentTimeMs.value = Date.now()
+  }, 60_000)
+})
+
+onUnmounted(() => {
+  if (currentTimeTimer !== undefined) {
+    window.clearInterval(currentTimeTimer)
+  }
+})
 
 const obligationOrders = computed(() =>
   store.orders.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
+)
+const upcomingExpiryOrders = computed(() =>
+  obligationOrders.value
+    .filter(order => new Date(order.expiryAt).getTime() > currentTimeMs.value)
+    .sort((left, right) => new Date(left.expiryAt).getTime() - new Date(right.expiryAt).getTime()),
 )
 // 这里的义务仓暴露额用于 UI 概览，真实保证金校验仍在 Rust 风控中完成。
 const sellPutMargin = computed(() =>
@@ -136,8 +155,8 @@ function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
 
     <Panel title="到期日历" class="span-4">
       <div class="calendar-list">
-        <p v-if="store.orders.length === 0" class="empty-state">暂无到期订单</p>
-        <article v-for="order in store.orders" :key="order.id">
+        <p v-if="upcomingExpiryOrders.length === 0" class="empty-state">暂无未到期订单</p>
+        <article v-for="order in upcomingExpiryOrders" :key="order.id">
           <strong>{{ expiryLabel(order) }}</strong>
           <span>{{ order.direction === 'sellPut' ? '卖出看跌' : '卖出看涨' }}</span>
           <em>{{ order.quantity }} BTC</em>

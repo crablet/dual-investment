@@ -4,6 +4,7 @@
 统一承载候选浏览、手动下单和自动复投规则；没有独立自动复投页面或 mock 数据路径。
 -->
 <script setup lang="ts">
+import type { StrategyCandidate } from '@/types/domain'
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -25,6 +26,7 @@ import {
 } from 'naive-ui'
 import { reactive, shallowRef, watchEffect } from 'vue'
 import OrderProgressPanel from '@/components/common/OrderProgressPanel.vue'
+import OrderReviewDialog from '@/components/orders/OrderReviewDialog.vue'
 import {
   candidateSortColumns,
   expiryFilters,
@@ -45,6 +47,14 @@ interface RuleForm {
   maxDaysToExpiry: number
   includeBtc: boolean
   excludeSameDirection: boolean
+}
+
+interface ManualOrderReview {
+  candidate: StrategyCandidate
+  quantity: string
+  projectedPremium: string
+  projectedBreakeven: string
+  daysToExpiry: number
 }
 
 const store = useAppStore()
@@ -72,6 +82,7 @@ const {
   resetCandidateFilters,
 } = useDualInvestmentCandidates()
 const advancedAutoOpen = shallowRef(false)
+const orderReview = shallowRef<ManualOrderReview>()
 
 const ruleForm = reactive<RuleForm>({
   enabled: false,
@@ -144,10 +155,28 @@ function submit() {
   if (!candidate) {
     return
   }
-  // 手动下单也走真实 Binance 订单，确认后才传 `confirmLive: true`。
-  if (!window.confirm('确认发送 Binance 期权订单？')) {
+  // 冻结用户点击发送时看到的候选快照，避免确认弹窗打开后候选刷新导致展示和实际下单不一致。
+  orderReview.value = {
+    candidate,
+    quantity: form.quantity.toFixed(2),
+    projectedPremium: String(projectedPremium.value),
+    projectedBreakeven: String(projectedBreakeven.value),
+    daysToExpiry: daysUntil(candidate.expiryAt),
+  }
+}
+
+function closeOrderReview() {
+  orderReview.value = undefined
+}
+
+function confirmOrderReview() {
+  const review = orderReview.value
+  if (!review) {
     return
   }
+  closeOrderReview()
+  const { candidate, quantity } = review
+  // 手动下单也走真实 Binance 订单，只有复核弹窗确认后才传 `confirmLive: true`。
   void store.placeStrategy({
     candidateId: candidate.id,
     symbol: candidate.symbol,
@@ -156,7 +185,7 @@ function submit() {
     expiry: candidate.expiry,
     expiryAt: candidate.expiryAt,
     strike: candidate.strike,
-    quantity: form.quantity.toFixed(2),
+    quantity,
     limitPrice: candidate.limitPrice,
     confirmLive: true,
   })
@@ -412,5 +441,16 @@ function submit() {
         </div>
       </section>
     </aside>
+
+    <OrderReviewDialog
+      :show="Boolean(orderReview)"
+      :candidate="orderReview?.candidate"
+      :quantity="orderReview?.quantity ?? '0'"
+      :projected-premium="orderReview?.projectedPremium ?? '0'"
+      :projected-breakeven="orderReview?.projectedBreakeven ?? '0'"
+      :days-to-expiry="orderReview?.daysToExpiry ?? 0"
+      @close="closeOrderReview"
+      @confirm="confirmOrderReview"
+    />
   </div>
 </template>

@@ -9,7 +9,7 @@ Rust 后端要求 Rust 1.95 或更新版本。
 - 桌面端：Tauri 2 + Vue 3 + Naive UI + Rust。
 - 交易范围：v1 仅支持 `BTC/USDT`。
 - 策略方向：卖 Put 抄底、卖 Call 止盈；候选范围为到期 `1-90` 天，并按 `BTCUSDT` 现货价过滤方向。
-- 双币赢工作台：低买/高卖方向选择、候选筛选、按张数下单和自动复投设置在同一页面完成。
+- 双币赢工作台：低买/高卖方向选择、候选筛选、按张数下单和自动复投设置在同一页面完成；手动发送订单前会进入订单复核弹窗。
 - 账户和资金：后端汇总期权保证金、现货账户和 Binance Simple Earn 真实持仓；下单或到期补齐前检查余额，不足时在受控流程内赎回活期、划转保证金。
 - 订单和恢复：期权下单、现货补齐和资金动作都保留可恢复记录；请求结果不确定时重新查询 Binance 事实，存在待恢复记录时暂停新的真实交易和后续资金动作。
 - 持仓接管：订单页可接管当前 Binance 期权义务仓，让本机继续同步、到期结算和必要的现货补齐。
@@ -25,6 +25,8 @@ Binance 期权是现金结算；到期 ITM 后，应用会通过额外的现货�
 到期扫描按批次处理：一轮扫描会先处理本轮所有到期订单，只有所有可结算订单都明确落定、且不存在待恢复记录时，才会对期权账户闲置 USDT 执行一次 `OPTION_MAIN` 归集并继续申购 Simple Earn。若结算价缺失、现货补齐未完成或恢复记录待确认，本轮归集会被跳过，等待下一轮重新基于 Binance 事实判断。
 
 下单前会校验合约状态、数量 `LOT_SIZE.stepSize`、价格 `PRICE_FILTER.tickSize`、Binance 当前价格上下限、可用保证金和下单后保证金占用率；默认保证金占用率风控上限为 60%。卖 Put 到期低买 BTC 时，现货补齐 USDT 需求按结算价和补齐 BTC 数量预留 10% 缓冲。
+
+手动下单发送前必须经过应用内订单复核：复核页会展示方向、期权合约、数量、执行价、下单限价、到期时间、预计权利金、保本价、距现货和被行权概率。用户确认后才会发送 Binance 实盘订单。
 
 真实下单和资金移动不会在网络失败时盲目重发。订单结果不确定时按订单号重新查询 Binance；资金结果不确定时按 `funding_attempts` 中的脱敏事实查询 Binance 历史。多次查询仍无法唯一确认时，记录会进入 `blocked`，需要人工核对 Binance 事实后解除阻断。
 
@@ -68,6 +70,7 @@ src/
     common/AccountBalanceList.vue   账户资产聚合列表
     common/EventCalendarBoard.vue   总览事件日历看板
     orders/AdoptOptionPositionsPanel.vue  Binance 期权持仓接管面板
+    orders/OrderReviewDialog.vue    手动 Binance 订单复核弹窗
     settings/        Binance 连接和日志设置面板
   composables/       格式化和可复用前端逻辑
     useDualInvestmentCandidates.ts  双币赢候选筛选、排序和选中状态
