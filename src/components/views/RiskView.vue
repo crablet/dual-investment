@@ -8,9 +8,11 @@ import type { RiskSeverity } from '@/types/domain'
 import { Activity, Gauge, ShieldCheck } from '@lucide/vue'
 import { NButton, NIcon, NProgress, NTag } from 'naive-ui'
 import { computed } from 'vue'
+import BarList from '@/components/common/BarList.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
+import { relativeBarWidth } from '@/utils/bars'
 
 const store = useAppStore()
 const { money, percent } = useFormat()
@@ -25,8 +27,9 @@ const exposureRows = computed(() => {
   ]
   const max = Math.max(...rows.map(row => row.value), 1)
   return rows.map(row => ({
-    ...row,
-    width: `${Math.max((row.value / max) * 100, row.value > 0 ? 10 : 0)}%`,
+    label: row.label,
+    value: money(String(row.value)),
+    width: relativeBarWidth(row.value, max),
   }))
 })
 
@@ -79,12 +82,7 @@ function tagType(severity: RiskSeverity) {
     </Panel>
 
     <Panel title="风险暴露" class="span-6">
-      <div class="bar-list exposure">
-        <div v-for="row in exposureRows" :key="row.label">
-          <span>{{ row.label }}</span>
-          <strong :style="{ width: row.width }">{{ money(String(row.value)) }}</strong>
-        </div>
-      </div>
+      <BarList class="exposure" :items="exposureRows" />
     </Panel>
 
     <Panel title="预警中心" class="span-6">

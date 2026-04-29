@@ -101,28 +101,6 @@ input {
   padding: 22px;
 }
 
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border: 2px solid var(--gold);
-  border-radius: 50%;
-  color: var(--gold);
-  background: rgba(245, 182, 37, 0.08);
-}
-
-.dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.dot.green {
-  background: var(--green);
-}
-
 .shell-alert {
   margin-bottom: 14px;
 }
@@ -143,29 +121,17 @@ input {
   grid-column: span 3;
 }
 
-.span-3 {
-  grid-column: span 3;
-}
 .span-4 {
   grid-column: span 4;
 }
-.span-5 {
-  grid-column: span 5;
-}
 .span-6 {
   grid-column: span 6;
-}
-.span-7 {
-  grid-column: span 7;
 }
 .span-8 {
   grid-column: span 8;
 }
 .span-12 {
   grid-column: span 12;
-}
-.row-span-3 {
-  grid-row: span 3;
 }
 
 .panel,
@@ -259,13 +225,10 @@ input {
   color: var(--muted);
 }
 
-/* 通用列表组：保持账户、待办、设置和义务仓等信息块的垂直节奏一致。 */
+/* 通用列表组：保持账户、待办、订单详情和义务仓等信息块的垂直节奏一致。 */
 .account-list,
 .task-list,
-.scan-list,
 .detail-list,
-.setting-list,
-.security-list,
 .calendar-list,
 .obligation-list {
   display: grid;
@@ -324,7 +287,6 @@ input {
 .account-row,
 .task-row,
 .detail-list p,
-.setting-list article,
 .calendar-list article,
 .obligation-list article {
   display: flex;
@@ -431,8 +393,7 @@ input {
 .account-values em,
 .detail-list p > span,
 .calendar-list em,
-.obligation-list em,
-.setting-list span {
+.obligation-list em {
   color: var(--muted);
   font-style: normal;
 }
@@ -474,9 +435,7 @@ input {
   font-variant-numeric: tabular-nums;
 }
 
-.payoff-stats,
-.summary-cards,
-.protection-grid {
+.summary-cards {
   display: grid;
   gap: 10px;
   min-width: 0;
@@ -1020,10 +979,7 @@ input {
 }
 
 .order-strip article,
-.summary-cards article,
-.scan-list article,
-.payoff-stats article,
-.security-list .security-action {
+.summary-cards article {
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1034,61 +990,16 @@ input {
 .order-strip span,
 .order-strip em,
 .summary-cards span,
-.summary-cards em,
-.scan-list span,
-.scan-list em {
+.summary-cards em {
   display: block;
 }
 
 .order-strip span,
 .order-strip em,
 .summary-cards span,
-.summary-cards em,
-.scan-list em {
+.summary-cards em {
   color: var(--muted);
   font-style: normal;
-}
-
-.strategy-form,
-.form-grid,
-.rule-grid,
-.settings-grid,
-.connect-form {
-  display: grid;
-  gap: 14px;
-}
-
-.strategy-form label,
-.form-grid label,
-.rule-grid label {
-  display: grid;
-  gap: 8px;
-  color: var(--muted);
-}
-
-.segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.segmented button {
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
-  min-height: 48px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--text);
-  background: transparent;
-  cursor: pointer;
-}
-
-.segmented button.active {
-  color: var(--gold);
-  border-color: var(--gold);
-  background: rgba(245, 182, 37, 0.08);
 }
 
 .native-input {
@@ -1099,10 +1010,6 @@ input {
   border-radius: 4px;
   color: var(--text);
   background: rgba(0, 0, 0, 0.18);
-}
-
-.date-picker-control {
-  width: 100%;
 }
 
 .dual-workbench {
@@ -1589,49 +1496,11 @@ button.opportunity-row.selected:hover {
   margin-top: 12px;
 }
 
-.payoff-panel {
-  display: grid;
-  gap: 14px;
-}
-
-.payoff-stats {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-}
-
-.payoff-stats span {
-  color: var(--muted);
-}
-
-.summary-list {
-  margin: 0;
-  padding-left: 18px;
-  color: #d5dee9;
-}
-
 .range-row,
-.checkbox-row,
-.inline-control {
+.checkbox-row {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.scan-list article.recommended {
-  border-color: rgba(82, 198, 111, 0.3);
-}
-
-.scan-list article.watch {
-  border-color: rgba(245, 182, 37, 0.3);
-}
-
-.scan-list article.reject {
-  border-color: rgba(239, 91, 76, 0.3);
-}
-
-.scan-list header {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
 }
 
 .summary-cards {
@@ -1642,7 +1511,8 @@ button.opportunity-row.selected:hover {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.order-summary-cards article {
+.order-summary-cards article,
+.monthly-summary-cards article {
   display: flex;
   min-height: 104px;
   flex-direction: column;
@@ -1651,12 +1521,7 @@ button.opportunity-row.selected:hover {
 }
 
 .monthly-summary-cards article {
-  display: flex;
   min-width: 0;
-  min-height: 104px;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
 }
 
 .summary-cards strong {
@@ -1773,50 +1638,14 @@ button.opportunity-row.selected:hover {
   color: var(--muted);
 }
 
-.security-action {
-  display: grid;
-  grid-template-columns: 28px 1fr auto;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  color: var(--text);
-  text-align: left;
-}
-
-.security-action-button {
-  justify-self: end;
-  width: 82px;
-}
-
-.security-action-button .n-button__content {
-  justify-content: center;
-  width: 100%;
-}
-
-.pill-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.pill-row span {
-  padding: 8px 12px;
-  border-radius: 999px;
-  color: var(--gold);
-  background: rgba(245, 182, 37, 0.1);
-}
-
 /* 窄桌面优先保持可读性：模块改为 6 栅格，表格继续由横向滚动承接。 */
 @media (max-width: 1200px) {
   .view-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
-  .span-3,
   .span-4,
-  .span-5,
   .span-6,
-  .span-7,
   .span-8 {
     grid-column: span 6;
   }
@@ -1826,13 +1655,8 @@ button.opportunity-row.selected:hover {
   }
 
   .summary-cards:not(.monthly-summary-cards),
-  .order-strip,
-  .payoff-stats {
+  .order-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .view-grid > .metric-card {
-    grid-column: span 3;
   }
 }
 
@@ -1849,10 +1673,6 @@ button.opportunity-row.selected:hover {
 @media (max-width: 1080px) {
   .dual-workbench {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .candidate-filter-bar {
-    grid-template-columns: repeat(3, minmax(118px, 1fr)) auto;
   }
 
   .direction-switch,

@@ -31,6 +31,13 @@ export interface PnlBreakdownItem {
   color?: string
 }
 
+/** 轻量条形图展示项。 */
+export interface BarListItem {
+  label: string
+  value: string
+  width: string
+}
+
 /** 手动下单进度步骤展示模型。 */
 export interface OrderProgressStepView {
   id: OrderProgressStage

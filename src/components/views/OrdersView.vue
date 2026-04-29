@@ -72,10 +72,6 @@ const detailRows = computed(() => {
   return createOrderDetailRows(selected.value)
 })
 
-function expiryLabel(order: { expiryAt: string }) {
-  return localDateTimeLabel(order.expiryAt)
-}
-
 function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
   return [
     { label: '方向', value: directionText(order.direction) },
@@ -83,7 +79,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
     { label: '期权合约', value: order.optionSymbol },
     { label: '交易所状态', value: order.exchangeStatus },
     { label: '客户端订单号', value: order.clientOrderId },
-    { label: '到期时间', value: expiryLabel(order) },
+    { label: '到期时间', value: localDateTimeLabel(order.expiryAt) },
     { label: '执行价', value: money(order.strike) },
     { label: '成交数量', value: `${order.filledQuantity} / ${order.quantity} 张` },
     { label: '成交均价', value: money(order.avgPrice) },
@@ -228,7 +224,7 @@ async function resolveFundingRow(row: RecoveryRow, resolution: FundingAttemptMan
               <td><NTag :type="directionTone(order.direction)" size="small">{{ directionText(order.direction) }}</NTag></td>
               <td>{{ order.symbol }}</td>
               <td>{{ money(order.strike) }}</td>
-              <td>{{ expiryLabel(order) }}</td>
+              <td>{{ localDateTimeLabel(order.expiryAt) }}</td>
               <td>{{ order.filledQuantity }} / {{ order.quantity }}</td>
               <td>{{ money(order.premium) }}</td>
               <td><NTag :type="statusTone(order.status)" size="small">{{ statusText(order.status) }}</NTag></td>

@@ -5,23 +5,26 @@
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
+import BarList from '@/components/common/BarList.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
+import { relativeBarWidth } from '@/utils/bars'
 
 const store = useAppStore()
-const { money, percent } = useFormat()
+const { directionText, money, percent } = useFormat()
 
 const strategyPerformance = computed(() => {
   // 条形图只比较当前前端订单快照中的权利金展示宽度，不替代 Rust 的收益报表事实。
   const rows = [
-    { label: '卖 Put 抄底', value: totalPremiumByDirection('sellPut') },
-    { label: '卖 Call 止盈', value: totalPremiumByDirection('sellCall') },
+    { label: directionText('sellPut'), value: totalPremiumByDirection('sellPut') },
+    { label: directionText('sellCall'), value: totalPremiumByDirection('sellCall') },
   ]
   const max = Math.max(...rows.map(row => row.value), 1)
   return rows.map(row => ({
-    ...row,
-    width: `${Math.max((row.value / max) * 100, row.value > 0 ? 10 : 0)}%`,
+    label: row.label,
+    value: money(String(row.value)),
+    width: relativeBarWidth(row.value, max),
   }))
 })
 
@@ -48,12 +51,7 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
     </Panel>
 
     <Panel title="策略绩效对比" class="span-6">
-      <div class="bar-list">
-        <div v-for="row in strategyPerformance" :key="row.label">
-          <span>{{ row.label }}</span>
-          <strong :style="{ width: row.width }">{{ money(String(row.value)) }}</strong>
-        </div>
-      </div>
+      <BarList :items="strategyPerformance" />
     </Panel>
 
     <Panel title="收益明细" class="span-12">
@@ -71,7 +69,7 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
           <tbody>
             <tr v-for="order in store.orders" :key="order.id">
               <td>{{ order.createdAt.slice(0, 10) }}</td>
-              <td>{{ order.direction === 'sellPut' ? '卖 Put 抄底' : '卖 Call 止盈' }}</td>
+              <td>{{ directionText(order.direction) }}</td>
               <td class="positive">{{ money(order.premium) }}</td>
               <td>{{ percent(order.annualized) }}</td>
               <td>{{ order.optionSymbol }} 收取权利金</td>

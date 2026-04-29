@@ -56,10 +56,6 @@ const balanceTotalValue = computed(() =>
   sumDecimalStrings(balanceBreakdown.value.map(item => item.value)),
 )
 
-function expiryLabel(order: { expiryAt: string }) {
-  return localDateTimeLabel(order.expiryAt)
-}
-
 function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
   const grouped = new Map<string, string[]>()
   for (const balance of balances) {
@@ -131,7 +127,7 @@ function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
               <td>{{ order.direction === 'sellPut' ? '卖出看跌（义务）' : '卖出看涨（义务）' }}</td>
               <td>{{ decimal(order.quantity) }} BTC</td>
               <td>{{ money(order.strike) }}</td>
-              <td>{{ expiryLabel(order) }}</td>
+              <td>{{ localDateTimeLabel(order.expiryAt) }}</td>
               <td class="positive">{{ money(order.estimatedPnl) }}</td>
               <td>{{ order.status === 'partiallyFilled' ? '部分成交' : '运行中' }}</td>
             </tr>
@@ -157,7 +153,7 @@ function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
       <div class="calendar-list">
         <p v-if="upcomingExpiryOrders.length === 0" class="empty-state">暂无未到期订单</p>
         <article v-for="order in upcomingExpiryOrders" :key="order.id">
-          <strong>{{ expiryLabel(order) }}</strong>
+          <strong>{{ localDateTimeLabel(order.expiryAt) }}</strong>
           <span>{{ order.direction === 'sellPut' ? '卖出看跌' : '卖出看涨' }}</span>
           <em>{{ order.quantity }} BTC</em>
         </article>
