@@ -5,10 +5,8 @@
 都通过 Rust command 执行，普通浏览器环境不提供 fallback。
 -->
 <script setup lang="ts">
-import type { LogFileInfo } from '@/types/domain'
 import { FileText, FolderOpen, RefreshCw, Trash2 } from '@lucide/vue'
 import { NAlert, NButton, NIcon, NTag } from 'naive-ui'
-import { computed } from 'vue'
 import Panel from '@/components/common/Panel.vue'
 import { useLogSnapshot } from '@/composables/useLogSnapshot'
 import { localDateTimeLabel } from '@/utils/date'
@@ -16,32 +14,11 @@ import { logLevelTone } from '@/utils/labels'
 
 const logs = useLogSnapshot()
 
-const latestLogLabel = computed(() => {
-  const latest = logs.recentEntries.value[0]
-  return latest ? localDateTimeLabel(latest.timestamp) : '暂无记录'
-})
-
 async function clearLogs() {
   if (!window.confirm('确认删除全部本地日志文件？订单、恢复记录和 keyring 凭据不会被删除。')) {
     return
   }
   await logs.clear()
-}
-
-/** 以二进制单位格式化文件大小，避免日志文件列表出现长数字。 */
-function fileSizeLabel(bytes: number) {
-  if (bytes < 1024) {
-    return `${bytes} B`
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`
-  }
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-/** 日志文件可能来自旧版本或异常状态，缺少修改时间时使用明确占位。 */
-function modifiedLabel(file: LogFileInfo) {
-  return file.modifiedAt ? localDateTimeLabel(file.modifiedAt) : '暂无修改时间'
 }
 </script>
 
@@ -57,26 +34,6 @@ function modifiedLabel(file: LogFileInfo) {
     <NAlert v-if="logs.error.value" type="error" class="settings-log-error">
       {{ logs.error.value }}
     </NAlert>
-
-    <div class="settings-log-summary">
-      <div>
-        <span>今日日志</span>
-        <strong>{{ logs.currentFileName.value }}</strong>
-      </div>
-      <div>
-        <span>日志文件</span>
-        <strong>{{ logs.fileCountLabel.value }}</strong>
-      </div>
-      <div>
-        <span>最近记录</span>
-        <strong>{{ latestLogLabel }}</strong>
-      </div>
-    </div>
-
-    <div class="settings-log-path">
-      <span>目录</span>
-      <strong>{{ logs.snapshot.value?.directory ?? '等待读取' }}</strong>
-    </div>
 
     <div class="settings-log-actions">
       <NButton secondary :loading="logs.pendingAction.value === 'openFile'" @click="logs.openCurrentFile">
@@ -107,19 +64,6 @@ function modifiedLabel(file: LogFileInfo) {
         <p>{{ entry.message }}</p>
       </div>
     </section>
-
-    <section class="settings-log-section">
-      <h3>日志文件</h3>
-      <div v-if="logs.files.value.length === 0" class="settings-empty-row">
-        暂无日志文件
-      </div>
-      <div v-for="file in logs.files.value" :key="file.path" class="settings-log-file">
-        <strong>{{ file.date }}</strong>
-        <span>{{ file.entryCount }} 条</span>
-        <span>{{ fileSizeLabel(file.sizeBytes) }}</span>
-        <time>{{ modifiedLabel(file) }}</time>
-      </div>
-    </section>
   </Panel>
 </template>
 
@@ -130,41 +74,6 @@ function modifiedLabel(file: LogFileInfo) {
 
 .settings-log-error {
   margin-bottom: 12px;
-}
-
-.settings-log-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-.settings-log-summary div,
-.settings-log-path {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.settings-log-summary span,
-.settings-log-path span {
-  min-width: 0;
-  color: var(--muted);
-}
-
-.settings-log-summary strong,
-.settings-log-path strong {
-  overflow: hidden;
-  color: var(--text);
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-log-path {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
 }
 
 .settings-log-actions {
@@ -208,14 +117,11 @@ function modifiedLabel(file: LogFileInfo) {
   border-bottom: 1px solid var(--line);
 }
 
-.settings-log-entry:last-child,
-.settings-log-file:last-child {
+.settings-log-entry:last-child {
   border-bottom: 0;
 }
 
-.settings-log-entry time,
-.settings-log-file time,
-.settings-log-file span {
+.settings-log-entry time {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -244,20 +150,6 @@ function modifiedLabel(file: LogFileInfo) {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
-}
-
-.settings-log-file {
-  display: grid;
-  grid-template-columns: 88px 64px 82px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  min-width: 0;
-  min-height: 36px;
-  border-bottom: 1px solid var(--line);
-}
-
-.settings-log-file strong {
-  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 1180px) {

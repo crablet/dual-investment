@@ -4,43 +4,35 @@
 展示真实订单、同步/结算操作和恢复记录；恢复动作会回到 Rust 重新查询 Binance。
 -->
 <script setup lang="ts">
-import type {
-  FundingAttemptManualResolution,
-  FundingAttemptView,
-  OrderAttemptView,
-  StrategyOrder,
-} from '@/types/domain'
+import type { StrategyOrder } from '@/types/domain'
 import { CheckCircle2, RefreshCw, ScanLine, XCircle } from '@lucide/vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
 import { computed, shallowRef, watchEffect } from 'vue'
 import Panel from '@/components/common/Panel.vue'
 import AdoptOptionPositionsPanel from '@/components/orders/AdoptOptionPositionsPanel.vue'
 import { useFormat } from '@/composables/useFormat'
+import { useRecoveryRows } from '@/composables/useRecoveryRows'
 import { useAppStore } from '@/stores/app'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
-import { attemptStatusText, fundingAttemptStatusText, recoveryStatusTone } from '@/utils/labels'
+import { sumDecimalStrings } from '@/utils/decimal'
+import { recoveryStatusTone } from '@/utils/labels'
 
 const store = useAppStore()
 const { directionText, directionTone, money, statusText, statusTone } = useFormat()
 const selectedId = shallowRef<string>()
+const {
+  recoveryRows,
+  recoveryStatusLabel,
+  canRecover,
+  canManuallyResolve,
+  recoverActionLabel,
+  recoverRow,
+  resolveFundingRow,
+} = useRecoveryRows()
 
 interface OrderDetailRow {
   label: string
   value: string
-}
-
-interface RecoveryRow {
-  id: string
-  source: 'order' | 'funding'
-  updatedAt: string
-  type: string
-  target: string
-  amount: string
-  exchangeRef: string
-  status: string
-  factSource: string
-  nextAction: string
-  message: string
 }
 
 watchEffect(() => {
@@ -53,18 +45,13 @@ watchEffect(() => {
 const selected = computed(() => store.orders.find(order => order.id === selectedId.value) ?? store.orders[0])
 const totalPremium = computed(() => {
   // 这里只是订单页摘要展示；收益报表事实来自 Rust 返回的 pnl 快照。
-  return store.orders.reduce((sum, order) => sum + Number(order.premium), 0)
+  return sumDecimalStrings(store.orders.map(order => order.premium))
 })
 const todayExpiryCount = computed(() => {
   // “今日到期”按本地日期展示，真实结算触发仍以后端 expiryAt 毫秒时间戳为准。
   const today = localDateKey(new Date().toISOString())
   return store.orders.filter(order => localDateKey(order.expiryAt) === today).length
 })
-const recoveryRows = computed(() => [
-  // 两类恢复记录共用列表只是为了页面扫描；执行时仍分派到不同后端 command。
-  ...store.orderAttempts.map(orderAttemptRecoveryRow),
-  ...store.fundingAttempts.map(fundingAttemptRecoveryRow),
-].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 10))
 const detailRows = computed(() => {
   if (!selected.value) {
     return []
@@ -97,81 +84,8 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
   ]
 }
 
-function orderAttemptRecoveryRow(attempt: OrderAttemptView): RecoveryRow {
-  // 订单恢复和资金恢复共用表格模型，但操作语义不同：订单恢复会重新查订单，
-  // 资金恢复会查 Binance 历史或等待人工核对。
-  return {
-    id: attempt.id,
-    source: 'order',
-    updatedAt: attempt.updatedAt,
-    type: attempt.status.startsWith('spot_') ? '现货补齐' : '期权订单',
-    target: attempt.optionSymbol,
-    amount: attempt.symbol,
-    exchangeRef: attempt.exchangeOrderId ?? attempt.clientOrderId,
-    status: attempt.status,
-    factSource: attempt.exchangeOrderId ? `Binance 订单 ${attempt.exchangeOrderId}` : `客户端订单 ${attempt.clientOrderId}`,
-    nextAction: attempt.status === 'persisted' || attempt.status === 'spot_persisted'
-      ? '无需处理'
-      : '重新查询 Binance 订单',
-    message: attempt.message,
-  }
-}
-
-function fundingAttemptRecoveryRow(attempt: FundingAttemptView): RecoveryRow {
-  // 资金恢复行直接展示后端给出的 factSource/nextAction，前端不推断 Binance 历史结果。
-  return {
-    id: attempt.id,
-    source: 'funding',
-    updatedAt: attempt.updatedAt,
-    type: attempt.kindLabel,
-    target: attempt.transferType ?? attempt.productId ?? attempt.asset,
-    amount: `${attempt.amount} ${attempt.asset}`,
-    exchangeRef: attempt.exchangeRef ?? '--',
-    status: attempt.status,
-    factSource: attempt.factSource,
-    nextAction: attempt.nextAction,
-    message: attempt.message,
-  }
-}
-
 function recoveryTimeLabel(value: string) {
   return value.slice(0, 19).replace('T', ' ')
-}
-
-function recoveryStatusLabel(row: RecoveryRow) {
-  return row.source === 'funding'
-    ? fundingAttemptStatusText(row.status)
-    : attemptStatusText(row.status)
-}
-
-function canRecover(row: RecoveryRow) {
-  // 终态记录只展示事实，不再触发恢复；blocked 资金记录仍允许“重查”。
-  return !['persisted', 'spot_persisted', 'confirmed', 'failed'].includes(row.status)
-}
-
-function canManuallyResolve(row: RecoveryRow) {
-  // 只有 blocked 资金动作允许人工解除阻断，订单恢复不能被前端直接改终态。
-  return row.source === 'funding' && row.status === 'blocked'
-}
-
-function recoverActionLabel(row: RecoveryRow) {
-  return row.status === 'blocked' ? '重查' : '恢复'
-}
-
-async function recoverRow(row: RecoveryRow) {
-  if (row.source === 'order') {
-    await store.recoverAttempt(row.id)
-    return
-  }
-  await store.recoverFundingAttempt(row.id)
-}
-
-async function resolveFundingRow(row: RecoveryRow, resolution: FundingAttemptManualResolution) {
-  const label = resolution === 'confirmed' ? '已在 Binance 核实该资金动作成功' : '已在 Binance 核实该资金动作失败或未发生'
-  if (!window.confirm(`确认${label}？该操作只解除恢复阻断，不会重新发送资金请求。`)) {
-    return
-  }
-  await store.resolveFundingAttempt(row.id, resolution)
 }
 </script>
 
@@ -194,7 +108,7 @@ async function resolveFundingRow(row: RecoveryRow, resolution: FundingAttemptMan
         <article><span>总订单数</span><strong>{{ store.orders.length }}</strong></article>
         <article><span>进行中订单</span><strong>{{ store.runningOrders.length }}</strong></article>
         <article><span>今日到期</span><strong>{{ todayExpiryCount }}</strong></article>
-        <article><span>累计权利金</span><strong>{{ money(String(totalPremium)) }}</strong></article>
+        <article><span>累计权利金</span><strong>{{ money(totalPremium) }}</strong></article>
       </div>
     </Panel>
 

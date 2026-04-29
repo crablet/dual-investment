@@ -6,6 +6,7 @@
 import type { StrategyCandidate, StrategyDirection } from '@/types/domain'
 import { computed, reactive, shallowRef, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 interface CandidateFilterForm {
   minAnnualized: number | null
@@ -102,7 +103,7 @@ export function useDualInvestmentCandidates() {
   )
 
   const referenceSpotPrice = computed(() =>
-    store.candidates.find(candidate => Number(candidate.spotPrice) > 0)?.spotPrice,
+    store.candidates.find(candidate => decimalStringToDisplayNumber(candidate.spotPrice) > 0)?.spotPrice,
   )
 
   const directionStats = computed(() => ({
@@ -160,15 +161,15 @@ export function useDualInvestmentCandidates() {
     // 右侧卡片的预计权利金只是 UI 估算；真实权利金以 Binance 成交回报为准。
     if (!selectedCandidate.value)
       return 0
-    return Number(selectedCandidate.value.limitPrice) * form.quantity
+    return decimalStringToDisplayNumber(selectedCandidate.value.limitPrice) * form.quantity
   })
 
   const projectedBreakeven = computed(() => {
     // 保本价预览帮助用户理解下单意图，不会写入订单事实；成交后以后端快照为准。
     if (!selectedCandidate.value)
       return 0
-    const strike = Number(selectedCandidate.value.strike)
-    const price = Number(selectedCandidate.value.limitPrice)
+    const strike = decimalStringToDisplayNumber(selectedCandidate.value.strike)
+    const price = decimalStringToDisplayNumber(selectedCandidate.value.limitPrice)
     return selectedCandidate.value.direction === 'sellPut'
       ? strike - price
       : strike + price
@@ -278,9 +279,9 @@ function matchesCandidateFilters(
   candidate: StrategyCandidate,
   candidateFilter: CandidateFilterForm,
 ) {
-  const annualized = Number(candidate.annualized)
-  const exerciseProbability = Number(candidate.exerciseProbability)
-  const distanceAbs = Math.abs(Number(candidate.strikeDistancePercent))
+  const annualized = decimalStringToDisplayNumber(candidate.annualized)
+  const exerciseProbability = decimalStringToDisplayNumber(candidate.exerciseProbability)
+  const distanceAbs = Math.abs(decimalStringToDisplayNumber(candidate.strikeDistancePercent))
 
   if (candidateFilter.minAnnualized !== null && annualized < candidateFilter.minAnnualized) {
     return false
@@ -302,7 +303,7 @@ function candidateSortNumber(candidate: StrategyCandidate, key: CandidateSortKey
   if (key === 'expiry') {
     return new Date(candidate.expiryAt).getTime()
   }
-  return Number(candidate[key])
+  return decimalStringToDisplayNumber(candidate[key])
 }
 
 function compareCandidateSortValue(

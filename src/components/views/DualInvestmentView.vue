@@ -24,9 +24,10 @@ import {
   NSlider,
   NSwitch,
 } from 'naive-ui'
-import { reactive, shallowRef, watchEffect } from 'vue'
+import { shallowRef } from 'vue'
 import OrderProgressPanel from '@/components/common/OrderProgressPanel.vue'
 import OrderReviewDialog from '@/components/orders/OrderReviewDialog.vue'
+import { useAutoRuleForm } from '@/composables/useAutoRuleForm'
 import {
   candidateSortColumns,
   expiryFilters,
@@ -35,19 +36,6 @@ import {
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { localDateTimeLabel } from '@/utils/date'
-
-interface RuleForm {
-  enabled: boolean
-  schedule: string
-  quantity: number
-  minAnnualized: number
-  maxDeltaAbs: number
-  maxIvRank: number
-  minDaysToExpiry: number
-  maxDaysToExpiry: number
-  includeBtc: boolean
-  excludeSameDirection: boolean
-}
 
 interface ManualOrderReview {
   candidate: StrategyCandidate
@@ -81,36 +69,15 @@ const {
   selectCandidate,
   resetCandidateFilters,
 } = useDualInvestmentCandidates()
-const advancedAutoOpen = shallowRef(false)
+const {
+  advancedAutoOpen,
+  ruleForm,
+  saveAutoRule,
+  toggleAuto,
+  runAutoNow,
+} = useAutoRuleForm()
 const orderReviewVisible = shallowRef(false)
 const orderReview = shallowRef<ManualOrderReview>()
-
-const ruleForm = reactive<RuleForm>({
-  enabled: false,
-  schedule: '每天 11:30',
-  quantity: 0.01,
-  minAnnualized: 15,
-  maxDeltaAbs: 0.30,
-  maxIvRank: 60,
-  minDaysToExpiry: 7,
-  maxDaysToExpiry: 45,
-  includeBtc: true,
-  excludeSameDirection: true,
-})
-
-watchEffect(() => {
-  if (!store.autoRule) {
-    return
-  }
-  // 后端 DTO 用 Decimal 字符串承接金融值；本地表单转 number 只是为了 Naive UI 控件交互。
-  Object.assign(ruleForm, {
-    ...store.autoRule,
-    quantity: Number(store.autoRule.quantity),
-    minAnnualized: Number(store.autoRule.minAnnualized),
-    maxDeltaAbs: Number(store.autoRule.maxDeltaAbs),
-    maxIvRank: Number(store.autoRule.maxIvRank),
-  })
-})
 
 function signedPercent(value: string | number) {
   // 展示用百分比允许 number；真实年化和风控阈值提交前会回到字符串契约。
@@ -119,36 +86,6 @@ function signedPercent(value: string | number) {
     return '--'
   const sign = numeric > 0 ? '+' : ''
   return `${sign}${percent(numeric)}`
-}
-
-function saveAutoRule() {
-  // 表单用 number 便于 slider/input 交互，提交前转回 Decimal 字符串契约。
-  void store.saveRule({
-    ...ruleForm,
-    quantity: ruleForm.quantity.toFixed(2),
-    minAnnualized: String(ruleForm.minAnnualized),
-    maxDeltaAbs: ruleForm.maxDeltaAbs.toFixed(2),
-    maxIvRank: String(ruleForm.maxIvRank),
-  })
-}
-
-function toggleAuto(value: boolean) {
-  // 自动复投开启后符合条件的自动单不会逐笔确认，因此开关本身必须二次确认。
-  if (value && !window.confirm('确认开启自动定投？后续符合条件的自动单不会逐笔确认。')) {
-    return
-  }
-  void store.toggleAuto({
-    enabled: value,
-    confirmLive: true,
-  })
-}
-
-function runAutoNow() {
-  // 立即执行可能直接下真实订单，必须显式确认。
-  if (!window.confirm('确认立即执行一次自动扫描？若存在推荐候选，将直接发送 Binance 订单。')) {
-    return
-  }
-  void store.runAutoOnce()
 }
 
 function submit() {

@@ -55,12 +55,12 @@ use crate::domain::{
     AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppError, AppResult, AppSettings,
     AppSnapshot, AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest, FundingAttempt,
     FundingAttemptKind, FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView,
-    LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OrderAttempt, OrderAttemptStatus,
-    OrderAttemptView, OrderProgressEvent, OrderProgressStage, OrderProgressStatus,
-    ResolveFundingAttemptRequest, RuntimeHealth, RuntimeHealthStatus, SimpleEarnRedemptionRecord,
-    SimpleEarnSnapshot, SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate,
-    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
-    UniversalTransferRecord,
+    LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
+    OrderAttemptStatus, OrderAttemptView, OrderProgressEvent, OrderProgressStage,
+    OrderProgressStatus, ResolveFundingAttemptRequest, RuntimeHealth, RuntimeHealthStatus,
+    SimpleEarnRedemptionRecord, SimpleEarnSnapshot, SimpleEarnSubscriptionRecord,
+    SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder, StrategyRequest,
+    StrategyStatus, ToggleAutoRequest, UniversalTransferRecord,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -72,6 +72,12 @@ struct LiveAccounts {
     spot: SpotAccountSnapshot,
     earn: SimpleEarnSnapshot,
     spot_prices: HashMap<String, Decimal>,
+}
+
+struct OrderLiveInputs {
+    account: OptionAccountSnapshot,
+    contracts: Vec<OptionContract>,
+    marks: Vec<OptionMarkPrice>,
 }
 
 /// 待发送的资金动作请求。
@@ -1069,6 +1075,30 @@ impl AppState {
         )
     }
 
+    async fn load_order_live_inputs(client: &BinanceClient) -> AppResult<OrderLiveInputs> {
+        let account_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.option_account().await }
+        });
+        let contracts_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.exchange_info().await }
+        });
+        let marks_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.option_mark_prices().await }
+        });
+        let account = join_binance_request(account_task).await;
+        let contracts = join_binance_request(contracts_task).await;
+        let marks = join_binance_request(marks_task).await;
+
+        Ok(OrderLiveInputs {
+            account: account?,
+            contracts: contracts?,
+            marks: marks?,
+        })
+    }
+
     /// 执行真实期权下单的核心流程。
     ///
     /// 顺序是：请求校验、读取实盘数据、合约匹配、风控校验、写入恢复记录、发送 Binance 订单、
@@ -1117,49 +1147,12 @@ impl AppState {
             request.option_symbol.as_deref(),
             None,
         );
-        let account_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.option_account().await }
-        });
-        let contracts_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.exchange_info().await }
-        });
-        let marks_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.option_mark_prices().await }
-        });
-        let account = join_binance_request(account_task).await;
-        let contracts = join_binance_request(contracts_task).await;
-        let marks = join_binance_request(marks_task).await;
-        let mut account = match account {
-            Ok(account) => account,
-            Err(error) => {
-                progress.emit(
-                    OrderProgressStage::Validate,
-                    OrderProgressStatus::Error,
-                    error.to_string(),
-                    request.option_symbol.as_deref(),
-                    None,
-                );
-                return Err(error);
-            }
-        };
-        let contracts = match contracts {
-            Ok(contracts) => contracts,
-            Err(error) => {
-                progress.emit(
-                    OrderProgressStage::Validate,
-                    OrderProgressStatus::Error,
-                    error.to_string(),
-                    request.option_symbol.as_deref(),
-                    None,
-                );
-                return Err(error);
-            }
-        };
-        let marks = match marks {
-            Ok(marks) => marks,
+        let OrderLiveInputs {
+            mut account,
+            contracts,
+            marks,
+        } = match Self::load_order_live_inputs(&client).await {
+            Ok(inputs) => inputs,
             Err(error) => {
                 progress.emit(
                     OrderProgressStage::Validate,

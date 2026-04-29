@@ -33,6 +33,17 @@ export function isNegativeDecimalString(value: DecimalString): boolean {
   return value.trim().startsWith('-') && !isZeroDecimalString(value)
 }
 
+/** Decimal 字符串转展示用 number；只能用于排序、图形比例、Intl 格式化和表单控件。 */
+export function decimalStringToDisplayNumber(value: DecimalString): number {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+/** 判断 Decimal 字符串是否有非零值。 */
+export function decimalStringHasValue(value: DecimalString): boolean {
+  return !isZeroDecimalString(value)
+}
+
 /** 把 Decimal 字符串拆成整数单位和小数位数。非法输入按 0 处理，避免 UI 派生中断。 */
 function parseDecimalString(raw: DecimalString): ParsedDecimal {
   const matched = raw.trim().match(/^([+-])?(\d+)(?:\.(\d+))?$/)

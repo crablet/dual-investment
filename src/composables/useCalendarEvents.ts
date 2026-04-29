@@ -16,6 +16,7 @@ import {
   scheduleTimeLabel,
   startOfDay,
 } from '@/utils/date'
+import { decimalStringHasValue } from '@/utils/decimal'
 import { attemptStatusText, fundingAttemptStatusText, strategyStatusText } from '@/utils/labels'
 
 export type CalendarEventType
@@ -280,10 +281,4 @@ function compareEvents(left: CalendarEvent, right: CalendarEvent) {
 function isDateInRange(dateKey: string, start: Date, end: Date) {
   const date = parseDateKey(dateKey)
   return date >= start && date <= end
-}
-
-/** 判断 Decimal 字符串是否有非零值。 */
-function decimalStringHasValue(value: string) {
-  // Decimal 字符串可能带小数零；用正则避免为了布尔判断引入 number 精度问题。
-  return !/^0(?:\.0+)?$/.test(value)
 }
