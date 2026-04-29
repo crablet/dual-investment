@@ -10,8 +10,6 @@ mod orders;
 mod risk;
 mod rules;
 
-#[allow(unused_imports)]
-pub use balances::empty_pnl_report;
 pub use balances::{
     build_balances, build_simple_earn_balances, build_spot_balances,
     pnl_report_from_orders_with_spot,
@@ -20,8 +18,6 @@ pub use candidates::{
     build_candidates, decimal_matches_step, option_sell_limit_price, required_margin,
     status_from_exchange,
 };
-#[allow(unused_imports)]
-pub use orders::preview_strategy;
 pub use orders::{annualized_from_order_terms, order_from_adopted_position, order_from_request};
-pub use risk::{empty_risk_snapshot, risk_snapshot_from_account};
+pub use risk::{DEFAULT_MAX_MARGIN_USAGE, empty_risk_snapshot, risk_snapshot_from_account};
 pub use rules::default_auto_rule;

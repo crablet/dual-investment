@@ -45,9 +45,7 @@ function exposureByDirection(direction: 'sellPut' | 'sellCall') {
 function tagType(severity: RiskSeverity) {
   if (severity === 'high')
     return 'error'
-  if (severity === 'medium')
-    return 'warning'
-  return 'info'
+  return 'warning'
 }
 </script>
 
@@ -94,7 +92,7 @@ function tagType(severity: RiskSeverity) {
         <p v-if="!store.risk?.alerts.length" class="empty-state">暂无风控预警</p>
         <article v-for="alert in store.risk?.alerts" :key="alert.id">
           <NTag :type="tagType(alert.severity)" size="small" class="alert-severity-tag">
-            {{ alert.severity === 'medium' ? '中等' : alert.severity === 'high' ? '高' : '低' }}
+            {{ alert.severity === 'medium' ? '中等' : '高' }}
           </NTag>
           <div>
             <strong>{{ alert.title }}</strong>

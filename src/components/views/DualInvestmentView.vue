@@ -82,6 +82,7 @@ const {
   resetCandidateFilters,
 } = useDualInvestmentCandidates()
 const advancedAutoOpen = shallowRef(false)
+const orderReviewVisible = shallowRef(false)
 const orderReview = shallowRef<ManualOrderReview>()
 
 const ruleForm = reactive<RuleForm>({
@@ -163,10 +164,17 @@ function submit() {
     projectedBreakeven: String(projectedBreakeven.value),
     daysToExpiry: daysUntil(candidate.expiryAt),
   }
+  orderReviewVisible.value = true
 }
 
 function closeOrderReview() {
-  orderReview.value = undefined
+  orderReviewVisible.value = false
+}
+
+function clearOrderReviewSnapshot() {
+  if (!orderReviewVisible.value) {
+    orderReview.value = undefined
+  }
 }
 
 function confirmOrderReview() {
@@ -443,7 +451,7 @@ function confirmOrderReview() {
     </aside>
 
     <OrderReviewDialog
-      :show="Boolean(orderReview)"
+      :show="orderReviewVisible"
       :candidate="orderReview?.candidate"
       :quantity="orderReview?.quantity ?? '0'"
       :projected-premium="orderReview?.projectedPremium ?? '0'"
@@ -451,6 +459,7 @@ function confirmOrderReview() {
       :days-to-expiry="orderReview?.daysToExpiry ?? 0"
       @close="closeOrderReview"
       @confirm="confirmOrderReview"
+      @after-leave="clearOrderReviewSnapshot"
     />
   </div>
 </template>

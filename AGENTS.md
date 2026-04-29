@@ -7,6 +7,7 @@
 - 不要把 API Secret、签名 query、Binance 原始响应或敏感上下文写入日志、SQLite、前端 store 或导出文件。API Key/Secret 只允许通过 `src-tauri/src/secrets.rs` 写入系统 keyring。
 - 金额、价格、数量、权利金、手续费、保证金和收益率不得用 `f64`；Rust 使用 `rust_decimal::Decimal`，前端以字符串承接。
 - 业务事实只来自 Binance 实盘接口或本地 SQLite 中已记录的真实事件；日志、进度事件和前端派生状态只用于展示或排障。
+- 开发阶段不维护旧 IPC、旧前端 DTO 或旧 SQLite JSON payload 兼容；删字段时同步 Rust DTO、TypeScript 类型和 Pinia 状态。旧测试数据可以清空，不要通过 `serde(default)`、别名字段或前端 fallback 保留历史结构。
 
 ## 交易与风控
 
@@ -46,6 +47,7 @@
 - Binance 请求、签名、Simple Earn、Universal Transfer、历史查询和期权持仓查询只放在 `binance.rs` 及 `src-tauri/src/binance/`。
 - Binance Universal Transfer 和 Simple Earn 历史接口空结果可能返回 `total=0` 且省略 `rows`；解析时应视为空列表。只有 `total` 非 0 或缺失且 `rows` 缺失时，才应视为接口结构异常并走查询重试/恢复流程。
 - 系统凭据读写只放在 `secrets.rs`；文件日志读写只放在 `logs.rs`，日志按 `logs/YYYY-MM-DD.log` 追加 JSONL，只允许脱敏摘要。
+- 不要在应用代码里保留开发期旧 SQLite 数据迁移、清表或兼容分支；如果本地测试库因结构变更需要处理，使用一次性本地命令或临时脚本完成迁移/清理，脚本不要提交进代码库。
 - 所有 command 返回 `Result<T, String>`，内部用 `AppError` 表达错误。订单和恢复记录保存可恢复事实，日志只做追加记录。
 
 ## 验证要求

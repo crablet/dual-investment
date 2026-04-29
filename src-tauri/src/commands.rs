@@ -205,7 +205,6 @@ pub fn clear_log_files(state: State<'_, AppState>) -> Result<LogSnapshot, String
 }
 
 /// 把内部错误转换成 Tauri command 的字符串错误。
-#[allow(clippy::needless_pass_by_value)]
 fn to_command_error(error: crate::domain::AppError) -> String {
     error.to_string()
 }

@@ -75,7 +75,7 @@ const eventsByDate = computed(() => {
 
 const calendarDays = computed<CalendarDay[]>(() => {
   // 固定 6 周网格，月份切换时尺寸稳定，避免日历区域跳动。
-  return Array.from({ length: 42 }, (_unused, index) => {
+  return Array.from({ length: 42 }, (_, index) => {
     const day = addDays(visibleStart.value, index)
     const date = formatDateKey(day)
     return {

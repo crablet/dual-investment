@@ -30,15 +30,15 @@ pub(super) fn option_funding_shortfall(
         .map_or(Decimal::ZERO, |asset| asset.available);
     let margin_shortfall = positive_decimal(required - available);
 
-    let rules = strategy::risk_snapshot_from_account(account).rules;
+    let max_margin_usage = strategy::DEFAULT_MAX_MARGIN_USAGE;
     let Some(usdt) = account.asset("USDT") else {
         return max_decimal(
             margin_shortfall,
-            risk_equity_target(required, rules.max_margin_usage),
+            risk_equity_target(required, max_margin_usage),
         );
     };
     let equity = option_usdt_equity(usdt);
-    let target_equity = risk_equity_target(usdt.initial_margin + required, rules.max_margin_usage);
+    let target_equity = risk_equity_target(usdt.initial_margin + required, max_margin_usage);
     max_decimal(margin_shortfall, positive_decimal(target_equity - equity))
 }
 
@@ -47,9 +47,9 @@ pub(super) fn option_idle_usdt_sweep_amount(account: &OptionAccountSnapshot) -> 
     let Some(usdt) = account.asset("USDT") else {
         return Decimal::ZERO;
     };
-    let rules = strategy::risk_snapshot_from_account(account).rules;
+    let max_margin_usage = strategy::DEFAULT_MAX_MARGIN_USAGE;
     let equity = option_usdt_equity(usdt);
-    let min_equity = risk_equity_target(usdt.initial_margin, rules.max_margin_usage);
+    let min_equity = risk_equity_target(usdt.initial_margin, max_margin_usage);
     let excess_equity = positive_decimal(equity - min_equity);
     min_decimal(usdt.available, excess_equity)
 }

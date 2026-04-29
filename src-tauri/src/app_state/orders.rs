@@ -21,7 +21,7 @@ pub(super) fn request_from_option_attempt(
     ack: &ExchangeOrderAck,
     contract: &OptionContract,
 ) -> AppResult<StrategyRequest> {
-    let (_expiry, strike, direction) = parse_option_symbol(&attempt.option_symbol)?;
+    let (_, strike, direction) = parse_option_symbol(&attempt.option_symbol)?;
     let quantity = if ack.quantity > Decimal::ZERO {
         ack.quantity
     } else {

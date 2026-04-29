@@ -42,7 +42,7 @@ use self::orders::{
 };
 use self::runtime::{
     client_from_runtime, join_binance_request, make_client_order_id, make_spot_client_order_id,
-    mask_api_key, parse_schedule_time, spawn_binance_request, verify_binance_access,
+    parse_schedule_time, spawn_binance_request, verify_binance_access,
 };
 use self::validation::{
     enforce_risk_rules, has_exchange_order_ref, is_in_the_money, is_trackable_order,
@@ -53,14 +53,14 @@ use self::validation::{
 use crate::binance::BinanceClient;
 use crate::domain::{
     AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppError, AppResult, AppSettings,
-    AppSnapshot, AutoInvestmentRule, CandidateScanDiagnostics, CandidateScanResult,
-    ConnectBinanceRequest, FundingAttempt, FundingAttemptKind, FundingAttemptManualResolution,
-    FundingAttemptStatus, FundingAttemptView, LogLevel, LogSnapshot, OptionAccountSnapshot,
-    OptionContract, OrderAttempt, OrderAttemptStatus, OrderAttemptView, OrderProgressEvent,
-    OrderProgressStage, OrderProgressStatus, ResolveFundingAttemptRequest, RuntimeHealth,
-    RuntimeHealthStatus, SimpleEarnRedemptionRecord, SimpleEarnSnapshot,
-    SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate, StrategyDirection,
-    StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest, UniversalTransferRecord,
+    AppSnapshot, AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest, FundingAttempt,
+    FundingAttemptKind, FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView,
+    LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OrderAttempt, OrderAttemptStatus,
+    OrderAttemptView, OrderProgressEvent, OrderProgressStage, OrderProgressStatus,
+    ResolveFundingAttemptRequest, RuntimeHealth, RuntimeHealthStatus, SimpleEarnRedemptionRecord,
+    SimpleEarnSnapshot, SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate,
+    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
+    UniversalTransferRecord,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -124,11 +124,8 @@ impl SettlementSweepPlan {
 
 #[derive(Clone, Debug, Default)]
 struct RuntimeHealthState {
-    last_tick_at: Option<chrono::DateTime<Utc>>,
-    last_success_at: Option<chrono::DateTime<Utc>>,
     consecutive_failures: u32,
     skipped_ticks: u32,
-    last_error: Option<String>,
 }
 
 const ORDER_PROGRESS_EVENT: &str = "order-progress";
@@ -355,26 +352,22 @@ fn is_uncertain_funding_error(error: &AppError) -> bool {
 #[allow(clippy::struct_excessive_bools)]
 pub struct RuntimeConfig {
     pub connected: bool,
-    pub api_key_masked: Option<String>,
     pub api_key: Option<String>,
     pub api_secret: Option<String>,
     pub saved_credentials: bool,
     pub auto_enabled: bool,
     pub quick_execution: bool,
-    pub default_symbol: String,
 }
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             connected: false,
-            api_key_masked: None,
             api_key: None,
             api_secret: None,
             saved_credentials: secrets::has_binance_credentials(),
             auto_enabled: false,
             quick_execution: true,
-            default_symbol: "BTCUSDT".to_string(),
         }
     }
 }
@@ -384,11 +377,9 @@ impl RuntimeConfig {
     pub fn settings(&self) -> AppSettings {
         AppSettings {
             connected: self.connected,
-            api_key_masked: self.api_key_masked.clone(),
             saved_credentials: self.saved_credentials,
             auto_enabled: self.auto_enabled,
             quick_execution: self.quick_execution,
-            default_symbol: self.default_symbol.clone(),
         }
     }
 }
@@ -402,7 +393,6 @@ pub struct AppState {
     runtime: Arc<RwLock<RuntimeConfig>>,
     client: Arc<RwLock<Option<BinanceClient>>>,
     candidates: Arc<RwLock<Vec<StrategyCandidate>>>,
-    scan_diagnostics: Arc<RwLock<CandidateScanDiagnostics>>,
     auto_rule: Arc<RwLock<AutoInvestmentRule>>,
     orders: Arc<RwLock<Vec<StrategyOrder>>>,
     persistence: Arc<Mutex<Persistence>>,
@@ -443,7 +433,6 @@ impl AppState {
             runtime: Arc::new(RwLock::new(RuntimeConfig::default())),
             client: Arc::new(RwLock::new(None)),
             candidates: Arc::new(RwLock::new(Vec::new())),
-            scan_diagnostics: Arc::new(RwLock::new(CandidateScanDiagnostics::default())),
             auto_rule: Arc::new(RwLock::new(auto_rule)),
             orders: Arc::new(RwLock::new(orders)),
             persistence: Arc::new(Mutex::new(persistence)),
@@ -465,7 +454,6 @@ impl AppState {
         let settings = self.runtime.read().await.settings();
         let auto_rule = self.auto_rule.read().await.clone();
         let candidates = self.candidates.read().await.clone();
-        let scan_diagnostics = self.scan_diagnostics.read().await.clone();
         let orders = self.orders.read().await.clone();
         let accounts = self.live_accounts_if_connected().await?;
         let (order_attempts, funding_attempts, pending_recovery_count) = {
@@ -507,7 +495,6 @@ impl AppState {
         Ok(AppSnapshot {
             balances,
             candidates,
-            scan_diagnostics,
             health,
             pnl: strategy::pnl_report_from_orders_with_spot(&orders, spot_price),
             risk: option_account.map_or_else(
@@ -549,7 +536,6 @@ impl AppState {
 
         let mut runtime = self.runtime.write().await;
         runtime.connected = true;
-        runtime.api_key_masked = Some(mask_api_key(&api_key));
         runtime.api_key = Some(api_key);
         runtime.api_secret = Some(api_secret);
         runtime.saved_credentials = true;
@@ -585,7 +571,6 @@ impl AppState {
 
         let mut runtime = self.runtime.write().await;
         runtime.connected = true;
-        runtime.api_key_masked = Some(mask_api_key(&api_key));
         runtime.api_key = Some(api_key);
         runtime.api_secret = Some(api_secret);
         runtime.saved_credentials = true;
@@ -609,7 +594,6 @@ impl AppState {
         secrets::delete_binance_credentials()?;
         let mut runtime = self.runtime.write().await;
         runtime.connected = false;
-        runtime.api_key_masked = None;
         runtime.api_key = None;
         runtime.api_secret = None;
         runtime.auto_enabled = false;
@@ -623,10 +607,6 @@ impl AppState {
         {
             let mut candidates = self.candidates.write().await;
             candidates.clear();
-        }
-        {
-            let mut scan_diagnostics = self.scan_diagnostics.write().await;
-            *scan_diagnostics = CandidateScanDiagnostics::default();
         }
         {
             let mut rule = self.auto_rule.write().await;
@@ -696,10 +676,6 @@ impl AppState {
         {
             let mut cached_candidates = self.candidates.write().await;
             cached_candidates.clone_from(&result.candidates);
-        }
-        {
-            let mut scan_diagnostics = self.scan_diagnostics.write().await;
-            scan_diagnostics.clone_from(&result.diagnostics);
         }
         Ok(result)
     }
@@ -1062,35 +1038,23 @@ impl AppState {
         };
         RuntimeHealth {
             status,
-            last_tick_at: health.last_tick_at,
-            last_success_at: health.last_success_at,
             consecutive_failures: health.consecutive_failures,
             skipped_ticks: health.skipped_ticks,
-            last_error: health.last_error,
             pending_recovery_count,
         }
-    }
-
-    async fn record_background_tick_started(&self) {
-        // tick 开始时间用于观测后台是否仍在运行，不代表本轮已成功同步。
-        let mut health = self.health.write().await;
-        health.last_tick_at = Some(Utc::now());
     }
 
     async fn record_background_tick_success(&self) {
         // 成功完成一整轮维护后清空失败/跳过计数，避免旧错误持续污染健康状态。
         let mut health = self.health.write().await;
-        health.last_success_at = Some(Utc::now());
         health.consecutive_failures = 0;
         health.skipped_ticks = 0;
-        health.last_error = None;
     }
 
-    async fn record_background_tick_failure(&self, error: &AppError) {
-        // 只记录脱敏错误文本；下次 tick 仍会继续尝试，除非恢复记录阻断自动动作。
+    async fn record_background_tick_failure(&self) {
+        // 下次 tick 仍会继续尝试，除非恢复记录阻断自动动作。
         let mut health = self.health.write().await;
         health.consecutive_failures = health.consecutive_failures.saturating_add(1);
-        health.last_error = Some(error.to_string());
     }
 
     async fn record_background_tick_skipped(&self) -> AppResult<()> {
@@ -2125,11 +2089,10 @@ impl AppState {
                     }
                     continue;
                 };
-                state.record_background_tick_started().await;
                 match state.background_tick().await {
                     Ok(()) => state.record_background_tick_success().await,
                     Err(error) => {
-                        state.record_background_tick_failure(&error).await;
+                        state.record_background_tick_failure().await;
                         let _ = state.record_error("background.tick_failed", &error.to_string());
                     }
                 }

@@ -117,7 +117,6 @@ export const useAppStore = defineStore('app', () => {
   const settings = computed(() => snapshot.value?.settings)
   const balances = computed(() => snapshot.value?.balances ?? [])
   const candidates = computed(() => snapshot.value?.candidates ?? [])
-  const scanDiagnostics = computed(() => snapshot.value?.scanDiagnostics)
   const orders = computed(() => snapshot.value?.orders ?? [])
   const pnl = computed(() => snapshot.value?.pnl)
   const risk = computed(() => snapshot.value?.risk)
@@ -427,7 +426,6 @@ export const useAppStore = defineStore('app', () => {
       snapshot.value = {
         ...snapshot.value,
         candidates: next.candidates,
-        scanDiagnostics: next.diagnostics,
       }
     }
   }
@@ -631,7 +629,6 @@ export const useAppStore = defineStore('app', () => {
     metrics,
     balances,
     candidates,
-    scanDiagnostics,
     orders,
     pnl,
     pnlBreakdown,

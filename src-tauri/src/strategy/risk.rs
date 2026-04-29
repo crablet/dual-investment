@@ -8,7 +8,10 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use super::math::percent_of;
-use crate::domain::{OptionAccountSnapshot, RiskAlert, RiskRuleSet, RiskSeverity, RiskSnapshot};
+use crate::domain::{OptionAccountSnapshot, RiskAlert, RiskSeverity, RiskSnapshot};
+
+/// 默认保证金占用率风控上限。
+pub const DEFAULT_MAX_MARGIN_USAGE: Decimal = dec!(60);
 
 /// 构造未连接状态下的空风险快照。
 pub fn empty_risk_snapshot() -> RiskSnapshot {
@@ -17,14 +20,12 @@ pub fn empty_risk_snapshot() -> RiskSnapshot {
         level: "未同步".to_string(),
         margin_usage: Decimal::ZERO,
         exercise_risk: Decimal::ZERO,
-        rules: default_risk_rules(),
         alerts: Vec::new(),
     }
 }
 
 /// 从期权账户保证金信息派生风险快照。
 pub fn risk_snapshot_from_account(account: &OptionAccountSnapshot) -> RiskSnapshot {
-    let rules = default_risk_rules();
     let usdt = account.asset("USDT");
     let margin_usage = usdt
         .and_then(|asset| percent_of(asset.initial_margin, asset.adjusted_equity))
@@ -48,7 +49,7 @@ pub fn risk_snapshot_from_account(account: &OptionAccountSnapshot) -> RiskSnapsh
     } else {
         0
     };
-    let alerts = if margin_usage >= rules.max_margin_usage {
+    let alerts = if margin_usage >= DEFAULT_MAX_MARGIN_USAGE {
         vec![RiskAlert {
             id: "margin-usage".to_string(),
             severity: if margin_usage >= dec!(80) {
@@ -69,14 +70,6 @@ pub fn risk_snapshot_from_account(account: &OptionAccountSnapshot) -> RiskSnapsh
         level: level.to_string(),
         margin_usage,
         exercise_risk: maintenance_usage,
-        rules,
         alerts,
-    }
-}
-
-/// 默认风控规则。
-fn default_risk_rules() -> RiskRuleSet {
-    RiskRuleSet {
-        max_margin_usage: dec!(60),
     }
 }

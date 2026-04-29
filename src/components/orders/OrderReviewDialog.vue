@@ -35,6 +35,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
   confirm: []
+  afterLeave: []
 }>()
 
 const { money, percent } = useFormat()
@@ -84,6 +85,7 @@ function confirm() {
     :mask-closable="false"
     :close-on-esc="false"
     :auto-focus="false"
+    @after-leave="emit('afterLeave')"
   >
     <section
       v-if="props.candidate"

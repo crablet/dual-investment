@@ -136,18 +136,12 @@ impl LogStore {
     fn file_info(path: &Path) -> AppResult<LogFileInfo> {
         let metadata = fs::metadata(path).map_err(storage_error)?;
         let modified_at = metadata.modified().ok().map(DateTime::<Utc>::from);
-        let file_name = path
-            .file_name()
-            .and_then(OsStr::to_str)
-            .unwrap_or_default()
-            .to_string();
         let date = path
             .file_stem()
             .and_then(OsStr::to_str)
             .unwrap_or_default()
             .to_string();
         Ok(LogFileInfo {
-            file_name,
             path: path.display().to_string(),
             date,
             size_bytes: metadata.len(),

@@ -219,7 +219,7 @@ pub(super) fn enforce_risk_rules(
     contract: &OptionContract,
     account: &OptionAccountSnapshot,
 ) -> AppResult<()> {
-    let rules = strategy::risk_snapshot_from_account(account).rules;
+    let max_margin_usage = strategy::DEFAULT_MAX_MARGIN_USAGE;
     let required = strategy::required_margin(contract, request.direction, request.quantity);
 
     if let Some(usdt) = account.asset("USDT") {
@@ -230,10 +230,9 @@ pub(super) fn enforce_risk_rules(
         };
         if equity > Decimal::ZERO {
             let next_usage = ((usdt.initial_margin + required) / equity * dec!(100)).round_dp(2);
-            if next_usage > rules.max_margin_usage {
+            if next_usage > max_margin_usage {
                 return Err(AppError::RiskRejected(format!(
-                    "下单后保证金占用预计 {}%，超过风控上限 {}%",
-                    next_usage, rules.max_margin_usage
+                    "下单后保证金占用预计 {next_usage}%，超过风控上限 {max_margin_usage}%"
                 )));
             }
         }

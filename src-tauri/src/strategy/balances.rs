@@ -20,7 +20,7 @@ struct BalanceValuation {
 }
 
 /// 构造空收益报告。
-pub fn empty_pnl_report() -> PnlReport {
+fn empty_pnl_report() -> PnlReport {
     PnlReport {
         cumulative: Decimal::ZERO,
         today: Decimal::ZERO,

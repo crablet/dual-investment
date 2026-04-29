@@ -11,9 +11,9 @@ use rust_decimal_macros::dec;
 
 use super::math::{abs_decimal, align_decimal_down_to_step, max_decimal, min_decimal};
 use crate::domain::{
-    AutoInvestmentRule, CandidateScanDiagnostics, CandidateScanResult, OptionAccountSnapshot,
-    OptionContract, OptionMarkPrice, RecommendationLevel, StrategyCandidate, StrategyDirection,
-    StrategyOrder, StrategyStatus,
+    AutoInvestmentRule, CandidateScanResult, OptionAccountSnapshot, OptionContract,
+    OptionMarkPrice, RecommendationLevel, StrategyCandidate, StrategyDirection, StrategyOrder,
+    StrategyStatus,
 };
 
 const BROWSE_MIN_DAYS_TO_EXPIRY: i64 = 1;
@@ -33,18 +33,9 @@ pub fn build_candidates(
     spot_price: Decimal,
     funding_available_usdt: Decimal,
 ) -> CandidateScanResult {
-    let mut diagnostics = CandidateScanDiagnostics {
-        raw_contracts: contracts.len(),
-        raw_marks: marks.len(),
-        browse_min_days: BROWSE_MIN_DAYS_TO_EXPIRY,
-        browse_max_days: BROWSE_MAX_DAYS_TO_EXPIRY,
-        ..CandidateScanDiagnostics::default()
-    };
-
     if spot_price <= Decimal::ZERO {
         return CandidateScanResult {
             candidates: Vec::new(),
-            diagnostics,
         };
     }
 
@@ -70,17 +61,14 @@ pub fn build_candidates(
         if contract.underlying != "BTCUSDT" || contract.quote_asset != "USDT" {
             continue;
         }
-        diagnostics.btc_contracts += 1;
 
         if contract.status != "TRADING" {
             continue;
         }
-        diagnostics.trading_contracts += 1;
 
         if rule.quantity < contract.min_qty || rule.quantity > contract.max_qty {
             continue;
         }
-        diagnostics.quantity_matched += 1;
 
         if let Some(candidate) = (|| {
             let direction = direction_from_option_side(&contract.side)?;
@@ -88,19 +76,16 @@ pub fn build_candidates(
             if !strike_matches_direction(contract.strike_price, direction, spot_price) {
                 return None;
             }
-            diagnostics.direction_matched += 1;
 
             let days_to_expiry = days_until_expiry(contract.expiry_at);
             if !(BROWSE_MIN_DAYS_TO_EXPIRY..=BROWSE_MAX_DAYS_TO_EXPIRY).contains(&days_to_expiry) {
                 return None;
             }
-            diagnostics.expiry_matched += 1;
 
             let mark = mark_by_symbol.get(contract.symbol.as_str()).copied()?;
             if mark.mark_price <= Decimal::ZERO {
                 return None;
             }
-            diagnostics.mark_matched += 1;
 
             let delta_abs = abs_decimal(mark.delta);
             let iv_rank = (mark.mark_iv * dec!(100)).round_dp(2);
@@ -166,8 +151,6 @@ pub fn build_candidates(
                 limit_price,
                 premium,
                 annualized,
-                delta_abs,
-                iv_rank,
                 exercise_probability,
                 breakeven,
                 spot_price,
@@ -181,20 +164,8 @@ pub fn build_candidates(
     }
 
     sort_candidates(&mut candidates);
-    diagnostics.returned_candidates = candidates.len();
-    diagnostics.returned_sell_put = candidates
-        .iter()
-        .filter(|candidate| candidate.direction == StrategyDirection::SellPut)
-        .count();
-    diagnostics.returned_sell_call = candidates
-        .iter()
-        .filter(|candidate| candidate.direction == StrategyDirection::SellCall)
-        .count();
 
-    CandidateScanResult {
-        candidates,
-        diagnostics,
-    }
+    CandidateScanResult { candidates }
 }
 
 /// 按精确 UTC 到期时间计算剩余天数。

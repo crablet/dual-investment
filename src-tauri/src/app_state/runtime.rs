@@ -102,14 +102,3 @@ pub(super) fn make_spot_client_order_id(direction: StrategyDirection) -> String 
         Utc::now().timestamp_millis()
     )
 }
-
-/// 脱敏 API Key，只保留首尾少量字符用于确认连接身份。
-pub(super) fn mask_api_key(api_key: &str) -> String {
-    let trimmed = api_key.trim();
-    if trimmed.len() <= 8 {
-        return "****".to_string();
-    }
-    let prefix = &trimmed[..4];
-    let suffix = &trimmed[trimmed.len() - 4..];
-    format!("{prefix}...{suffix}")
-}

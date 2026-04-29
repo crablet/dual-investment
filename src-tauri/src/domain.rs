@@ -31,7 +31,7 @@ pub type AppResult<T> = Result<T, AppError>;
 /// 后台运行健康状态。
 ///
 /// 这个状态只用于前端观测长期运行质量，不作为订单、结算或资金事实来源。
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeHealthStatus {
     Idle,
@@ -95,9 +95,8 @@ pub enum StrategyOrderSource {
     AdoptedPosition,
 }
 
-/// 候选机会的推荐等级。
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// 候选机会的内部推荐等级。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecommendationLevel {
     Recommended,
     Watch,
@@ -105,28 +104,22 @@ pub enum RecommendationLevel {
 }
 
 /// 风险提醒严重程度。
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RiskSeverity {
-    Low,
     Medium,
     High,
 }
 
-/// 前端设置页和导航状态需要展示的运行配置。
-///
-/// 这里不包含明文 Secret；`api_key_masked` 只用于显示脱敏连接状态。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+/// 前端设置页和导航状态需要展示的运行配置，不包含 API Key 或 Secret。
+#[derive(Clone, Debug, Serialize)]
 #[allow(clippy::struct_excessive_bools)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub connected: bool,
-    pub api_key_masked: Option<String>,
-    #[serde(default)]
     pub saved_credentials: bool,
     pub auto_enabled: bool,
     pub quick_execution: bool,
-    pub default_symbol: String,
 }
 
 /// 应用日志等级。
@@ -153,10 +146,9 @@ pub struct LogEntry {
 }
 
 /// 一个每日日志文件的展示信息。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogFileInfo {
-    pub file_name: String,
     pub path: String,
     pub date: String,
     pub size_bytes: u64,
@@ -165,7 +157,7 @@ pub struct LogFileInfo {
 }
 
 /// 设置页日志卡片需要的日志快照。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogSnapshot {
     pub directory: String,
@@ -178,11 +170,10 @@ pub struct LogSnapshot {
 ///
 /// `free`、`locked` 和 `usdt_value` 以字符串序列化给前端，前端只负责展示或
 /// 派生 UI 指标，不反向作为真实资金事实。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BalanceRow {
     pub asset: String,
-    #[serde(default)]
     pub source: String,
     #[serde(with = "rust_decimal::serde::str")]
     pub free: Decimal,
@@ -197,7 +188,7 @@ pub struct BalanceRow {
 ///
 /// 候选来自 Binance 实盘合约与 mark price，再结合当前自动规则计算推荐等级。
 /// 浏览范围和可见性在策略层决定，前端筛选只影响展示。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyCandidate {
     pub id: String,
@@ -217,10 +208,6 @@ pub struct StrategyCandidate {
     #[serde(with = "rust_decimal::serde::str")]
     pub annualized: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
-    pub delta_abs: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub iv_rank: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
     pub exercise_probability: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub breakeven: Decimal,
@@ -228,37 +215,16 @@ pub struct StrategyCandidate {
     pub spot_price: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike_distance_percent: Decimal,
+    #[serde(skip_serializing)]
     pub recommendation: RecommendationLevel,
     pub reason: String,
 }
 
-/// 候选扫描漏斗诊断。
-///
-/// 前端用这些计数解释为什么没有候选，避免把过滤过程隐藏成一个空列表。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CandidateScanDiagnostics {
-    pub raw_contracts: usize,
-    pub raw_marks: usize,
-    pub btc_contracts: usize,
-    pub trading_contracts: usize,
-    pub direction_matched: usize,
-    pub expiry_matched: usize,
-    pub mark_matched: usize,
-    pub quantity_matched: usize,
-    pub returned_candidates: usize,
-    pub returned_sell_put: usize,
-    pub returned_sell_call: usize,
-    pub browse_min_days: i64,
-    pub browse_max_days: i64,
-}
-
-/// 候选扫描结果，包含候选列表和过滤漏斗。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+/// 候选扫描结果。
+#[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateScanResult {
     pub candidates: Vec<StrategyCandidate>,
-    pub diagnostics: CandidateScanDiagnostics,
 }
 
 /// 本地持久化的真实策略订单。
@@ -270,7 +236,6 @@ pub struct StrategyOrder {
     pub id: String,
     pub source: StrategyOrderSource,
     pub exchange_order_id: Option<String>,
-    #[serde(default)]
     pub client_order_id: String,
     pub symbol: String,
     pub option_symbol: String,
@@ -282,11 +247,11 @@ pub struct StrategyOrder {
     pub strike: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub quantity: Decimal,
-    #[serde(default, with = "rust_decimal::serde::str")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub filled_quantity: Decimal,
-    #[serde(default, with = "rust_decimal::serde::str")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub avg_price: Decimal,
-    #[serde(default, with = "rust_decimal::serde::str")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub fee: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub premium: Decimal,
@@ -296,28 +261,22 @@ pub struct StrategyOrder {
     pub annualized: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub breakeven: Decimal,
-    #[serde(default)]
     pub exchange_status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub settlement_action: String,
-    #[serde(default, with = "rust_decimal::serde::str")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub settlement_price: Decimal,
-    #[serde(default)]
     pub settled_at: Option<DateTime<Utc>>,
-    #[serde(default)]
     pub spot_order_id: Option<String>,
-    #[serde(default)]
     pub spot_client_order_id: String,
-    #[serde(default)]
     pub spot_order_status: String,
-    #[serde(default)]
     pub rebalance_message: String,
-    #[serde(default, with = "rust_decimal::serde::str")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub spot_filled_quantity: Decimal,
-    #[serde(default, with = "rust_decimal::serde::str")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub spot_avg_price: Decimal,
-    #[serde(default, with = "rust_decimal::serde::str")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub spot_fee: Decimal,
 }
 
@@ -343,20 +302,10 @@ pub struct AutoInvestmentRule {
     pub exclude_same_direction: bool,
 }
 
-/// 风控规则集合。
-///
-/// 规则值使用 Decimal 字符串跨 IPC，Rust 端负责真实风控拦截。
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RiskRuleSet {
-    #[serde(with = "rust_decimal::serde::str")]
-    pub max_margin_usage: Decimal,
-}
-
 /// 风控提醒。
 ///
 /// `message` 应该是可安全展示的中文摘要，不应包含签名请求、Secret 或订单响应原文。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RiskAlert {
     pub id: String,
@@ -369,7 +318,7 @@ pub struct RiskAlert {
 /// 当前风险快照。
 ///
 /// 由账户保证金、义务仓和风控规则计算得出，用于 UI 展示和下单前风控判断。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RiskSnapshot {
     pub score: u32,
@@ -378,14 +327,13 @@ pub struct RiskSnapshot {
     pub margin_usage: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub exercise_risk: Decimal,
-    pub rules: RiskRuleSet,
     pub alerts: Vec<RiskAlert>,
 }
 
 /// 收益汇总。
 ///
 /// 这里保留真实订单和现货补齐派生出的收益字段；展示用构成比例由前端从这些字段再派生。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PnlReport {
     #[serde(with = "rust_decimal::serde::str")]
@@ -399,15 +347,12 @@ pub struct PnlReport {
 }
 
 /// 后台调度器和恢复记录的运行健康快照。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeHealth {
     pub status: RuntimeHealthStatus,
-    pub last_tick_at: Option<DateTime<Utc>>,
-    pub last_success_at: Option<DateTime<Utc>>,
     pub consecutive_failures: u32,
     pub skipped_ticks: u32,
-    pub last_error: Option<String>,
     pub pending_recovery_count: usize,
 }
 
@@ -463,7 +408,7 @@ pub struct OrderAttempt {
 }
 
 /// 前端可展示的恢复记录。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderAttemptView {
     pub id: String,
@@ -606,14 +551,11 @@ pub struct ResolveFundingAttemptRequest {
 }
 
 /// 前端可展示的资金动作恢复记录。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FundingAttemptView {
     pub id: String,
-    pub chain_id: String,
-    pub kind: String,
     pub kind_label: String,
-    pub purpose: String,
     pub asset: String,
     #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
@@ -662,10 +604,7 @@ impl From<FundingAttempt> for FundingAttemptView {
         };
         Self {
             id: attempt.id,
-            chain_id: attempt.chain_id,
-            kind: attempt.kind.as_str().to_string(),
             kind_label: attempt.kind.display().to_string(),
-            purpose: attempt.purpose,
             asset: attempt.asset,
             amount: attempt.amount,
             transfer_type: attempt.transfer_type,
@@ -684,7 +623,7 @@ impl From<FundingAttempt> for FundingAttemptView {
 /// 手动下单进度阶段。
 ///
 /// 这些事件只用于前端展示当前流程，不作为交易事实来源。
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OrderProgressStage {
     Validate,
@@ -695,10 +634,9 @@ pub enum OrderProgressStage {
 }
 
 /// 手动下单进度状态。
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OrderProgressStatus {
-    Pending,
     Running,
     Success,
     Error,
@@ -931,33 +869,16 @@ pub struct ExerciseRecord {
     pub settlement_price: Decimal,
 }
 
-/// 策略预览结果。
-///
-/// 预览只用于展示和本地订单字段计算，不能替代下单前的合约校验和风控校验。
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StrategyPreview {
-    pub candidate: StrategyCandidate,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub max_profit: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub reserved_asset: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub protected_limit_price: Decimal,
-    pub summary: Vec<String>,
-}
-
 /// 前端一次刷新所需的完整应用快照。
 ///
 /// 通过一个快照减少细粒度 IPC 往返；前端再从快照派生指标、日历和列表状态。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSnapshot {
     pub settings: AppSettings,
     pub health: RuntimeHealth,
     pub balances: Vec<BalanceRow>,
     pub candidates: Vec<StrategyCandidate>,
-    pub scan_diagnostics: CandidateScanDiagnostics,
     pub orders: Vec<StrategyOrder>,
     pub pnl: PnlReport,
     pub risk: RiskSnapshot,

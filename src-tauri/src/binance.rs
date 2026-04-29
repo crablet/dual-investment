@@ -52,7 +52,6 @@ pub struct BinanceClient {
     api_key: String,
     api_secret: String,
     eapi_base: String,
-    #[allow(dead_code)]
     spot_base: String,
     timestamp_offset_ms: Arc<AtomicI64>,
 }
@@ -419,8 +418,6 @@ impl BinanceClient {
 
     /// 发送真实 Binance 现货市价补齐订单。
     ///
-    /// 目前入口由结算流程控制；保留 `dead_code` 是因为补齐流程可能受功能开关或测试路径影响。
-    #[allow(dead_code)]
     pub async fn place_spot_market_order(
         &self,
         symbol: &str,
@@ -771,7 +768,6 @@ fn response_id(value: &Value, key: &str, operation: &str) -> AppResult<String> {
 }
 
 /// 根据双币赢方向决定现货补齐方向。
-#[allow(dead_code)]
 pub const fn spot_rebalance_side(direction: StrategyDirection) -> &'static str {
     match direction {
         StrategyDirection::SellPut => "BUY",

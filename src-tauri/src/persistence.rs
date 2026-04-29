@@ -38,9 +38,10 @@ impl Persistence {
 
     /// 初始化本地表结构。
     ///
-    /// `strategy_orders` 和 `auto_rule` 使用 JSON payload，是为了让领域结构演进时减少
-    /// 迁移成本；`order_attempts` 和 `funding_attempts` 单独拆列，是因为恢复流程需要
-    /// 稳定按状态、订单号、资金动作引用和查询时间推进。
+    /// 只创建当前代码需要的表结构；开发期旧数据迁移或清理应使用一次性本地命令处理，
+    /// 不把旧结构兼容或自动删库逻辑留在应用代码里。`order_attempts` 和
+    /// `funding_attempts` 单独拆列，是因为恢复流程需要稳定按状态、订单号、资金动作引用
+    /// 和查询时间推进。
     fn init(&self) -> AppResult<()> {
         self.connection
             .execute_batch(

@@ -19,10 +19,8 @@ export type StrategyStatus
     | 'expired'
     | 'partiallyFilled'
     | 'rebalanceFailed'
-/** 候选推荐等级，只用于前端筛选和提示，不代表下单许可。 */
-export type RecommendationLevel = 'recommended' | 'watch' | 'reject'
 /** 风险提醒严重程度；具体风险规则由 Rust Decimal 规则计算。 */
-export type RiskSeverity = 'low' | 'medium' | 'high'
+export type RiskSeverity = 'medium' | 'high'
 /** 文件日志等级；日志内容必须是后端脱敏摘要。 */
 export type LogLevel = 'info' | 'warn' | 'error'
 /** 手动下单进度阶段，和 Rust 发出的脱敏进度事件保持一致。 */
@@ -37,11 +35,9 @@ export type StrategyOrderSource = 'liveOrder' | 'adoptedPosition'
 /** 前端可见运行设置，不包含明文 API Secret。 */
 export interface AppSettings {
   connected: boolean
-  apiKeyMasked?: string
   savedCredentials: boolean
   autoEnabled: boolean
   quickExecution: boolean
-  defaultSymbol: string
 }
 
 /** 账户资产行，可能来自期权保证金账户或现货账户。 */
@@ -67,36 +63,15 @@ export interface StrategyCandidate {
   limitPrice: DecimalString
   premium: DecimalString
   annualized: DecimalString
-  deltaAbs: DecimalString
-  ivRank: DecimalString
   exerciseProbability: DecimalString
   breakeven: DecimalString
   spotPrice: DecimalString
   strikeDistancePercent: DecimalString
-  recommendation: RecommendationLevel
   reason: string
-}
-
-/** 候选扫描过滤漏斗，用于解释空列表和规则命中情况。 */
-export interface CandidateScanDiagnostics {
-  rawContracts: number
-  rawMarks: number
-  btcContracts: number
-  tradingContracts: number
-  directionMatched: number
-  expiryMatched: number
-  markMatched: number
-  quantityMatched: number
-  returnedCandidates: number
-  returnedSellPut: number
-  returnedSellCall: number
-  browseMinDays: number
-  browseMaxDays: number
 }
 
 export interface CandidateScanResult {
   candidates: StrategyCandidate[]
-  diagnostics: CandidateScanDiagnostics
 }
 
 /** 本地保存的真实策略订单。 */
@@ -172,11 +147,6 @@ export interface AutoInvestmentRule {
   excludeSameDirection: boolean
 }
 
-/** 风控规则集合。 */
-export interface RiskRuleSet {
-  maxMarginUsage: DecimalString
-}
-
 /** 可展示的风险提醒；后端负责保证内容脱敏。 */
 export interface RiskAlert {
   id: string
@@ -192,7 +162,6 @@ export interface RiskSnapshot {
   level: string
   marginUsage: DecimalString
   exerciseRisk: DecimalString
-  rules: RiskRuleSet
   alerts: RiskAlert[]
 }
 
@@ -207,11 +176,8 @@ export interface PnlReport {
 /** 后台调度器和恢复记录的运行健康快照。 */
 export interface RuntimeHealth {
   status: RuntimeHealthStatus
-  lastTickAt?: string
-  lastSuccessAt?: string
   consecutiveFailures: number
   skippedTicks: number
-  lastError?: string
   pendingRecoveryCount: number
 }
 
@@ -226,7 +192,6 @@ export interface LogEntry {
 
 /** 每日日志文件展示信息。 */
 export interface LogFileInfo {
-  fileName: string
   path: string
   date: string
   sizeBytes: number
@@ -259,10 +224,7 @@ export interface OrderAttemptView {
 /** 资金动作恢复记录视图。 */
 export interface FundingAttemptView {
   id: string
-  chainId: string
-  kind: string
   kindLabel: string
-  purpose: string
   asset: string
   amount: DecimalString
   transferType?: string
@@ -303,7 +265,6 @@ export interface AppSnapshot {
   health: RuntimeHealth
   balances: BalanceRow[]
   candidates: StrategyCandidate[]
-  scanDiagnostics: CandidateScanDiagnostics
   orders: StrategyOrder[]
   pnl: PnlReport
   risk: RiskSnapshot

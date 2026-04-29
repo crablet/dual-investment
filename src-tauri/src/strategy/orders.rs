@@ -13,14 +13,13 @@ use super::candidates::{
 };
 use crate::domain::{
     ExchangeOrderAck, OptionContract, OptionPosition, RecommendationLevel, StrategyCandidate,
-    StrategyDirection, StrategyOrder, StrategyOrderSource, StrategyPreview, StrategyRequest,
-    StrategyStatus,
+    StrategyDirection, StrategyOrder, StrategyOrderSource, StrategyRequest, StrategyStatus,
 };
 
 /// 基于下单请求构造本地预览。
 ///
 /// 预览用于 UI 展示和订单字段初始计算，真实下单仍必须经过合约解析、风控和 Binance 回报。
-pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
+fn preview_candidate(request: &StrategyRequest) -> StrategyCandidate {
     let premium = (request.limit_price * request.quantity).round_dp(2);
     let breakeven = match request.direction {
         StrategyDirection::SellPut => request.strike - request.limit_price,
@@ -29,7 +28,7 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
     let expiry_at = request.expiry_at;
     let expiry_days = days_until_expiry(expiry_at).max(1);
     let annualized = estimate_annualized(premium, request.strike, request.quantity, expiry_days);
-    let candidate = StrategyCandidate {
+    StrategyCandidate {
         id: request
             .candidate_id
             .clone()
@@ -54,36 +53,12 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
         limit_price: request.limit_price,
         premium,
         annualized,
-        delta_abs: Decimal::ZERO,
-        iv_rank: Decimal::ZERO,
         exercise_probability: Decimal::ZERO,
         breakeven,
         spot_price: Decimal::ZERO,
         strike_distance_percent: Decimal::ZERO,
         recommendation: RecommendationLevel::Watch,
         reason: "基于用户输入限价的订单预览".to_string(),
-    };
-
-    let reserved_asset = match request.direction {
-        StrategyDirection::SellPut => request.strike * request.quantity,
-        StrategyDirection::SellCall => request.quantity,
-    };
-    let protected_limit_price = request.limit_price;
-    let action = match request.direction {
-        StrategyDirection::SellPut => "到期 ITM 后自动买入 BTC，完成补齐",
-        StrategyDirection::SellCall => "到期 ITM 后自动卖出 BTC，完成补齐",
-    };
-
-    StrategyPreview {
-        candidate,
-        max_profit: premium,
-        reserved_asset,
-        protected_limit_price,
-        summary: vec![
-            format!("快速成交：以用户输入限价尝试 IOC 成交"),
-            format!("{action}"),
-            format!("预计年化 {}%，数量 {} 张", annualized, request.quantity),
-        ],
     }
 }
 
@@ -91,7 +66,7 @@ pub fn preview_strategy(request: &StrategyRequest) -> StrategyPreview {
 ///
 /// 成交数量、均价、手续费和交易所状态以 `ack` 为准；请求只提供策略方向和用户确认的参数。
 pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> StrategyOrder {
-    let preview = preview_strategy(request);
+    let preview = preview_candidate(request);
     let now = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
     let opened_at = ack.create_time.or(ack.update_time).unwrap_or(now);
     let avg_price = if ack.avg_price > Decimal::ZERO {
@@ -120,7 +95,7 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         client_order_id: ack.client_order_id.clone(),
         symbol: request.symbol.clone(),
         option_symbol: if ack.symbol.is_empty() {
-            preview.candidate.option_symbol
+            preview.option_symbol
         } else {
             ack.symbol.clone()
         },
@@ -136,7 +111,7 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         premium,
         estimated_pnl: premium - ack.fee,
         annualized,
-        breakeven: preview.candidate.breakeven,
+        breakeven: preview.breakeven,
         exchange_status: ack.status.clone(),
         created_at: now,
         updated_at: now,
