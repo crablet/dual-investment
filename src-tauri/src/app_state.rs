@@ -67,6 +67,9 @@ use crate::persistence::Persistence;
 use crate::secrets;
 use crate::strategy;
 
+/// 一次实盘同步需要的账户侧快照。
+///
+/// 三类账户和现货价格一起读取，是为了让快照、收益估值和资金准备使用同一批事实。
 struct LiveAccounts {
     option: OptionAccountSnapshot,
     spot: SpotAccountSnapshot,
@@ -74,6 +77,9 @@ struct LiveAccounts {
     spot_prices: HashMap<String, Decimal>,
 }
 
+/// 发送期权订单前必须重新读取的实盘输入。
+///
+/// 下单不能复用候选扫描缓存，因为合约过滤器、mark price 和账户保证金都可能已经变化。
 struct OrderLiveInputs {
     account: OptionAccountSnapshot,
     contracts: Vec<OptionContract>,
@@ -354,14 +360,24 @@ fn is_uncertain_funding_error(error: &AppError) -> bool {
         )
 }
 
+/// 运行期连接配置。
+///
+/// API Key 和 Secret 只允许留在内存中用于重建 Binance 客户端，不能写入日志、
+/// `SQLite` 或前端快照；前端只能通过 `settings()` 获取脱敏状态。
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct RuntimeConfig {
+    /// 当前进程是否已经验证过 Binance 连接和交易权限。
     pub connected: bool,
+    /// 内存中的 API Key，用于本进程内重建客户端；保存凭据仍走系统 keyring。
     pub api_key: Option<String>,
+    /// 内存中的 API Secret，只用于签名请求，不得进入任何持久化或展示层。
     pub api_secret: Option<String>,
+    /// 系统 keyring 是否存在完整凭据。
     pub saved_credentials: bool,
+    /// 自动策略开关；启动时默认 false，避免重启后直接自动下单。
     pub auto_enabled: bool,
+    /// 手动下单体验开关，不绕过后端真实下单门禁。
     pub quick_execution: bool,
 }
 

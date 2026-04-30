@@ -190,7 +190,7 @@ export interface LogEntry {
   message: string
 }
 
-/** 每日日志文件展示信息。 */
+/** 本地日志文件元数据；用于判断是否允许清理日志，不直接暴露敏感内容。 */
 export interface LogFileInfo {
   path: string
   date: string
@@ -199,7 +199,7 @@ export interface LogFileInfo {
   modifiedAt?: string
 }
 
-/** 设置页日志卡片快照。 */
+/** 设置页日志状态快照，只包含脱敏日志摘要和本地文件元数据。 */
 export interface LogSnapshot {
   directory: string
   currentFile: string

@@ -145,7 +145,9 @@ pub struct LogEntry {
     pub message: String,
 }
 
-/// 一个每日日志文件的展示信息。
+/// 一个本地日志文件的元数据。
+///
+/// 前端当前只用这些元数据判断是否允许清理日志；文件内容仍只能通过脱敏日志记录展示。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogFileInfo {
@@ -156,7 +158,9 @@ pub struct LogFileInfo {
     pub modified_at: Option<DateTime<Utc>>,
 }
 
-/// 设置页日志卡片需要的日志快照。
+/// 设置页日志面板需要的日志快照。
+///
+/// 快照包含最近脱敏日志和本地文件元数据，不包含日志原始文件内容。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogSnapshot {

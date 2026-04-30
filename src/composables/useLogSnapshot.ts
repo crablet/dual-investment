@@ -16,14 +16,6 @@ export function useLogSnapshot() {
   const loading = computed(() => pendingAction.value !== undefined)
   const files = computed(() => snapshot.value?.files ?? [])
   const recentEntries = computed(() => snapshot.value?.recentEntries ?? [])
-  const fileCountLabel = computed(() => `${files.value.length} 个文件`)
-  const currentFileName = computed(() => {
-    const currentFile = snapshot.value?.currentFile
-    if (!currentFile) {
-      return '暂无日志文件'
-    }
-    return currentFile.split(/[\\/]/).at(-1) ?? currentFile
-  })
 
   /**
    * 包装日志相关 Tauri command。
@@ -53,7 +45,7 @@ export function useLogSnapshot() {
   }
 
   async function openCurrentFile() {
-    // 打开文件可能会由系统外部程序修改日志目录，返回后刷新一次保持文件列表同步。
+    // 打开外部日志查看器后刷新快照，让删除按钮和最近日志跟随文件系统实际状态。
     await run('openFile', () => api.openCurrentLogFile())
     await refresh()
   }
@@ -75,8 +67,6 @@ export function useLogSnapshot() {
     snapshot,
     files,
     recentEntries,
-    fileCountLabel,
-    currentFileName,
     loading,
     pendingAction,
     error,

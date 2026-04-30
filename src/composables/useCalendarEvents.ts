@@ -19,6 +19,7 @@ import {
 import { decimalStringHasValue } from '@/utils/decimal'
 import { attemptStatusText, fundingAttemptStatusText, strategyStatusText } from '@/utils/labels'
 
+/** 日历事件类型只用于筛选和跳转，不对应独立持久化任务。 */
 export type CalendarEventType
   = | 'order'
     | 'expiry'
@@ -29,8 +30,10 @@ export type CalendarEventType
     | 'recovery'
     | 'system'
 
+/** 日历角标颜色语义，保持和全局交易终端配色一致。 */
 export type CalendarEventTone = 'gold' | 'green' | 'blue' | 'purple' | 'red' | 'gray'
 
+/** 从当前快照派生出的单条日历事件。 */
 export interface CalendarEvent {
   id: string
   type: CalendarEventType
@@ -54,6 +57,7 @@ interface UseCalendarEventsOptions {
   endDate: MaybeRefOrGetter<Date>
 }
 
+/** 日历顶部筛选项；顺序即 UI 展示顺序。 */
 export const calendarEventTypes: CalendarEventTypeMeta[] = [
   { id: 'all', label: '全部', tone: 'gold' },
   { id: 'order', label: '买入', tone: 'gold' },

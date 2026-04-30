@@ -7,6 +7,7 @@ import { reactive, shallowRef, watchEffect } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 export interface AutoRuleForm {
+  /** UI 开关状态，保存规则时不代表后端自动策略已开启。 */
   enabled: boolean
   schedule: string
   quantity: number
@@ -19,6 +20,7 @@ export interface AutoRuleForm {
   excludeSameDirection: boolean
 }
 
+/** 组合自动复投规则表单、保存动作和真实执行前的用户确认。 */
 export function useAutoRuleForm() {
   const store = useAppStore()
   const advancedAutoOpen = shallowRef(false)

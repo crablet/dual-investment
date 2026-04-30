@@ -14,6 +14,7 @@ import { attemptStatusText, fundingAttemptStatusText } from '@/utils/labels'
 
 export interface RecoveryRow {
   id: string
+  /** 区分订单恢复和资金恢复，点击操作时必须分派到不同 Rust command。 */
   source: 'order' | 'funding'
   updatedAt: string
   type: string
@@ -26,6 +27,7 @@ export interface RecoveryRow {
   message: string
 }
 
+/** 组合订单页恢复中心的列表模型和行级操作。 */
 export function useRecoveryRows() {
   const store = useAppStore()
 

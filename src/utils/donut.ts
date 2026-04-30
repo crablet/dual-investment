@@ -11,13 +11,19 @@ import {
   sumDecimalStrings,
 } from '@/utils/decimal'
 
+/** 环形图内部归一化条目，补齐渲染、排序和颜色需要的稳定键。 */
 export interface NormalizedDonutItem extends PnlBreakdownItem {
+  /** Vue 渲染使用的唯一 key；同业务 key 重复时会追加序号。 */
   key: string
+  /** 颜色解析使用的稳定业务 key，避免重复项改变同类颜色。 */
   colorKey: string
+  /** 排序使用的稳定业务 key，和渲染 key 分离以保留业务顺序。 */
   sortKey: string
+  /** 原始输入顺序，用于排序字段完全相同时保持稳定。 */
   sourceIndex: number
 }
 
+/** SVG 扇区展示模型，所有字段都只服务图形和辅助阅读文案。 */
 export interface DonutSegment extends NormalizedDonutItem {
   color: string
   percentLabel: string
@@ -28,6 +34,7 @@ export interface DonutSegment extends NormalizedDonutItem {
   ariaLabel: string
 }
 
+/** 环形图中心文案，随 hover/focus 在总览和单扇区之间切换。 */
 export interface DonutCenterDisplay {
   label: string
   value: string
@@ -86,6 +93,7 @@ const percentFormatter = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 1,
 })
 
+/** 归一化环形图输入，过滤零值并按业务稳定顺序排序。 */
 export function normalizeDonutItems(items: PnlBreakdownItem[]): NormalizedDonutItem[] {
   const keyCounts = new Map<string, number>()
 
@@ -114,11 +122,13 @@ export function normalizeDonutItems(items: PnlBreakdownItem[]): NormalizedDonutI
     })
 }
 
+/** 计算环形图占比总量；负值按绝对值参与占比，避免抵消其他扇区。 */
 export function absoluteDonutTotal(items: NormalizedDonutItem[]) {
   // 饼图用绝对值计算占比，负收益仍以颜色/文案标识，不让负数抵消总占比。
   return items.reduce((sum, item) => sum + Math.abs(decimalStringToDisplayNumber(item.value)), 0)
 }
 
+/** 把归一化条目转换成 SVG circle 需要的 dash 参数和可访问文案。 */
 export function buildDonutSegments(items: NormalizedDonutItem[], unit: string): DonutSegment[] {
   const total = absoluteDonutTotal(items)
   let offset = 25
@@ -145,6 +155,7 @@ export function buildDonutSegments(items: NormalizedDonutItem[], unit: string): 
   })
 }
 
+/** 决定中心总值：调用方显式值优先，否则汇总当前可见条目。 */
 export function resolveCenterValue(
   items: NormalizedDonutItem[],
   center?: string,
@@ -153,6 +164,7 @@ export function resolveCenterValue(
   return centerValue ?? center ?? sumDecimalStrings(items.map(item => item.value))
 }
 
+/** 根据 hover/focus 状态决定中心区域展示总览还是单个扇区。 */
 export function centerDisplayForSegment(
   active: DonutSegment | undefined,
   centerLabel: string,
@@ -175,6 +187,7 @@ export function centerDisplayForSegment(
   }
 }
 
+/** 格式化环形图数值；非法数字保留原字符串，方便暴露异常输入。 */
 export function formatDonutValue(value: string) {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? valueFormatter.format(numeric) : value
