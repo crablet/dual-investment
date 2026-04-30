@@ -6,13 +6,14 @@
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, Row, params};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
 use crate::domain::{
     AppError, AppResult, AutoInvestmentRule, FundingAttempt, FundingAttemptKind,
-    FundingAttemptStatus, OrderAttempt, OrderAttemptStatus, StrategyDirection, StrategyOrder,
+    FundingAttemptStatus, OrderAttempt, OrderAttemptStatus, SettlementSweep, SettlementSweepStatus,
+    StrategyDirection, StrategyOrder,
 };
 
 pub struct Persistence {
@@ -80,6 +81,25 @@ impl Persistence {
                     query_after_at TEXT,
                     send_count INTEGER NOT NULL,
                     query_count INTEGER NOT NULL,
+                    effective_query_count INTEGER NOT NULL,
+                    transport_error_count INTEGER NOT NULL,
+                    submit_error_kind TEXT,
+                    history_error_kind TEXT,
+                    history_checked_at TEXT,
+                    history_window_start_at TEXT,
+                    history_window_end_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS settlement_sweeps (
+                    id TEXT PRIMARY KEY,
+                    chain_id TEXT NOT NULL,
+                    purpose TEXT NOT NULL,
+                    settled_symbols TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    scheduled_at TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -100,6 +120,8 @@ impl Persistence {
                     ON funding_attempts (status, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_funding_attempts_chain
                     ON funding_attempts (chain_id, kind);
+                CREATE INDEX IF NOT EXISTS idx_settlement_sweeps_due
+                    ON settlement_sweeps (status, scheduled_at);
                 ",
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
@@ -178,9 +200,16 @@ impl Persistence {
                     query_after_at,
                     send_count,
                     query_count,
+                    effective_query_count,
+                    transport_error_count,
+                    submit_error_kind,
+                    history_error_kind,
+                    history_checked_at,
+                    history_window_start_at,
+                    history_window_end_at,
                     created_at,
                     updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                 params![
                     attempt.id,
                     attempt.chain_id,
@@ -196,8 +225,48 @@ impl Persistence {
                     attempt.query_after_at.as_ref().map(DateTime::to_rfc3339),
                     i64::from(attempt.send_count),
                     i64::from(attempt.query_count),
+                    i64::from(attempt.effective_query_count),
+                    i64::from(attempt.transport_error_count),
+                    attempt.submit_error_kind.as_deref(),
+                    attempt.history_error_kind.as_deref(),
+                    attempt.history_checked_at.as_ref().map(DateTime::to_rfc3339),
+                    attempt.history_window_start_at.as_ref().map(DateTime::to_rfc3339),
+                    attempt.history_window_end_at.as_ref().map(DateTime::to_rfc3339),
                     attempt.created_at.to_rfc3339(),
                     attempt.updated_at.to_rfc3339(),
+                ],
+            )
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        Ok(())
+    }
+
+    /// 保存到期结算后的批次级期权 USDT 归集任务。
+    pub fn save_settlement_sweep(&self, sweep: &SettlementSweep) -> AppResult<()> {
+        let settled_symbols = serde_json::to_string(&sweep.settled_symbols)
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO settlement_sweeps (
+                    id,
+                    chain_id,
+                    purpose,
+                    settled_symbols,
+                    status,
+                    message,
+                    scheduled_at,
+                    created_at,
+                    updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    sweep.id,
+                    sweep.chain_id,
+                    sweep.purpose,
+                    settled_symbols,
+                    sweep.status.as_str(),
+                    sweep.message,
+                    sweep.scheduled_at.to_rfc3339(),
+                    sweep.created_at.to_rfc3339(),
+                    sweep.updated_at.to_rfc3339(),
                 ],
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
@@ -339,14 +408,54 @@ impl Persistence {
             .prepare(
                 "SELECT id, chain_id, kind, purpose, asset, amount, transfer_type, product_id,
                         exchange_ref, status, message, query_after_at, send_count, query_count,
-                        created_at, updated_at
+                        effective_query_count, transport_error_count, submit_error_kind,
+                        history_error_kind, history_checked_at, history_window_start_at,
+                        history_window_end_at, created_at, updated_at
                  FROM funding_attempts
                  ORDER BY updated_at DESC
                  LIMIT ?1",
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
         let mapped = statement
-            .query_map([limit], |row| {
+            .query_map([limit], FundingAttemptRow::read)
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+
+        let mut attempts = Vec::new();
+        for row in mapped {
+            let row = row.map_err(|error| AppError::Storage(error.to_string()))?;
+            attempts.push(row.into_attempt()?);
+        }
+        Ok(attempts)
+    }
+
+    /// 按资金链路读取恢复记录。
+    pub fn list_funding_attempts_by_chain(&self, chain_id: &str) -> AppResult<Vec<FundingAttempt>> {
+        let mut attempts = self.list_funding_attempts(500)?;
+        attempts.retain(|attempt| attempt.chain_id == chain_id);
+        attempts.sort_by_key(|attempt| attempt.created_at);
+        Ok(attempts)
+    }
+
+    /// 读取已经到执行时间的待归集任务。
+    pub fn list_due_settlement_sweeps(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> AppResult<Vec<SettlementSweep>> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT id, chain_id, purpose, settled_symbols, status, message,
+                        scheduled_at, created_at, updated_at
+                 FROM settlement_sweeps
+                 WHERE status = 'pending' AND scheduled_at <= ?1
+                 ORDER BY scheduled_at ASC
+                 LIMIT ?2",
+            )
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        let mapped = statement
+            .query_map(params![now.to_rfc3339(), limit], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -354,60 +463,40 @@ impl Persistence {
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, String>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, i64>(12)?,
-                    row.get::<_, i64>(13)?,
-                    row.get::<_, String>(14)?,
-                    row.get::<_, String>(15)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
                 ))
             })
             .map_err(|error| AppError::Storage(error.to_string()))?;
 
-        let mut attempts = Vec::new();
+        let mut sweeps = Vec::new();
         for row in mapped {
             let (
                 id,
                 chain_id,
-                kind,
                 purpose,
-                asset,
-                amount,
-                transfer_type,
-                product_id,
-                exchange_ref,
+                settled_symbols,
                 status,
                 message,
-                query_after_at,
-                send_count,
-                query_count,
+                scheduled_at,
                 created_at,
                 updated_at,
             ) = row.map_err(|error| AppError::Storage(error.to_string()))?;
-            attempts.push(FundingAttempt {
+            sweeps.push(SettlementSweep {
                 id,
                 chain_id,
-                kind: parse_funding_kind(&kind)?,
                 purpose,
-                asset,
-                amount: parse_decimal(&amount)?,
-                transfer_type,
-                product_id,
-                exchange_ref,
-                status: parse_funding_status(&status)?,
+                settled_symbols: serde_json::from_str(&settled_symbols)
+                    .map_err(|error| AppError::Storage(error.to_string()))?,
+                status: parse_settlement_sweep_status(&status)?,
                 message,
-                query_after_at: query_after_at.as_deref().map(parse_time).transpose()?,
-                send_count: parse_nonnegative_u32(send_count, "send_count")?,
-                query_count: parse_nonnegative_u32(query_count, "query_count")?,
+                scheduled_at: parse_time(&scheduled_at)?,
                 created_at: parse_time(&created_at)?,
                 updated_at: parse_time(&updated_at)?,
             });
         }
-        Ok(attempts)
+        Ok(sweeps)
     }
 
     /// 统计仍需要人工确认或恢复的下单记录。
@@ -438,6 +527,108 @@ impl Persistence {
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
         usize::try_from(count).map_err(|error| AppError::Storage(error.to_string()))
+    }
+}
+
+struct FundingAttemptRow {
+    id: String,
+    chain_id: String,
+    kind: String,
+    purpose: String,
+    asset: String,
+    amount: String,
+    transfer_type: Option<String>,
+    product_id: Option<String>,
+    exchange_ref: Option<String>,
+    status: String,
+    message: String,
+    query_after_at: Option<String>,
+    send_count: i64,
+    query_count: i64,
+    effective_query_count: i64,
+    transport_error_count: i64,
+    submit_error_kind: Option<String>,
+    history_error_kind: Option<String>,
+    history_checked_at: Option<String>,
+    history_window_start_at: Option<String>,
+    history_window_end_at: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+impl FundingAttemptRow {
+    fn read(row: &Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            chain_id: row.get(1)?,
+            kind: row.get(2)?,
+            purpose: row.get(3)?,
+            asset: row.get(4)?,
+            amount: row.get(5)?,
+            transfer_type: row.get(6)?,
+            product_id: row.get(7)?,
+            exchange_ref: row.get(8)?,
+            status: row.get(9)?,
+            message: row.get(10)?,
+            query_after_at: row.get(11)?,
+            send_count: row.get(12)?,
+            query_count: row.get(13)?,
+            effective_query_count: row.get(14)?,
+            transport_error_count: row.get(15)?,
+            submit_error_kind: row.get(16)?,
+            history_error_kind: row.get(17)?,
+            history_checked_at: row.get(18)?,
+            history_window_start_at: row.get(19)?,
+            history_window_end_at: row.get(20)?,
+            created_at: row.get(21)?,
+            updated_at: row.get(22)?,
+        })
+    }
+
+    fn into_attempt(self) -> AppResult<FundingAttempt> {
+        Ok(FundingAttempt {
+            id: self.id,
+            chain_id: self.chain_id,
+            kind: parse_funding_kind(&self.kind)?,
+            purpose: self.purpose,
+            asset: self.asset,
+            amount: parse_decimal(&self.amount)?,
+            transfer_type: self.transfer_type,
+            product_id: self.product_id,
+            exchange_ref: self.exchange_ref,
+            status: parse_funding_status(&self.status)?,
+            message: self.message,
+            query_after_at: self.query_after_at.as_deref().map(parse_time).transpose()?,
+            send_count: parse_nonnegative_u32(self.send_count, "send_count")?,
+            query_count: parse_nonnegative_u32(self.query_count, "query_count")?,
+            effective_query_count: parse_nonnegative_u32(
+                self.effective_query_count,
+                "effective_query_count",
+            )?,
+            transport_error_count: parse_nonnegative_u32(
+                self.transport_error_count,
+                "transport_error_count",
+            )?,
+            submit_error_kind: self.submit_error_kind,
+            history_error_kind: self.history_error_kind,
+            history_checked_at: self
+                .history_checked_at
+                .as_deref()
+                .map(parse_time)
+                .transpose()?,
+            history_window_start_at: self
+                .history_window_start_at
+                .as_deref()
+                .map(parse_time)
+                .transpose()?,
+            history_window_end_at: self
+                .history_window_end_at
+                .as_deref()
+                .map(parse_time)
+                .transpose()?,
+            created_at: parse_time(&self.created_at)?,
+            updated_at: parse_time(&self.updated_at)?,
+        })
     }
 }
 
@@ -505,5 +696,16 @@ fn parse_funding_status(value: &str) -> AppResult<FundingAttemptStatus> {
         "failed" => Ok(FundingAttemptStatus::Failed),
         "blocked" => Ok(FundingAttemptStatus::Blocked),
         _ => Err(AppError::Storage(format!("未知资金恢复状态：{value}"))),
+    }
+}
+
+/// 解析 `SQLite` 中持久化的结算归集任务状态。
+fn parse_settlement_sweep_status(value: &str) -> AppResult<SettlementSweepStatus> {
+    match value {
+        "pending" => Ok(SettlementSweepStatus::Pending),
+        "completed" => Ok(SettlementSweepStatus::Completed),
+        "skipped" => Ok(SettlementSweepStatus::Skipped),
+        "failed" => Ok(SettlementSweepStatus::Failed),
+        _ => Err(AppError::Storage(format!("未知结算归集任务状态：{value}"))),
     }
 }

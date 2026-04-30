@@ -20,13 +20,15 @@
 - 期权订单和请求必须携带 Binance exchangeInfo.expiryDate 派生的精确 expiryAt；到期结算价格只来自 Binance 行权记录接口，不得用现货价替代。
 - 期权下单价格和数量必须满足 Binance PRICE_FILTER.tickSize 与 LOT_SIZE.stepSize；默认保证金占用率风控上限为 60%。
 - 下单或补齐需要资金时，只能基于现货/期权余额和 Simple Earn 真实持仓准备资金；请求确认后等待账户快照反映到账，等待期间只允许查询，不得重复发送资金动作。
-- 到期结算后的期权闲置 USDT 归集是批次级收尾动作：不得按每个订单重复发送 OPTION_MAIN；存在待恢复记录、未完成结算或未完成补齐时跳过归集。
+- 到期结算后的期权闲置 USDT 归集是批次级收尾动作：结算批次完成后创建 settlement_sweeps 任务并延迟约 5 分钟执行；不得按每个订单重复发送 OPTION_MAIN；同一 chain_id 已确认的划转/申购必须续跑下一步，不得重复发送；低于 10 USDT 不自动归集；存在待恢复记录、未完成结算或未完成补齐时跳过或延后归集。
+- OPTION_MAIN 确认成功后必须等待现货账户快照反映到账，才能申购 Simple Earn；等待期间只允许查询，不得重复发送划转或申购请求。
 
 ## 恢复与接管
 
 - 下单或现货补齐结果不确定时，不要盲目重发真实订单；必须按 clientOrderId 或交易所订单号重新查询 Binance，并保留 order_attempts 恢复记录。
 - 期权订单若被 Binance 确认为 EXPIRED、REJECTED、CANCELED 或 CANCELLED 且成交数量为 0，必须标记失败，不得创建、恢复或继续跟踪为活跃 StrategyOrder。
 - Simple Earn 和 Universal Transfer 必须先写入 funding_attempts 再发送 Binance；结果不确定时只按交易所引用或同类型、同资产、同金额的唯一历史记录确认，不唯一则进入 blocked。
+- 资金恢复查询失败只记录为临时错误并按慢退避重查，不计入有效“查不到”次数；只有 Binance 历史接口成功返回但仍无法确认时，才增加 effective_query_count。恢复记录应保留脱敏诊断字段：查询窗口、下次查询时间、有效查询次数、临时错误次数和错误分类。
 - blocked 资金记录只能在人工核对 Binance 事实后解除为 confirmed 或 failed；解除操作只更新恢复记录和脱敏日志，不得重新发送资金请求。
 - Binance 期权持仓接管只允许从当前义务仓和 exchangeInfo 创建本地跟踪订单；接管入口不下单、不移动资金、不混入恢复记录。接管订单使用 StrategyOrder.source = adoptedPosition，后续同步以当前持仓和到期行权记录为事实来源。
 

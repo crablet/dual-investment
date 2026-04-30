@@ -541,6 +541,50 @@ pub struct FundingAttempt {
     pub query_after_at: Option<DateTime<Utc>>,
     pub send_count: u32,
     pub query_count: u32,
+    pub effective_query_count: u32,
+    pub transport_error_count: u32,
+    pub submit_error_kind: Option<String>,
+    pub history_error_kind: Option<String>,
+    pub history_checked_at: Option<DateTime<Utc>>,
+    pub history_window_start_at: Option<DateTime<Utc>>,
+    pub history_window_end_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 到期结算后的批次级期权 USDT 归集任务状态。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettlementSweepStatus {
+    Pending,
+    Completed,
+    Skipped,
+    Failed,
+}
+
+impl SettlementSweepStatus {
+    /// 返回持久化到 `SQLite` 的稳定状态字符串。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Completed => "completed",
+            Self::Skipped => "skipped",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// 到期结算后延迟执行的资金收尾任务。
+///
+/// 该记录只描述本机批次归集计划；真实资金动作仍必须通过 `FundingAttempt` 落库后发送。
+#[derive(Clone, Debug)]
+pub struct SettlementSweep {
+    pub id: String,
+    pub chain_id: String,
+    pub purpose: String,
+    pub settled_symbols: Vec<String>,
+    pub status: SettlementSweepStatus,
+    pub message: String,
+    pub scheduled_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -570,6 +614,15 @@ pub struct FundingAttemptView {
     pub message: String,
     pub fact_source: String,
     pub next_action: String,
+    pub query_after_at: Option<DateTime<Utc>>,
+    pub query_count: u32,
+    pub effective_query_count: u32,
+    pub transport_error_count: u32,
+    pub submit_error_kind: Option<String>,
+    pub history_error_kind: Option<String>,
+    pub history_checked_at: Option<DateTime<Utc>>,
+    pub history_window_start_at: Option<DateTime<Utc>>,
+    pub history_window_end_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -618,6 +671,15 @@ impl From<FundingAttempt> for FundingAttemptView {
             message: attempt.message,
             fact_source,
             next_action,
+            query_after_at: attempt.query_after_at,
+            query_count: attempt.query_count,
+            effective_query_count: attempt.effective_query_count,
+            transport_error_count: attempt.transport_error_count,
+            submit_error_kind: attempt.submit_error_kind,
+            history_error_kind: attempt.history_error_kind,
+            history_checked_at: attempt.history_checked_at,
+            history_window_start_at: attempt.history_window_start_at,
+            history_window_end_at: attempt.history_window_end_at,
             created_at: attempt.created_at,
             updated_at: attempt.updated_at,
         }

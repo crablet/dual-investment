@@ -25,6 +25,7 @@ export interface RecoveryRow {
   factSource: string
   nextAction: string
   message: string
+  diagnostics: string
 }
 
 /** 组合订单页恢复中心的列表模型和行级操作。 */
@@ -103,6 +104,7 @@ function orderAttemptRecoveryRow(attempt: OrderAttemptView): RecoveryRow {
       ? '无需处理'
       : '重新查询 Binance 订单',
     message: attempt.message,
+    diagnostics: '',
   }
 }
 
@@ -120,5 +122,37 @@ function fundingAttemptRecoveryRow(attempt: FundingAttemptView): RecoveryRow {
     factSource: attempt.factSource,
     nextAction: attempt.nextAction,
     message: attempt.message,
+    diagnostics: fundingAttemptDiagnostics(attempt),
   }
+}
+
+function fundingAttemptDiagnostics(attempt: FundingAttemptView) {
+  const parts = [
+    `查询 ${attempt.queryCount} 次`,
+    `有效 ${attempt.effectiveQueryCount} 次`,
+    `临时错误 ${attempt.transportErrorCount} 次`,
+  ]
+  if (attempt.queryAfterAt) {
+    parts.push(`下次 ${formatRecoveryDateTime(attempt.queryAfterAt)}`)
+  }
+  if (attempt.submitErrorKind) {
+    parts.push(`发送错误 ${attempt.submitErrorKind}`)
+  }
+  if (attempt.historyErrorKind) {
+    parts.push(`历史错误 ${attempt.historyErrorKind}`)
+  }
+  if (attempt.historyWindowStartAt && attempt.historyWindowEndAt) {
+    parts.push(
+      `窗口 ${formatRecoveryDateTime(attempt.historyWindowStartAt)} - ${formatRecoveryDateTime(attempt.historyWindowEndAt)}`,
+    )
+  }
+  return parts.join('；')
+}
+
+function formatRecoveryDateTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString()
 }

@@ -198,7 +198,12 @@ function recoveryTimeLabel(value: string) {
               </td>
               <td>{{ row.factSource }}</td>
               <td>{{ row.nextAction }}</td>
-              <td>{{ row.message }}</td>
+              <td>
+                <div>{{ row.message }}</div>
+                <div v-if="row.diagnostics" class="recovery-diagnostics">
+                  {{ row.diagnostics }}
+                </div>
+              </td>
               <td>
                 <div class="button-row compact">
                   <NButton
@@ -243,3 +248,13 @@ function recoveryTimeLabel(value: string) {
     </Panel>
   </div>
 </template>
+
+<style scoped>
+.recovery-diagnostics {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+</style>

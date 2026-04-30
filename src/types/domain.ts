@@ -234,6 +234,15 @@ export interface FundingAttemptView {
   message: string
   factSource: string
   nextAction: string
+  queryAfterAt?: string
+  queryCount: number
+  effectiveQueryCount: number
+  transportErrorCount: number
+  submitErrorKind?: string
+  historyErrorKind?: string
+  historyCheckedAt?: string
+  historyWindowStartAt?: string
+  historyWindowEndAt?: string
   createdAt: string
   updatedAt: string
 }

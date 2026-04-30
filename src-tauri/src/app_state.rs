@@ -59,10 +59,10 @@ use crate::domain::{
     FundingAttemptKind, FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView,
     LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
     OrderAttemptStatus, OrderAttemptView, OrderProgressStage, OrderProgressStatus,
-    ResolveFundingAttemptRequest, RuntimeHealth, RuntimeHealthStatus, SimpleEarnRedemptionRecord,
-    SimpleEarnSnapshot, SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate,
-    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
-    UniversalTransferRecord,
+    ResolveFundingAttemptRequest, RuntimeHealth, RuntimeHealthStatus, SettlementSweep,
+    SettlementSweepStatus, SimpleEarnRedemptionRecord, SimpleEarnSnapshot,
+    SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate, StrategyDirection,
+    StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest, UniversalTransferRecord,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -113,6 +113,13 @@ enum FundingHistoryOutcome {
     Ambiguous,
 }
 
+/// 期权账户闲置 USDT 归集任务的执行结果。
+enum SweepExecutionOutcome {
+    Completed(String),
+    Skipped(String),
+    Waiting(String),
+}
+
 #[derive(Debug, Default)]
 struct SettlementSweepPlan {
     option_idle_usdt_needed: bool,
@@ -144,15 +151,50 @@ struct RuntimeHealthState {
 
 const FUNDING_HISTORY_LOOKBACK_MINUTES: i64 = 5;
 const FUNDING_HISTORY_LOOKAHEAD_DAYS: i64 = 30;
-const FUNDING_QUERY_RETRY_LIMIT: u32 = 3;
+const FUNDING_HISTORY_EXPANDED_WINDOW_MINUTES: i64 = 30;
+const FUNDING_HISTORY_WIDE_WINDOW_HOURS: i64 = 2;
+const FUNDING_QUERY_BACKOFF_MINUTES: [i64; 5] = [1, 3, 10, 30, 120];
+const SETTLEMENT_SWEEP_DELAY_MINUTES: i64 = 5;
+const OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT: Decimal = dec!(10);
 const OPTION_ACCOUNT_FUNDING_REFRESH_ATTEMPTS: usize = 6;
 const OPTION_ACCOUNT_FUNDING_REFRESH_DELAY_MS: u64 = 700;
+const SPOT_BALANCE_CONFIRM_ATTEMPTS: usize = 6;
+const SPOT_BALANCE_CONFIRM_DELAY_MS: u64 = 1_000;
 
-fn funding_history_window(created_at: chrono::DateTime<Utc>) -> (i64, i64) {
-    // 历史查询窗口从本地写入恢复记录的时间开始，兼顾接口延迟又限制扫描范围。
-    let start = created_at - Duration::minutes(FUNDING_HISTORY_LOOKBACK_MINUTES);
-    let max_end = start + Duration::days(FUNDING_HISTORY_LOOKAHEAD_DAYS);
-    let near_now = Utc::now() + Duration::minutes(5);
+fn funding_backoff_after_count(count: u32) -> Duration {
+    let index = usize::try_from(count.saturating_sub(1))
+        .unwrap_or(usize::MAX)
+        .min(FUNDING_QUERY_BACKOFF_MINUTES.len().saturating_sub(1));
+    Duration::minutes(FUNDING_QUERY_BACKOFF_MINUTES[index])
+}
+
+fn funding_history_effective_query_limit() -> u32 {
+    u32::try_from(FUNDING_QUERY_BACKOFF_MINUTES.len()).unwrap_or(u32::MAX)
+}
+
+fn funding_history_window(
+    attempt: &FundingAttempt,
+    now: chrono::DateTime<Utc>,
+) -> (chrono::DateTime<Utc>, chrono::DateTime<Utc>) {
+    // 历史查询窗口从本地写入恢复记录的时间向两侧扩展。有效查询次数越多，说明
+    // Binance 历史落库可能越慢，窗口随之变宽，但仍限制在交易所可接受的时间范围内。
+    let (lookback, lookahead) = match attempt.effective_query_count {
+        0 | 1 => (
+            Duration::minutes(FUNDING_HISTORY_LOOKBACK_MINUTES),
+            Duration::minutes(FUNDING_HISTORY_LOOKBACK_MINUTES),
+        ),
+        2 | 3 => (
+            Duration::minutes(FUNDING_HISTORY_EXPANDED_WINDOW_MINUTES),
+            Duration::minutes(FUNDING_HISTORY_EXPANDED_WINDOW_MINUTES),
+        ),
+        _ => (
+            Duration::hours(FUNDING_HISTORY_WIDE_WINDOW_HOURS),
+            Duration::hours(FUNDING_HISTORY_WIDE_WINDOW_HOURS),
+        ),
+    };
+    let start = attempt.created_at - lookback;
+    let max_end = attempt.created_at + Duration::days(FUNDING_HISTORY_LOOKAHEAD_DAYS);
+    let near_now = now + lookahead;
     let mut end = if near_now < max_end {
         near_now
     } else {
@@ -161,7 +203,54 @@ fn funding_history_window(created_at: chrono::DateTime<Utc>) -> (i64, i64) {
     if end <= start {
         end = start + Duration::minutes(1);
     }
-    (start.timestamp_millis(), end.timestamp_millis())
+    (start, end)
+}
+
+fn classify_funding_error(error: &AppError) -> &'static str {
+    match error {
+        AppError::Config(_) => "config",
+        AppError::RiskRejected(_) => "risk_rejected",
+        AppError::Storage(_) => "storage",
+        AppError::Binance(message) if message.contains("请求超时") => "timeout",
+        AppError::Binance(message) if message.contains("连接失败") => "connect_failed",
+        AppError::Binance(message) if message.contains("响应体读取失败") => {
+            "body_read_failed"
+        }
+        AppError::Binance(message) if message.contains("网络请求失败") => "network_failed",
+        AppError::Binance(message) if message.contains("响应解码失败") => "decode_failed",
+        AppError::Binance(message) if message.contains("响应缺少 rows 字段") => {
+            "missing_rows"
+        }
+        AppError::Binance(message) if message.contains("HTTP 429") => "rate_limited",
+        AppError::Binance(message)
+            if message.contains("HTTP 500")
+                || message.contains("HTTP 502")
+                || message.contains("HTTP 503")
+                || message.contains("HTTP 504") =>
+        {
+            "binance_server_error"
+        }
+        AppError::Binance(message) if message.contains("响应缺少") => "missing_response_field",
+        AppError::Binance(_) => "binance",
+    }
+}
+
+fn is_transient_binance_error(error: &AppError) -> bool {
+    matches!(
+        error,
+        AppError::Binance(message)
+            if message.contains("请求超时")
+                || message.contains("连接失败")
+                || message.contains("响应体读取失败")
+                || message.contains("网络请求失败")
+                || message.contains("响应解码失败")
+                || message.contains("响应缺少 rows 字段")
+                || message.contains("HTTP 429")
+                || message.contains("HTTP 500")
+                || message.contains("HTTP 502")
+                || message.contains("HTTP 503")
+                || message.contains("HTTP 504")
+    )
 }
 
 /// 用交易所引用或脱敏匹配条件确认 Universal Transfer 事实。
@@ -932,7 +1021,10 @@ impl AppState {
         self.recover_due_funding_attempts().await?;
         self.sync_live_orders().await?;
         if self.pending_recovery_count()? == 0 {
-            self.settle_due_orders().await?;
+            self.run_due_settlement_sweeps().await?;
+            if self.pending_recovery_count()? == 0 {
+                self.settle_due_orders().await?;
+            }
         }
         self.snapshot().await
     }
@@ -941,6 +1033,12 @@ impl AppState {
     pub async fn run_settlement_scan(&self) -> AppResult<Vec<StrategyOrder>> {
         let _maintenance_guard = self.maintenance_lock.lock().await;
         self.recover_due_funding_attempts().await?;
+        if self.pending_recovery_count()? > 0 {
+            return Err(AppError::RiskRejected(
+                "存在待确认资金恢复记录，已暂停结算资金动作".to_string(),
+            ));
+        }
+        self.run_due_settlement_sweeps().await?;
         if self.pending_recovery_count()? > 0 {
             return Err(AppError::RiskRejected(
                 "存在待确认资金恢复记录，已暂停结算资金动作".to_string(),
@@ -963,6 +1061,12 @@ impl AppState {
         }
         let _maintenance_guard = self.maintenance_lock.lock().await;
         self.recover_due_funding_attempts().await?;
+        if self.pending_recovery_count()? > 0 {
+            return Err(AppError::RiskRejected(
+                "存在待确认恢复记录，已暂停自动策略".to_string(),
+            ));
+        }
+        self.run_due_settlement_sweeps().await?;
         if self.pending_recovery_count()? > 0 {
             return Err(AppError::RiskRejected(
                 "存在待确认恢复记录，已暂停自动策略".to_string(),
@@ -1701,14 +1805,12 @@ impl AppState {
                 }
             }
         }
-        self.sweep_settlement_option_idle_usdt_once(&client, &sweep_plan)
-            .await?;
+        self.schedule_settlement_option_idle_usdt_sweep(&sweep_plan)?;
         Ok(updated)
     }
 
-    async fn sweep_settlement_option_idle_usdt_once(
+    fn schedule_settlement_option_idle_usdt_sweep(
         &self,
-        client: &BinanceClient,
         plan: &SettlementSweepPlan,
     ) -> AppResult<()> {
         if !plan.option_idle_usdt_needed {
@@ -1727,29 +1829,142 @@ impl AppState {
         if self.pending_recovery_count()? > 0 {
             self.record_warning(
                 "funding.settlement_sweep.deferred",
-                "存在待确认恢复记录，暂不执行本轮结算后的期权 USDT 归集",
+                "存在待确认恢复记录，暂不创建本轮结算后的期权 USDT 归集任务",
             )?;
             return Ok(());
         }
-
-        let _trade_guard = self.trade_lock.lock().await;
-        if self.pending_recovery_count()? > 0 {
-            self.record_warning(
-                "funding.settlement_sweep.deferred",
-                "等待归集锁期间出现待确认恢复记录，已跳过本轮结算后的期权 USDT 归集",
-            )?;
-            return Ok(());
-        }
+        let now = Utc::now();
+        let sweep = SettlementSweep {
+            id: Uuid::new_v4().to_string(),
+            chain_id: Uuid::new_v4().to_string(),
+            purpose: "期权到期结算后归集".to_string(),
+            settled_symbols: plan.settled_symbols.clone(),
+            status: SettlementSweepStatus::Pending,
+            message: "到期结算已完成，等待期权账户余额稳定后归集闲置 USDT".to_string(),
+            scheduled_at: now + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES),
+            created_at: now,
+            updated_at: now,
+        };
+        self.save_settlement_sweep(&sweep)?;
         self.record_log(
-            "funding.settlement_sweep.started",
+            "funding.settlement_sweep.scheduled",
             &format!(
-                "本轮到期结算已完成，准备归集期权账户闲置 USDT，涉及 {}",
-                plan.settled_symbols.join("、")
+                "本轮到期结算已完成，已计划 {} 分钟后归集期权账户闲置 USDT，涉及 {}",
+                SETTLEMENT_SWEEP_DELAY_MINUTES,
+                sweep.settled_symbols.join("、")
             ),
         )?;
-        self.sweep_option_idle_usdt_best_effort(client, "期权到期结算后归集")
-            .await;
         Ok(())
+    }
+
+    async fn run_due_settlement_sweeps(&self) -> AppResult<()> {
+        if !self.runtime.read().await.connected {
+            return Ok(());
+        }
+        if self.pending_recovery_count()? > 0 {
+            return Ok(());
+        }
+        let sweeps = {
+            let persistence = self
+                .persistence
+                .lock()
+                .map_err(|error| AppError::Storage(error.to_string()))?;
+            persistence.list_due_settlement_sweeps(Utc::now(), 20)?
+        };
+        if sweeps.is_empty() {
+            return Ok(());
+        }
+        let client = self.live_client().await?;
+        for mut sweep in sweeps {
+            let _trade_guard = self.trade_lock.lock().await;
+            if self.pending_recovery_count()? > 0 {
+                sweep.message = "存在待确认恢复记录，继续延后结算归集任务".to_string();
+                sweep.scheduled_at = Utc::now() + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES);
+                sweep.updated_at = Utc::now();
+                self.save_settlement_sweep(&sweep)?;
+                self.record_warning(
+                    "funding.settlement_sweep.deferred",
+                    "执行结算归集前发现待确认恢复记录，已延后任务",
+                )?;
+                return Ok(());
+            }
+            match self
+                .execute_settlement_sweep(&client, &sweep.purpose, &sweep.chain_id)
+                .await
+            {
+                Ok(SweepExecutionOutcome::Completed(message)) => {
+                    sweep.status = SettlementSweepStatus::Completed;
+                    sweep.message = message;
+                    sweep.updated_at = Utc::now();
+                    self.save_settlement_sweep(&sweep)?;
+                }
+                Ok(SweepExecutionOutcome::Skipped(message)) => {
+                    sweep.status = SettlementSweepStatus::Skipped;
+                    sweep.message = message;
+                    sweep.updated_at = Utc::now();
+                    self.save_settlement_sweep(&sweep)?;
+                }
+                Ok(SweepExecutionOutcome::Waiting(message)) => {
+                    sweep.status = SettlementSweepStatus::Pending;
+                    sweep.message = message;
+                    sweep.scheduled_at =
+                        Utc::now() + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES);
+                    sweep.updated_at = Utc::now();
+                    self.save_settlement_sweep(&sweep)?;
+                }
+                Err(error) if self.pending_recovery_count()? > 0 => {
+                    sweep.status = SettlementSweepStatus::Pending;
+                    sweep.message = format!(
+                        "结算归集已产生待确认资金恢复记录，等待恢复后继续：{}",
+                        classify_funding_error(&error)
+                    );
+                    sweep.scheduled_at =
+                        Utc::now() + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES);
+                    sweep.updated_at = Utc::now();
+                    self.save_settlement_sweep(&sweep)?;
+                    self.record_warning(
+                        "funding.settlement_sweep.waiting_recovery",
+                        "结算归集等待资金恢复记录确认后继续",
+                    )?;
+                    return Ok(());
+                }
+                Err(error) if is_transient_binance_error(&error) => {
+                    sweep.status = SettlementSweepStatus::Pending;
+                    sweep.message = format!(
+                        "结算归集查询暂时失败，稍后重试：{}",
+                        classify_funding_error(&error)
+                    );
+                    sweep.scheduled_at =
+                        Utc::now() + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES);
+                    sweep.updated_at = Utc::now();
+                    self.save_settlement_sweep(&sweep)?;
+                    self.record_warning("funding.settlement_sweep.retry_later", &sweep.message)?;
+                }
+                Err(error) => {
+                    sweep.status = SettlementSweepStatus::Failed;
+                    sweep.message = format!(
+                        "结算归集无法自动继续，已停止该批次任务：{}",
+                        classify_funding_error(&error)
+                    );
+                    sweep.updated_at = Utc::now();
+                    self.save_settlement_sweep(&sweep)?;
+                    self.record_warning(
+                        "funding.settlement_sweep.failed",
+                        &format!("结算归集任务失败：{error}"),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn execute_settlement_sweep(
+        &self,
+        client: &BinanceClient,
+        purpose: &str,
+        chain_id: &str,
+    ) -> AppResult<SweepExecutionOutcome> {
+        self.sweep_option_idle_usdt(client, purpose, chain_id).await
     }
 
     async fn settlement_price(
@@ -1983,6 +2198,10 @@ impl AppState {
         if self.pending_recovery_count()? > 0 {
             return Ok(());
         }
+        self.run_due_settlement_sweeps().await?;
+        if self.pending_recovery_count()? > 0 {
+            return Ok(());
+        }
         self.settle_due_orders().await?;
         if self.should_run_auto_now().await {
             match self.execute_auto_strategy().await {
@@ -2133,6 +2352,22 @@ impl AppState {
             .save_funding_attempt(attempt)
     }
 
+    /// 保存结算后的批次级归集任务。
+    fn save_settlement_sweep(&self, sweep: &SettlementSweep) -> AppResult<()> {
+        self.persistence
+            .lock()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+            .save_settlement_sweep(sweep)
+    }
+
+    /// 读取同一资金链路上的恢复记录。
+    fn funding_attempts_by_chain(&self, chain_id: &str) -> AppResult<Vec<FundingAttempt>> {
+        self.persistence
+            .lock()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+            .list_funding_attempts_by_chain(chain_id)
+    }
+
     /// 获取可用 Binance 客户端；缓存缺失时从运行期凭据重建。
     async fn live_client(&self) -> AppResult<BinanceClient> {
         if let Some(client) = self.client.read().await.as_ref().cloned() {
@@ -2263,6 +2498,13 @@ impl AppState {
             query_after_at: None,
             send_count: 0,
             query_count: 0,
+            effective_query_count: 0,
+            transport_error_count: 0,
+            submit_error_kind: None,
+            history_error_kind: None,
+            history_checked_at: None,
+            history_window_start_at: None,
+            history_window_end_at: None,
             created_at: now,
             updated_at: now,
         };
@@ -2326,6 +2568,7 @@ impl AppState {
             Ok(exchange_ref) => {
                 attempt.status = FundingAttemptStatus::ExchangeAck;
                 attempt.exchange_ref = Some(exchange_ref);
+                attempt.submit_error_kind = None;
                 attempt.message = "Binance 已返回资金动作引用，正在查询历史确认".to_string();
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(&attempt)?;
@@ -2334,7 +2577,10 @@ impl AppState {
             Err(error) if is_uncertain_funding_error(&error) => {
                 // 结果不确定时不重发资金动作，改为按 Binance 历史确认。
                 attempt.status = FundingAttemptStatus::Uncertain;
-                attempt.message = format!("资金请求结果不确定，正在按 Binance 历史确认：{error}");
+                let error_kind = classify_funding_error(&error);
+                attempt.submit_error_kind = Some(error_kind.to_string());
+                attempt.message =
+                    format!("资金请求结果不确定，正在按 Binance 历史确认：{error_kind}");
                 attempt.query_after_at = Some(Utc::now());
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(&attempt)?;
@@ -2342,7 +2588,9 @@ impl AppState {
             }
             Err(error) => {
                 attempt.status = FundingAttemptStatus::Failed;
-                attempt.message = format!("Binance 明确拒绝或本地校验失败：{error}");
+                let error_kind = classify_funding_error(&error);
+                attempt.submit_error_kind = Some(error_kind.to_string());
+                attempt.message = format!("Binance 明确拒绝或本地校验失败：{error_kind}");
                 attempt.query_after_at = None;
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(&attempt)?;
@@ -2356,12 +2604,60 @@ impl AppState {
         client: &BinanceClient,
         mut attempt: FundingAttempt,
     ) -> AppResult<FundingAttempt> {
-        // 查询次数也是恢复事实的一部分；多次无法唯一确认后会进入 blocked。
+        // 总查询次数记录所有恢复查询尝试；有效查询次数只在 Binance 历史接口成功返回后增加。
+        let now = Utc::now();
+        let (window_start, window_end) = funding_history_window(&attempt, now);
         attempt.query_count = attempt.query_count.saturating_add(1);
-        attempt.updated_at = Utc::now();
+        attempt.history_checked_at = Some(now);
+        attempt.history_window_start_at = Some(window_start);
+        attempt.history_window_end_at = Some(window_end);
+        attempt.updated_at = now;
         self.save_funding_attempt(&attempt)?;
 
-        let outcome = self.lookup_funding_history(client, &attempt).await?;
+        let outcome = match self
+            .lookup_funding_history(client, &attempt, window_start, window_end)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.apply_funding_history_query_error(&mut attempt, &error)?;
+                return Ok(attempt);
+            }
+        };
+        attempt.effective_query_count = attempt.effective_query_count.saturating_add(1);
+        attempt.history_error_kind = None;
+        self.apply_funding_history_outcome(&mut attempt, outcome)?;
+        Ok(attempt)
+    }
+
+    fn apply_funding_history_query_error(
+        &self,
+        attempt: &mut FundingAttempt,
+        error: &AppError,
+    ) -> AppResult<()> {
+        let error_kind = classify_funding_error(error);
+        if is_transient_binance_error(error) {
+            attempt.transport_error_count = attempt.transport_error_count.saturating_add(1);
+            attempt.history_error_kind = Some(error_kind.to_string());
+            attempt.query_after_at =
+                Some(Utc::now() + funding_backoff_after_count(attempt.transport_error_count));
+            attempt.message = format!("Binance 历史查询暂时失败，稍后继续确认：{error_kind}");
+        } else {
+            attempt.status = FundingAttemptStatus::Blocked;
+            attempt.history_error_kind = Some(error_kind.to_string());
+            attempt.query_after_at = None;
+            attempt.message =
+                format!("Binance 历史查询发生不可自动确认错误，已阻断资金动作：{error_kind}");
+        }
+        attempt.updated_at = Utc::now();
+        self.save_funding_attempt(attempt)
+    }
+
+    fn apply_funding_history_outcome(
+        &self,
+        attempt: &mut FundingAttempt,
+        outcome: FundingHistoryOutcome,
+    ) -> AppResult<()> {
         match outcome {
             FundingHistoryOutcome::Confirmed(exchange_ref, status) => {
                 attempt.status = FundingAttemptStatus::Confirmed;
@@ -2369,7 +2665,7 @@ impl AppState {
                 attempt.query_after_at = None;
                 attempt.message = format!("已按 Binance 历史确认成功，状态 {status}");
                 attempt.updated_at = Utc::now();
-                self.save_funding_attempt(&attempt)?;
+                self.save_funding_attempt(attempt)?;
                 self.record_log(
                     "funding.recovery.confirmed",
                     &format!(
@@ -2386,10 +2682,11 @@ impl AppState {
                     attempt.exchange_ref = Some(exchange_ref);
                 }
                 attempt.status = FundingAttemptStatus::Pending;
-                attempt.query_after_at = Some(Utc::now() + Duration::minutes(1));
+                attempt.query_after_at =
+                    Some(Utc::now() + funding_backoff_after_count(attempt.effective_query_count));
                 attempt.message = format!("Binance 历史显示仍在处理中，状态 {status}");
                 attempt.updated_at = Utc::now();
-                self.save_funding_attempt(&attempt)?;
+                self.save_funding_attempt(attempt)?;
             }
             FundingHistoryOutcome::Failed(exchange_ref, status) => {
                 if let Some(exchange_ref) = exchange_ref {
@@ -2399,44 +2696,49 @@ impl AppState {
                 attempt.query_after_at = None;
                 attempt.message = format!("Binance 历史确认失败，状态 {status}");
                 attempt.updated_at = Utc::now();
-                self.save_funding_attempt(&attempt)?;
+                self.save_funding_attempt(attempt)?;
             }
-            FundingHistoryOutcome::NotFound | FundingHistoryOutcome::Ambiguous => {
-                let ambiguous = matches!(outcome, FundingHistoryOutcome::Ambiguous);
+            FundingHistoryOutcome::Ambiguous => {
                 // 多条匹配比查不到更危险：无法判断哪条是本机请求，继续自动动作可能重复移动资金。
-                if attempt.query_count >= FUNDING_QUERY_RETRY_LIMIT {
+                attempt.status = FundingAttemptStatus::Blocked;
+                attempt.query_after_at = None;
+                attempt.message =
+                    "Binance 历史匹配到多条可能记录，无法唯一确认，已阻断自动资金动作".to_string();
+                attempt.updated_at = Utc::now();
+                self.save_funding_attempt(attempt)?;
+            }
+            FundingHistoryOutcome::NotFound => {
+                if attempt.effective_query_count >= funding_history_effective_query_limit() {
                     attempt.status = FundingAttemptStatus::Blocked;
                     attempt.query_after_at = None;
-                    attempt.message = if ambiguous {
-                        "Binance 历史匹配到多条可能记录，无法唯一确认，已阻断自动资金动作"
-                            .to_string()
-                    } else {
-                        "多次查询 Binance 历史仍无法确认该资金动作是否发生，已阻断自动资金动作"
-                            .to_string()
-                    };
+                    attempt.message =
+                        "多次有效查询 Binance 历史仍无法确认该资金动作是否发生，已阻断自动资金动作"
+                            .to_string();
                 } else {
                     attempt.status = FundingAttemptStatus::Uncertain;
-                    attempt.query_after_at = Some(Utc::now() + Duration::minutes(1));
-                    attempt.message = if ambiguous {
-                        "Binance 历史匹配到多条可能记录，稍后重查以避免重复执行".to_string()
-                    } else {
-                        "暂未在 Binance 历史中确认该资金动作，稍后继续查询".to_string()
-                    };
+                    attempt.query_after_at = Some(
+                        Utc::now() + funding_backoff_after_count(attempt.effective_query_count),
+                    );
+                    attempt.message =
+                        "暂未在 Binance 历史中确认该资金动作，稍后继续查询".to_string();
                 }
                 attempt.updated_at = Utc::now();
-                self.save_funding_attempt(&attempt)?;
+                self.save_funding_attempt(attempt)?;
             }
         }
-        Ok(attempt)
+        Ok(())
     }
 
     async fn lookup_funding_history(
         &self,
         client: &BinanceClient,
         attempt: &FundingAttempt,
+        window_start: chrono::DateTime<Utc>,
+        window_end: chrono::DateTime<Utc>,
     ) -> AppResult<FundingHistoryOutcome> {
         // 每种资金动作走对应 Binance 历史接口，不能把日志或前端进度当作资金事实。
-        let (start_time_ms, end_time_ms) = funding_history_window(attempt.created_at);
+        let start_time_ms = window_start.timestamp_millis();
+        let end_time_ms = window_end.timestamp_millis();
         match attempt.kind {
             FundingAttemptKind::UniversalTransfer => {
                 let transfer_type = attempt.transfer_type.as_deref().ok_or_else(|| {
@@ -2714,28 +3016,135 @@ impl AppState {
 
     async fn sweep_option_idle_usdt_best_effort(&self, client: &BinanceClient, purpose: &str) {
         // 归集是收尾优化，失败时只写脱敏告警，不回滚已经完成的下单或结算事实。
-        if let Err(error) = self.sweep_option_idle_usdt(client, purpose).await {
-            let _ = self.record_warning("funding.sweep.failed", &format!("{purpose}失败：{error}"));
+        let chain_id = Uuid::new_v4().to_string();
+        match self
+            .sweep_option_idle_usdt(client, purpose, &chain_id)
+            .await
+        {
+            Ok(SweepExecutionOutcome::Completed(_) | SweepExecutionOutcome::Skipped(_)) => {}
+            Ok(SweepExecutionOutcome::Waiting(message)) => {
+                let _ = self.record_warning("funding.sweep.waiting", &message);
+            }
+            Err(error) => {
+                let _ =
+                    self.record_warning("funding.sweep.failed", &format!("{purpose}失败：{error}"));
+            }
         }
     }
 
     /// 把期权账户中不需要继续支撑保证金风控的 USDT 归集回现货并申购活期。
-    async fn sweep_option_idle_usdt(&self, client: &BinanceClient, purpose: &str) -> AppResult<()> {
-        let account = client.option_account().await?;
-        let amount = round_down_funding_amount(option_idle_usdt_sweep_amount(&account));
-        if amount < dec!(0.01) {
-            return Ok(());
+    async fn sweep_option_idle_usdt(
+        &self,
+        client: &BinanceClient,
+        purpose: &str,
+        chain_id: &str,
+    ) -> AppResult<SweepExecutionOutcome> {
+        let chain_attempts = self.funding_attempts_by_chain(chain_id)?;
+        if let Some(subscription) = chain_attempts.iter().find(|attempt| {
+            attempt.kind == FundingAttemptKind::SimpleEarnSubscribe && attempt.asset == "USDT"
+        }) {
+            return match subscription.status {
+                FundingAttemptStatus::Confirmed => Ok(SweepExecutionOutcome::Completed(
+                    "该归集链路的 Simple Earn 活期申购已确认完成".to_string(),
+                )),
+                FundingAttemptStatus::Failed => Err(AppError::RiskRejected(
+                    "该归集链路已有失败的 Simple Earn 申购记录，需要人工复核".to_string(),
+                )),
+                _ => Err(AppError::RiskRejected(
+                    "该归集链路已有待确认的 Simple Earn 申购记录".to_string(),
+                )),
+            };
         }
 
-        let chain_id = Uuid::new_v4().to_string();
-        self.execute_universal_transfer(client, &chain_id, purpose, "OPTION_MAIN", "USDT", amount)
+        let (transfer_amount, minimum_spot_amount) = if let Some(transfer) =
+            chain_attempts.iter().find(|attempt| {
+                attempt.kind == FundingAttemptKind::UniversalTransfer
+                    && attempt.asset == "USDT"
+                    && attempt.transfer_type.as_deref() == Some("OPTION_MAIN")
+            }) {
+            match transfer.status {
+                FundingAttemptStatus::Confirmed => (transfer.amount, transfer.amount),
+                FundingAttemptStatus::Failed => {
+                    return Err(AppError::RiskRejected(
+                        "该归集链路已有失败的 OPTION_MAIN 划转记录，需要人工复核".to_string(),
+                    ));
+                }
+                _ => {
+                    return Err(AppError::RiskRejected(
+                        "该归集链路已有待确认的 OPTION_MAIN 划转记录".to_string(),
+                    ));
+                }
+            }
+        } else {
+            let account = client.option_account().await?;
+            let amount = round_down_funding_amount(option_idle_usdt_sweep_amount(&account));
+            if amount < OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT {
+                let message = format!(
+                    "{purpose}跳过期权 USDT 归集：可归集数量 {amount} USDT 小于自动归集阈值 {OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT} USDT"
+                );
+                self.record_log("funding.option_idle_sweep.skipped", &message)?;
+                return Ok(SweepExecutionOutcome::Skipped(message));
+            }
+
+            let spot_before = client.spot_account().await?;
+            let minimum_spot_amount = spot_asset_free(&spot_before, "USDT") + amount;
+            self.execute_universal_transfer(
+                client,
+                chain_id,
+                purpose,
+                "OPTION_MAIN",
+                "USDT",
+                amount,
+            )
             .await?;
-        self.record_log(
-            "funding.transfer.option_main",
-            &format!("已从期权保证金账户归集 {amount} USDT 到现货账户，{purpose}"),
-        )?;
-        self.subscribe_spot_asset_to_earn(client, "USDT", amount, purpose, &chain_id)
-            .await
+            self.record_log(
+                "funding.transfer.option_main",
+                &format!("已从期权保证金账户归集 {amount} USDT 到现货账户，{purpose}"),
+            )?;
+            (amount, minimum_spot_amount)
+        };
+
+        if !self
+            .wait_for_spot_asset_available(client, "USDT", minimum_spot_amount)
+            .await?
+        {
+            let message = format!(
+                "{purpose}已确认 OPTION_MAIN 划转，但现货账户暂未反映 {transfer_amount} USDT，延后 Simple Earn 申购"
+            );
+            self.record_warning("funding.earn.subscribe_deferred", &message)?;
+            return Ok(SweepExecutionOutcome::Waiting(message));
+        }
+
+        self.subscribe_spot_asset_to_earn(client, "USDT", transfer_amount, purpose, chain_id)
+            .await?;
+        Ok(SweepExecutionOutcome::Completed(format!(
+            "{purpose}已完成期权闲置 USDT 归集链路"
+        )))
+    }
+
+    async fn wait_for_spot_asset_available(
+        &self,
+        client: &BinanceClient,
+        asset: &str,
+        expected_amount: Decimal,
+    ) -> AppResult<bool> {
+        for attempt_index in 0..SPOT_BALANCE_CONFIRM_ATTEMPTS {
+            let spot_account = client.spot_account().await?;
+            if spot_asset_free(&spot_account, asset) >= expected_amount {
+                if attempt_index > 0 {
+                    self.record_log(
+                        "funding.spot_balance_refreshed",
+                        &format!("现货账户已反映 {expected_amount} {asset}，继续后续资金收尾动作"),
+                    )?;
+                }
+                return Ok(true);
+            }
+            if attempt_index + 1 == SPOT_BALANCE_CONFIRM_ATTEMPTS {
+                break;
+            }
+            tokio::time::sleep(StdDuration::from_millis(SPOT_BALANCE_CONFIRM_DELAY_MS)).await;
+        }
+        Ok(false)
     }
 
     async fn sweep_spot_rebalance_assets_best_effort(
@@ -2786,6 +3195,30 @@ impl AppState {
         let amount = round_down_funding_amount(amount);
         if amount <= Decimal::ZERO {
             return Ok(());
+        }
+        if let Some(subscription) =
+            self.funding_attempts_by_chain(chain_id)?
+                .into_iter()
+                .find(|attempt| {
+                    attempt.kind == FundingAttemptKind::SimpleEarnSubscribe
+                        && attempt.asset == asset
+                })
+        {
+            return match subscription.status {
+                FundingAttemptStatus::Confirmed => {
+                    self.record_log(
+                        "funding.earn.subscribe_already_confirmed",
+                        &format!("{purpose}已存在确认完成的 {asset} 活期申购记录，跳过重复申购"),
+                    )?;
+                    Ok(())
+                }
+                FundingAttemptStatus::Failed => Err(AppError::RiskRejected(format!(
+                    "{purpose}已有失败的 {asset} 活期申购记录，需要人工复核"
+                ))),
+                _ => Err(AppError::RiskRejected(format!(
+                    "{purpose}已有待确认的 {asset} 活期申购记录"
+                ))),
+            };
         }
         let products = client.simple_earn_flexible_products(asset).await?;
         let product = products
