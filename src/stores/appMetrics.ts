@@ -6,6 +6,7 @@
 import type { AppSettings, AppSnapshot } from '@/types/domain'
 import type { MetricCardModel, PnlBreakdownItem } from '@/types/view'
 import {
+  decimalStringToDisplayNumber,
   isZeroDecimalString,
   sumDecimalStrings,
 } from '@/utils/decimal'
@@ -93,7 +94,7 @@ export function buildPnlBreakdown(report: AppSnapshot['pnl'] | undefined): PnlBr
 
 function formatMetricMoney(value: string) {
   // 指标卡格式化允许转 number；汇总本身已经由 Decimal 字符串工具完成。
-  const numeric = Number(value)
+  const numeric = decimalStringToDisplayNumber(value)
   if (!Number.isFinite(numeric)) {
     return `${value} USDT`
   }

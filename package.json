@@ -17,7 +17,6 @@
   "dependencies": {
     "@lucide/vue": "^1.20.0",
     "@tauri-apps/api": "^2.11.0",
-    "echarts": "^6.1.0",
     "naive-ui": "^2.44.1",
     "pinia": "^3.0.4",
     "vue": "^3.5.38"

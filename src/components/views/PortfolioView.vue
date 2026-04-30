@@ -13,7 +13,7 @@ import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { localDateTimeLabel } from '@/utils/date'
-import { sumDecimalStrings } from '@/utils/decimal'
+import { decimalStringToDisplayNumber, sumDecimalStrings } from '@/utils/decimal'
 
 const store = useAppStore()
 const { decimal, money } = useFormat()
@@ -44,12 +44,18 @@ const upcomingExpiryOrders = computed(() =>
 const sellPutMargin = computed(() =>
   obligationOrders.value
     .filter(order => order.direction === 'sellPut')
-    .reduce((sum, order) => sum + Number(order.strike) * Number(order.quantity), 0),
+    .reduce(
+      (sum, order) =>
+        sum
+        + decimalStringToDisplayNumber(order.strike)
+        * decimalStringToDisplayNumber(order.quantity),
+      0,
+    ),
 )
 const sellCallQuantity = computed(() =>
   obligationOrders.value
     .filter(order => order.direction === 'sellCall')
-    .reduce((sum, order) => sum + Number(order.quantity), 0),
+    .reduce((sum, order) => sum + decimalStringToDisplayNumber(order.quantity), 0),
 )
 const balanceBreakdown = computed<PnlBreakdownItem[]>(() => buildBalanceBreakdown(store.balances))
 const balanceTotalValue = computed(() =>

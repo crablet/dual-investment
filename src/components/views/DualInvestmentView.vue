@@ -8,9 +8,6 @@ import type { StrategyCandidate } from '@/types/domain'
 import {
   ArrowDownCircle,
   ArrowUpCircle,
-  ArrowUpDown,
-  ChevronDown,
-  ChevronUp,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -26,16 +23,17 @@ import {
 } from 'naive-ui'
 import { shallowRef } from 'vue'
 import OrderProgressPanel from '@/components/common/OrderProgressPanel.vue'
+import CandidateTable from '@/components/dual/CandidateTable.vue'
 import OrderReviewDialog from '@/components/orders/OrderReviewDialog.vue'
 import { useAutoRuleForm } from '@/composables/useAutoRuleForm'
 import {
-  candidateSortColumns,
   expiryFilters,
   useDualInvestmentCandidates,
 } from '@/composables/useDualInvestmentCandidates'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { localDateTimeLabel } from '@/utils/date'
+import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 interface ManualOrderReview {
   candidate: StrategyCandidate
@@ -81,7 +79,7 @@ const orderReview = shallowRef<ManualOrderReview>()
 
 function signedPercent(value: string | number) {
   // 展示用百分比允许 number；真实年化和风控阈值提交前会回到字符串契约。
-  const numeric = Number(value)
+  const numeric = typeof value === 'number' ? value : decimalStringToDisplayNumber(value)
   if (!Number.isFinite(numeric))
     return '--'
   const sign = numeric > 0 ? '+' : ''
@@ -218,48 +216,14 @@ function confirmOrderReview() {
           <NButton secondary @click="resetCandidateFilters">重置</NButton>
         </div>
 
-        <div class="opportunity-table">
-          <div class="opportunity-row opportunity-head">
-            <button
-              v-for="column in candidateSortColumns"
-              :key="column.key"
-              class="opportunity-sort"
-              :class="{ active: candidateSortKey === column.key }"
-              type="button"
-              :aria-pressed="candidateSortKey === column.key"
-              @click="toggleCandidateSort(column.key)"
-            >
-              <span>{{ column.label }}</span>
-              <NIcon
-                :component="candidateSortKey === column.key
-                  ? (candidateSortDirection === 'asc' ? ChevronUp : ChevronDown)
-                  : ArrowUpDown"
-              />
-            </button>
-          </div>
-          <button
-            v-for="candidate in sortedCandidates"
-            :key="candidate.id"
-            class="opportunity-row"
-            :class="{ selected: selectedCandidate?.id === candidate.id }"
-            type="button"
-            @click="selectCandidate(candidate)"
-          >
-            <span>
-              <strong>{{ money(candidate.strike) }}</strong>
-              <em>
-                距现货 {{ signedPercent(candidate.strikeDistancePercent) }}
-              </em>
-            </span>
-            <span class="positive">{{ percent(candidate.annualized) }}</span>
-            <span>
-              <strong>{{ localDateTimeLabel(candidate.expiryAt) }}</strong>
-              <em>{{ daysUntil(candidate.expiryAt) }} 天</em>
-            </span>
-            <span>{{ money(candidate.limitPrice) }}</span>
-            <span>{{ percent(candidate.exerciseProbability) }}</span>
-          </button>
-        </div>
+        <CandidateTable
+          :candidates="sortedCandidates"
+          :selected-candidate-id="selectedCandidate?.id"
+          :sort-key="candidateSortKey"
+          :sort-direction="candidateSortDirection"
+          @select="selectCandidate"
+          @toggle-sort="toggleCandidateSort"
+        />
 
         <div v-if="filteredCandidates.length === 0" class="empty-state opportunity-empty">
           <strong>{{ emptyCandidateTitle }}</strong>
@@ -285,7 +249,7 @@ function confirmOrderReview() {
             <strong :class="{ positive: selectedCandidate }">
               {{ selectedCandidate ? percent(selectedCandidate.annualized) : '--' }}
             </strong>
-            <em v-if="selectedCandidate && Number(selectedCandidate.spotPrice) > 0">
+            <em v-if="selectedCandidate && decimalStringToDisplayNumber(selectedCandidate.spotPrice) > 0">
               距现货 {{ signedPercent(selectedCandidate.strikeDistancePercent) }}
             </em>
           </article>

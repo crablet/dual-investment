@@ -5,6 +5,7 @@
 
 import { reactive, shallowRef, watchEffect } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 export interface AutoRuleForm {
   /** UI 开关状态，保存规则时不代表后端自动策略已开启。 */
@@ -45,10 +46,10 @@ export function useAutoRuleForm() {
     // 后端 DTO 用 Decimal 字符串承接金融值；本地表单转 number 只是为了 Naive UI 控件交互。
     Object.assign(ruleForm, {
       ...store.autoRule,
-      quantity: Number(store.autoRule.quantity),
-      minAnnualized: Number(store.autoRule.minAnnualized),
-      maxDeltaAbs: Number(store.autoRule.maxDeltaAbs),
-      maxIvRank: Number(store.autoRule.maxIvRank),
+      quantity: decimalStringToDisplayNumber(store.autoRule.quantity),
+      minAnnualized: decimalStringToDisplayNumber(store.autoRule.minAnnualized),
+      maxDeltaAbs: decimalStringToDisplayNumber(store.autoRule.maxDeltaAbs),
+      maxIvRank: decimalStringToDisplayNumber(store.autoRule.maxIvRank),
     })
   })
 

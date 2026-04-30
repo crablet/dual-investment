@@ -56,6 +56,7 @@ Binance 期权是现金结算；到期 ITM 后，应用会通过额外的现货�
       composables/  可复用前端逻辑
       services/     Tauri API 调用
       stores/       Pinia 应用状态和展示派生 helper
+      theme/        Naive UI 全局主题覆盖
       types/        前后端共享数据形状
       utils/        前端纯展示工具
 

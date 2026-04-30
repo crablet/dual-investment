@@ -33,6 +33,7 @@
 ## 前端与后端边界
 
 - 前端使用 Vue 3、script setup、Pinia、Naive UI、Vite；跨页面状态源保持在 src/stores/app.ts，route/view 级组件只做组合。
+- Naive UI 全局主题配置放在 src/theme/；App.vue 只负责 provider、视图组合和应用级 wiring，不堆叠主题常量或业务逻辑。
 - 双币赢和自动复投共用 src/components/views/DualInvestmentView.vue；候选筛选和下单入口只放在“双币赢”页。订单页可以提供持仓接管入口，恢复中心可以展示恢复记录，但不得把接管状态展示成恢复记录。
 - 前端只做展示派生：订单年化只展示 StrategyOrder.annualized，收益分类不得从日志推断，账户估值由 Rust 提供，无法定价时显示“暂无估值”。下单进度事件、日志和图表交互不得作为交易事实来源。
 - 到期信息统一展示 expiryAt 的本地日期时间；总览事件日历只从快照派生。

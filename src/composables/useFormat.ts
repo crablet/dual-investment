@@ -4,6 +4,7 @@
 // 或前端 BigInt 辅助函数处理。
 
 import type { StrategyDirection, StrategyStatus } from '@/types/domain'
+import { decimalStringToDisplayNumber } from '@/utils/decimal'
 import {
   directionTextMap,
   directionToneMap,
@@ -39,15 +40,15 @@ function percentFormatter(digits: number) {
 
 /** 返回组件常用的格式化函数和状态映射。 */
 export function useFormat() {
-  // 这里的 Number 转换只用于 Intl 展示格式化；不要把返回值再作为计算输入。
+  // 这里的转换只用于 Intl 展示格式化；不要把返回值再作为计算输入。
   const money = (value: string | number, currency = 'USDT') =>
-    `${moneyFormatter.format(Number(value))} ${currency}`
+    `${moneyFormatter.format(toDisplayNumber(value))} ${currency}`
 
   const decimal = (value: string | number) =>
-    decimalFormatter.format(Number(value))
+    decimalFormatter.format(toDisplayNumber(value))
 
   const percent = (value: string | number, digits = 2) =>
-    `${percentFormatter(digits).format(Number(value))}%`
+    `${percentFormatter(digits).format(toDisplayNumber(value))}%`
 
   const directionText = (direction: StrategyDirection) => directionTextMap[direction]
 
@@ -66,4 +67,8 @@ export function useFormat() {
     statusText,
     statusTone,
   }
+}
+
+function toDisplayNumber(value: string | number) {
+  return typeof value === 'number' ? value : decimalStringToDisplayNumber(value)
 }

@@ -14,8 +14,8 @@ interface CandidateFilterForm {
   maxDistanceAbs: number | null
 }
 
-type CandidateSortKey = 'strike' | 'annualized' | 'expiry' | 'limitPrice' | 'exerciseProbability'
-type CandidateSortDirection = 'asc' | 'desc'
+export type CandidateSortKey = 'strike' | 'annualized' | 'expiry' | 'limitPrice' | 'exerciseProbability'
+export type CandidateSortDirection = 'asc' | 'desc'
 
 // 到期筛选按自然天展示；实际期权到期和下单请求仍使用 Rust 返回的精确 expiryAt。
 const dayMs = 86_400_000
@@ -219,7 +219,7 @@ export function useDualInvestmentCandidates() {
     selectedCandidateId.value = candidate.id
     form.direction = candidate.direction
     // 后端候选数量是 Binance 期权“张”口径，前端只承接默认值，真实校验仍在 Rust。
-    form.quantity = Number(candidate.quantity)
+    form.quantity = decimalStringToDisplayNumber(candidate.quantity)
   }
 
   function resetCandidateFilters() {
@@ -253,7 +253,7 @@ export function useDualInvestmentCandidates() {
 }
 
 /** 计算展示用剩余天数；真实到期判断以后端 expiryAt 和结算扫描为准。 */
-function daysUntil(expiry: string) {
+export function daysUntil(expiry: string) {
   const target = expiry.includes('T') ? new Date(expiry) : new Date(`${expiry}T00:00:00`)
   return Math.max(0, Math.ceil((target.getTime() - Date.now()) / dayMs))
 }

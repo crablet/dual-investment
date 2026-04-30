@@ -15,6 +15,7 @@ import {
 import { computed } from 'vue'
 import { useFormat } from '@/composables/useFormat'
 import { localDateTimeLabel } from '@/utils/date'
+import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 interface Props {
   show: boolean
@@ -66,7 +67,7 @@ const reviewFacts = computed<ReviewFact[]>(() => {
 })
 
 function signedPercent(value: string | number) {
-  const numeric = Number(value)
+  const numeric = typeof value === 'number' ? value : decimalStringToDisplayNumber(value)
   if (!Number.isFinite(numeric)) {
     return '--'
   }

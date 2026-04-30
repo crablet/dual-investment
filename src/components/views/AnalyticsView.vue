@@ -10,6 +10,7 @@ import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { relativeBarWidth } from '@/utils/bars'
+import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 const store = useAppStore()
 const { directionText, money, percent } = useFormat()
@@ -31,12 +32,12 @@ const strategyPerformance = computed(() => {
 /**
  * 按策略方向汇总权利金，用于图形展示。
  *
- * 这里转成 number 只影响 UI 宽度和标签格式；真实金额仍以后端 Decimal 字符串为准。
+ * 这里转成展示 number 只影响 UI 宽度和标签格式；真实金额仍以后端 Decimal 字符串为准。
  */
 function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
   return store.orders
     .filter(order => order.direction === direction)
-    .reduce((sum, order) => sum + Number(order.premium), 0)
+    .reduce((sum, order) => sum + decimalStringToDisplayNumber(order.premium), 0)
 }
 </script>
 

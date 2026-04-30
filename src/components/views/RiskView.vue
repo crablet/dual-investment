@@ -13,6 +13,7 @@ import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { relativeBarWidth } from '@/utils/bars'
+import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 const store = useAppStore()
 const { money, percent } = useFormat()
@@ -36,12 +37,22 @@ const exposureRows = computed(() => {
 /**
  * 计算方向维度的名义暴露，用于 UI 条形图。
  *
- * Number 只用于展示比例；不要把这里的结果作为保证金或真实风险计算输入。
+ * 数字转换只用于展示比例；不要把这里的结果作为保证金或真实风险计算输入。
  */
 function exposureByDirection(direction: 'sellPut' | 'sellCall') {
   return store.orders
     .filter(order => order.direction === direction)
-    .reduce((sum, order) => sum + Number(order.strike) * Number(order.quantity), 0)
+    .reduce(
+      (sum, order) =>
+        sum
+        + decimalStringToDisplayNumber(order.strike)
+        * decimalStringToDisplayNumber(order.quantity),
+      0,
+    )
+}
+
+function progressPercent(value: string | undefined) {
+  return decimalStringToDisplayNumber(value ?? '0')
 }
 
 /** 映射 Naive UI 标签类型。 */
@@ -68,7 +79,7 @@ function tagType(severity: RiskSeverity) {
         <NIcon :component="Gauge" />
         <strong>{{ percent(store.risk?.marginUsage ?? '0') }}</strong>
         <span>{{ riskLevelLabel }}</span>
-        <NProgress :percentage="Number(store.risk?.marginUsage ?? 0)" status="warning" :show-indicator="false" />
+        <NProgress :percentage="progressPercent(store.risk?.marginUsage)" status="warning" :show-indicator="false" />
       </div>
     </Panel>
 
@@ -77,7 +88,7 @@ function tagType(severity: RiskSeverity) {
         <NIcon :component="Activity" />
         <strong>{{ percent(store.risk?.exerciseRisk ?? '0') }}</strong>
         <span>{{ riskLevelLabel }}</span>
-        <NProgress :percentage="Number(store.risk?.exerciseRisk ?? 0)" status="warning" :show-indicator="false" />
+        <NProgress :percentage="progressPercent(store.risk?.exerciseRisk)" status="warning" :show-indicator="false" />
       </div>
     </Panel>
 

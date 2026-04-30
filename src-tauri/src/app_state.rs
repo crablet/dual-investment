@@ -7,6 +7,7 @@
 mod adoption;
 mod funding;
 mod orders;
+mod progress;
 mod runtime;
 mod validation;
 
@@ -23,7 +24,7 @@ use std::{
 use chrono::{Duration, Local, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::sync::{Mutex as AsyncMutex, RwLock};
 use uuid::Uuid;
 
@@ -40,6 +41,7 @@ use self::orders::{
     apply_option_ack, apply_option_position, apply_spot_ack, combined_balances, is_spot_attempt,
     is_unfilled_terminal_option_ack, request_from_option_attempt,
 };
+use self::progress::OrderProgressEmitter;
 use self::runtime::{
     client_from_runtime, join_binance_request, make_client_order_id, make_spot_client_order_id,
     parse_schedule_time, spawn_binance_request, verify_binance_access,
@@ -56,11 +58,11 @@ use crate::domain::{
     AppSnapshot, AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest, FundingAttempt,
     FundingAttemptKind, FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView,
     LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
-    OrderAttemptStatus, OrderAttemptView, OrderProgressEvent, OrderProgressStage,
-    OrderProgressStatus, ResolveFundingAttemptRequest, RuntimeHealth, RuntimeHealthStatus,
-    SimpleEarnRedemptionRecord, SimpleEarnSnapshot, SimpleEarnSubscriptionRecord,
-    SpotAccountSnapshot, StrategyCandidate, StrategyDirection, StrategyOrder, StrategyRequest,
-    StrategyStatus, ToggleAutoRequest, UniversalTransferRecord,
+    OrderAttemptStatus, OrderAttemptView, OrderProgressStage, OrderProgressStatus,
+    ResolveFundingAttemptRequest, RuntimeHealth, RuntimeHealthStatus, SimpleEarnRedemptionRecord,
+    SimpleEarnSnapshot, SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate,
+    StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest,
+    UniversalTransferRecord,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -140,63 +142,11 @@ struct RuntimeHealthState {
     skipped_ticks: u32,
 }
 
-const ORDER_PROGRESS_EVENT: &str = "order-progress";
 const FUNDING_HISTORY_LOOKBACK_MINUTES: i64 = 5;
 const FUNDING_HISTORY_LOOKAHEAD_DAYS: i64 = 30;
 const FUNDING_QUERY_RETRY_LIMIT: u32 = 3;
 const OPTION_ACCOUNT_FUNDING_REFRESH_ATTEMPTS: usize = 6;
 const OPTION_ACCOUNT_FUNDING_REFRESH_DELAY_MS: u64 = 700;
-
-struct OrderProgressEmitter {
-    app: Option<AppHandle>,
-    flow_id: Option<String>,
-    source: String,
-}
-
-impl OrderProgressEmitter {
-    fn manual(app: AppHandle, request: &StrategyRequest) -> Self {
-        Self {
-            app: Some(app),
-            flow_id: request.client_flow_id.clone(),
-            source: "manual".to_string(),
-        }
-    }
-
-    fn disabled(source: &str) -> Self {
-        Self {
-            app: None,
-            flow_id: None,
-            source: source.to_string(),
-        }
-    }
-
-    /// 向前端发送脱敏进度事件。
-    ///
-    /// 自动策略没有前端 flow id，因此使用 disabled emitter 静默执行。
-    fn emit(
-        &self,
-        stage: OrderProgressStage,
-        status: OrderProgressStatus,
-        message: impl Into<String>,
-        option_symbol: Option<&str>,
-        exchange_order_id: Option<&str>,
-    ) {
-        let (Some(app), Some(flow_id)) = (&self.app, &self.flow_id) else {
-            return;
-        };
-        let event = OrderProgressEvent {
-            flow_id: flow_id.clone(),
-            source: self.source.clone(),
-            stage,
-            status,
-            message: message.into(),
-            timestamp: Utc::now(),
-            option_symbol: option_symbol.map(str::to_string),
-            exchange_order_id: exchange_order_id.map(str::to_string),
-        };
-        let _ = app.emit(ORDER_PROGRESS_EVENT, event);
-    }
-}
 
 fn funding_history_window(created_at: chrono::DateTime<Utc>) -> (i64, i64) {
     // 历史查询窗口从本地写入恢复记录的时间开始，兼顾接口延迟又限制扫描范围。

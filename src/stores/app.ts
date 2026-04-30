@@ -27,6 +27,7 @@ import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
 import { api } from '@/services/api'
 import { buildMetrics, buildPnlBreakdown } from '@/stores/appMetrics'
+import { mergeOrdersByUpdatedAt } from '@/stores/appSnapshot'
 import {
   formatReconnectDelay,
   isPermanentSavedConnectionError,
@@ -479,7 +480,7 @@ export const useAppStore = defineStore('app', () => {
   async function runSettlementScan() {
     const next = await run('settlement', () => api.runSettlementScan())
     if (next && snapshot.value) {
-      snapshot.value = { ...snapshot.value, orders: mergeOrders(next, snapshot.value.orders) }
+      snapshot.value = { ...snapshot.value, orders: mergeOrdersByUpdatedAt(next, snapshot.value.orders) }
       // 结算扫描可能产生风险状态、恢复记录或资金结果，完成后拉完整快照校正局部合并。
       await refresh()
     }
@@ -496,7 +497,7 @@ export const useAppStore = defineStore('app', () => {
   async function recoverAttempt(attemptId: string) {
     const order = await run('recover', () => api.recoverOrderAttempt(attemptId))
     if (order && snapshot.value) {
-      snapshot.value = { ...snapshot.value, orders: mergeOrders([order], snapshot.value.orders) }
+      snapshot.value = { ...snapshot.value, orders: mergeOrdersByUpdatedAt([order], snapshot.value.orders) }
       // 订单恢复先由 Rust 重新查询 Binance 事实；前端只刷新展示，不触发重放下单。
       await refresh()
     }
@@ -534,7 +535,7 @@ export const useAppStore = defineStore('app', () => {
     const orders = await run('adopt', () => api.adoptOptionPositions(request))
     if (orders && snapshot.value) {
       // 接管只把 Binance 当前义务仓转成本地跟踪订单，不混入 order_attempts 恢复记录。
-      snapshot.value = { ...snapshot.value, orders: mergeOrders(orders, snapshot.value.orders) }
+      snapshot.value = { ...snapshot.value, orders: mergeOrdersByUpdatedAt(orders, snapshot.value.orders) }
       adoptableOptionPositions.value = adoptableOptionPositions.value.map(row =>
         request.symbols.includes(row.symbol)
           ? { ...row, adoptable: false, alreadyTracked: true, reason: '本地已有跟踪记录' }
@@ -597,15 +598,6 @@ export const useAppStore = defineStore('app', () => {
     autoReconnectAttempts.value = 0
     autoReconnectDelayMs.value = reconnectBackoffDelays[0]
     lastAutoReconnectError.value = undefined
-  }
-
-  /** 合并后端返回的更新订单，并按更新时间倒序展示。 */
-  function mergeOrders(next: StrategyOrder[], current: StrategyOrder[]) {
-    const byId = new Map(current.map(order => [order.id, order]))
-    for (const order of next) {
-      byId.set(order.id, order)
-    }
-    return [...byId.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
   }
 
   return {
