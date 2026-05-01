@@ -264,7 +264,7 @@ function confirmOrderReview() {
           </article>
           <article>
             <span>保本价</span>
-            <strong>{{ money(String(projectedBreakeven)) }}</strong>
+            <strong>{{ money(String(projectedBreakeven), 'USDT', 0) }}</strong>
           </article>
         </div>
 

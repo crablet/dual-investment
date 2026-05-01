@@ -67,7 +67,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
     { label: '交易所状态', value: order.exchangeStatus },
     { label: '客户端订单号', value: order.clientOrderId },
     { label: '到期时间', value: localDateTimeLabel(order.expiryAt) },
-    { label: '执行价', value: money(order.strike) },
+    { label: '执行价', value: money(order.strike, 'USDT', 0) },
     { label: '成交数量', value: `${order.filledQuantity} / ${order.quantity} 张` },
     { label: '成交均价', value: money(order.avgPrice) },
     { label: '手续费', value: money(order.fee) },
@@ -137,7 +137,7 @@ function recoveryTimeLabel(value: string) {
               <td>{{ order.id }}</td>
               <td><NTag :type="directionTone(order.direction)" size="small">{{ directionText(order.direction) }}</NTag></td>
               <td>{{ order.symbol }}</td>
-              <td>{{ money(order.strike) }}</td>
+              <td>{{ money(order.strike, 'USDT', 0) }}</td>
               <td>{{ localDateTimeLabel(order.expiryAt) }}</td>
               <td>{{ order.filledQuantity }} / {{ order.quantity }}</td>
               <td>{{ money(order.premium) }}</td>

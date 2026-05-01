@@ -119,7 +119,7 @@ function adoptSelected() {
               </NTag>
             </td>
             <td>{{ localDateTimeLabel(row.expiryAt) }}</td>
-            <td>{{ money(row.strike) }}</td>
+            <td>{{ money(row.strike, 'USDT', 0) }}</td>
             <td>{{ row.quantity }}</td>
             <td>{{ money(row.entryPrice) }}</td>
             <td>{{ money(row.markPrice) }}</td>

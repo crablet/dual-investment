@@ -1,7 +1,7 @@
 //! 双币赢候选扫描与推荐排序。
 //!
-//! 输入数据来自 Binance 合约、mark price、账户快照和本地真实订单。这里只构造可展示候选
-//! 和推荐等级，不发送订单，也不把规则不命中的候选直接隐藏成“没有机会”。
+//! 输入数据来自 Binance 合约、买一价、mark greeks、账户快照和本地真实订单。
+//! 这里只构造可展示候选和推荐等级，不发送订单，也不把规则不命中的候选直接隐藏成“没有机会”。
 
 use std::collections::HashMap;
 
@@ -12,27 +12,43 @@ use rust_decimal_macros::dec;
 use super::math::{abs_decimal, align_decimal_down_to_step, max_decimal, min_decimal};
 use crate::domain::{
     AutoInvestmentRule, CandidateScanResult, OptionAccountSnapshot, OptionContract,
-    OptionMarkPrice, RecommendationLevel, StrategyCandidate, StrategyDirection, StrategyOrder,
-    StrategyStatus,
+    OptionMarkPrice, OptionOrderBook, OptionTicker, RecommendationLevel, StrategyCandidate,
+    StrategyDirection, StrategyOrder, StrategyStatus,
 };
 
 const BROWSE_MIN_DAYS_TO_EXPIRY: i64 = 1;
 const BROWSE_MAX_DAYS_TO_EXPIRY: i64 = 90;
 
-/// 根据 Binance 合约、mark price、账户和规则构造候选列表。
+/// 候选扫描所需的 Binance 实盘输入和本地状态。
+#[derive(Clone, Copy)]
+pub struct CandidateBuildInputs<'a> {
+    pub contracts: &'a [OptionContract],
+    pub marks: &'a [OptionMarkPrice],
+    pub tickers: &'a [OptionTicker],
+    pub rule: &'a AutoInvestmentRule,
+    pub account: &'a OptionAccountSnapshot,
+    pub orders: &'a [StrategyOrder],
+    pub spot_price: Decimal,
+    pub funding_available_usdt: Decimal,
+}
+
+/// 根据 Binance 合约、买一价、mark greeks、账户和规则构造候选列表。
 ///
 /// 候选可见范围固定为到期 1-90 天；自动复投规则只影响推荐等级，不决定候选是否可见。
 /// 方向过滤必须使用 BTCUSDT 现货价：低买只保留现货价下方 Put，高卖只保留现货价上方 Call。
 #[allow(clippy::too_many_lines)]
-pub fn build_candidates(
-    contracts: &[OptionContract],
-    marks: &[OptionMarkPrice],
-    rule: &AutoInvestmentRule,
-    account: &OptionAccountSnapshot,
-    orders: &[StrategyOrder],
-    spot_price: Decimal,
-    funding_available_usdt: Decimal,
-) -> CandidateScanResult {
+pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult {
+    let CandidateBuildInputs {
+        contracts,
+        marks,
+        tickers,
+        rule,
+        account,
+        orders,
+        spot_price,
+        funding_available_usdt,
+    } = inputs;
+
     if spot_price <= Decimal::ZERO {
         return CandidateScanResult {
             candidates: Vec::new(),
@@ -42,6 +58,10 @@ pub fn build_candidates(
     let mark_by_symbol = marks
         .iter()
         .map(|mark| (mark.symbol.as_str(), mark))
+        .collect::<HashMap<_, _>>();
+    let ticker_by_symbol = tickers
+        .iter()
+        .map(|ticker| (ticker.symbol.as_str(), ticker))
         .collect::<HashMap<_, _>>();
     let has_open_direction = |direction| {
         orders.iter().any(|order| {
@@ -86,12 +106,20 @@ pub fn build_candidates(
             if mark.mark_price <= Decimal::ZERO {
                 return None;
             }
+            let ticker = ticker_by_symbol.get(contract.symbol.as_str()).copied()?;
+            if ticker.bid_price <= Decimal::ZERO {
+                return None;
+            }
 
             let delta_abs = abs_decimal(mark.delta);
             let iv_rank = (mark.mark_iv * dec!(100)).round_dp(2);
             let quantity = rule.quantity;
-            // 候选展示使用 Binance mark price；真实下单会在编排层按 tick size 对齐。
-            let limit_price = mark.mark_price.round_dp(contract.price_scale);
+            // 候选展示使用 Binance 买一价估算卖出 IOC 的可主动成交限价；
+            // 真实下单前会重新读取订单簿并按当时买盘深度重算。
+            let limit_price = option_sell_taker_limit_price(ticker.bid_price, contract);
+            if !candidate_price_satisfies_exchange_limits(limit_price, contract, mark) {
+                return None;
+            }
             let premium = (limit_price * quantity).round_dp(contract.price_scale);
             let annualized = estimate_annualized(
                 premium,
@@ -129,13 +157,13 @@ pub fn build_candidates(
             };
             let reason = if passes_rule {
                 format!(
-                    "来自 Binance 合约和 mark price，满足当前自动规则，mark IV 代理值 {iv_rank}%"
+                    "来自 Binance 合约、买一价和 mark greeks，满足当前自动规则，mark IV 代理值 {iv_rank}%"
                 )
             } else if available_margin < required_margin {
                 "可用保证金不足，暂不建议下单".to_string()
             } else {
                 format!(
-                    "来自 Binance 合约和 mark price，未完全满足当前自动规则，mark IV 代理值 {iv_rank}%"
+                    "来自 Binance 合约、买一价和 mark greeks，未完全满足当前自动规则，mark IV 代理值 {iv_rank}%"
                 )
             };
 
@@ -222,21 +250,62 @@ pub fn required_margin(
     }
 }
 
-/// 把期权卖单限价对齐到 Binance `PRICE_FILTER` tick。
+fn candidate_price_satisfies_exchange_limits(
+    price: Decimal,
+    contract: &OptionContract,
+    mark: &OptionMarkPrice,
+) -> bool {
+    if price <= Decimal::ZERO {
+        return false;
+    }
+    if contract.min_price > Decimal::ZERO && price < contract.min_price {
+        return false;
+    }
+    if contract.max_price > Decimal::ZERO && price > contract.max_price {
+        return false;
+    }
+    if mark.low_price_limit > Decimal::ZERO && price < mark.low_price_limit {
+        return false;
+    }
+    if mark.high_price_limit > Decimal::ZERO && price > mark.high_price_limit {
+        return false;
+    }
+    true
+}
+
+/// 根据当前买盘深度计算期权卖出 IOC 的可主动成交限价。
 ///
-/// 期权下单始终是卖出限价 IOC。向下对齐不会把最低可接受权利金抬高到 mark price 之上，
-/// 同时避免把不在 tick size 网格上的价格发给 Binance。
-pub fn option_sell_limit_price(price: Decimal, contract: &OptionContract) -> Decimal {
+/// 真实下单只使用买一价作为卖出限价；买一量不足时返回 `None`，
+/// 调用方必须阻止真实订单，避免在用户确认后悄悄下探到更低买盘价。
+pub fn option_sell_taker_limit_price_for_quantity(
+    order_book: &OptionOrderBook,
+    quantity: Decimal,
+    contract: &OptionContract,
+) -> Option<Decimal> {
+    if quantity <= Decimal::ZERO {
+        return None;
+    }
+    let best_bid = order_book
+        .bids
+        .iter()
+        .find(|level| level.price > Decimal::ZERO && level.quantity > Decimal::ZERO)?;
+    if best_bid.quantity < quantity {
+        return None;
+    }
+    let price = option_sell_taker_limit_price(best_bid.price, contract);
+    (price > Decimal::ZERO).then_some(price)
+}
+
+/// 把期权卖出 IOC 限价对齐到 Binance `PRICE_FILTER` tick。
+///
+/// 价格来源必须是买盘报价。向下对齐能保持卖单继续主动穿过买盘；
+/// 不向上抬到 `minPrice`，否则可能把主动成交单变成挂单或未成交单。
+pub fn option_sell_taker_limit_price(price: Decimal, contract: &OptionContract) -> Decimal {
     let tick_aligned = align_decimal_down_to_step(price, contract.price_tick_size);
-    let min_aligned = if contract.min_price > Decimal::ZERO {
-        max_decimal(tick_aligned, contract.min_price)
+    if contract.max_price > Decimal::ZERO {
+        min_decimal(tick_aligned, contract.max_price)
     } else {
         tick_aligned
-    };
-    if contract.max_price > Decimal::ZERO {
-        min_decimal(min_aligned, contract.max_price)
-    } else {
-        min_aligned
     }
 }
 

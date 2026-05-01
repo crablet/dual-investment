@@ -15,8 +15,8 @@ pub use balances::{
     pnl_report_from_orders_with_spot,
 };
 pub use candidates::{
-    build_candidates, decimal_matches_step, option_sell_limit_price, required_margin,
-    status_from_exchange,
+    CandidateBuildInputs, build_candidates, decimal_matches_step,
+    option_sell_taker_limit_price_for_quantity, required_margin, status_from_exchange,
 };
 pub use orders::{annualized_from_order_terms, order_from_adopted_position, order_from_request};
 pub use risk::{DEFAULT_MAX_MARGIN_USAGE, empty_risk_snapshot, risk_snapshot_from_account};

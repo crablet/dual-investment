@@ -12,17 +12,27 @@ import {
   statusToneMap,
 } from '@/utils/labels'
 
-const moneyFormatter = new Intl.NumberFormat('zh-CN', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
 const decimalFormatter = new Intl.NumberFormat('zh-CN', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })
 
+const moneyFormatters = new Map<number, Intl.NumberFormat>()
 const percentFormatters = new Map<number, Intl.NumberFormat>()
+
+/** 按小数位数缓存金额 formatter，候选当前价格可按合约价格步长展示为整数。 */
+function moneyFormatter(digits: number) {
+  const cached = moneyFormatters.get(digits)
+  if (cached) {
+    return cached
+  }
+  const formatter = new Intl.NumberFormat('zh-CN', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
+  moneyFormatters.set(digits, formatter)
+  return formatter
+}
 
 /** 按小数位数缓存百分比 formatter，避免组件重复创建 Intl 对象。 */
 function percentFormatter(digits: number) {
@@ -41,8 +51,8 @@ function percentFormatter(digits: number) {
 /** 返回组件常用的格式化函数和状态映射。 */
 export function useFormat() {
   // 这里的转换只用于 Intl 展示格式化；不要把返回值再作为计算输入。
-  const money = (value: string | number, currency = 'USDT') =>
-    `${moneyFormatter.format(toDisplayNumber(value))} ${currency}`
+  const money = (value: string | number, currency = 'USDT', digits = 2) =>
+    `${moneyFormatter(digits).format(toDisplayNumber(value))} ${currency}`
 
   const decimal = (value: string | number) =>
     decimalFormatter.format(toDisplayNumber(value))

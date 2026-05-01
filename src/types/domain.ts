@@ -50,7 +50,7 @@ export interface BalanceRow {
   usdtValueKnown: boolean
 }
 
-/** Binance 实盘合约和 mark price 派生出的候选机会。 */
+/** Binance 实盘合约、买一价和 mark greeks 派生出的候选机会。 */
 export interface StrategyCandidate {
   id: string
   symbol: string

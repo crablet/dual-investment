@@ -190,7 +190,7 @@ pub struct BalanceRow {
 
 /// 一条可浏览、可下单的策略候选。
 ///
-/// 候选来自 Binance 实盘合约与 mark price，再结合当前自动规则计算推荐等级。
+/// 候选来自 Binance 实盘合约、买一价与 mark greeks，再结合当前自动规则计算推荐等级。
 /// 浏览范围和可见性在策略层决定，前端筛选只影响展示。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -862,7 +862,8 @@ pub struct OptionContract {
 
 /// Binance mark price 行情。
 ///
-/// mark price、Delta 和 IV 只作为候选估算输入，真实成交价格以订单回报为准。
+/// mark price 只用于价格上下限校验；Delta 和 IV 用于候选风险估算。
+/// 下单限价必须来自可主动成交的盘口买盘，真实成交价格以订单回报为准。
 #[derive(Clone, Debug)]
 pub struct OptionMarkPrice {
     pub symbol: String,
@@ -871,6 +872,30 @@ pub struct OptionMarkPrice {
     pub delta: Decimal,
     pub high_price_limit: Decimal,
     pub low_price_limit: Decimal,
+}
+
+/// Binance 期权 24h ticker 中的当前盘口摘要。
+///
+/// 候选扫描用这里的买一价估算可主动卖出的权利金；发送真实订单前还会重新读取订单簿。
+#[derive(Clone, Debug)]
+pub struct OptionTicker {
+    pub symbol: String,
+    pub bid_price: Decimal,
+}
+
+/// Binance 期权订单簿单档价格和数量。
+#[derive(Clone, Debug)]
+pub struct OrderBookLevel {
+    pub price: Decimal,
+    pub quantity: Decimal,
+}
+
+/// Binance 期权订单簿。
+///
+/// 真实卖出 IOC 下单前使用当前买一价和买一量计算可主动成交的限价，不复用候选扫描快照。
+#[derive(Clone, Debug)]
+pub struct OptionOrderBook {
+    pub bids: Vec<OrderBookLevel>,
 }
 
 /// 交易所订单查询或下单响应的归一化结构。

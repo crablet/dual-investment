@@ -2,7 +2,7 @@
 手动期权订单复核弹窗。
 
 这里是发送 Binance 实盘订单前最后一道人工门禁；组件只展示父页面冻结的候选快照，
-确认事件由父页面转成真实下单请求。
+确认事件由父页面转成真实下单请求。Rust 下单链路会在发送前重新读取当前买一价和买一量并覆盖限价。
 -->
 <script setup lang="ts">
 import type { StrategyCandidate } from '@/types/domain'
@@ -58,9 +58,9 @@ const reviewFacts = computed<ReviewFact[]>(() => {
     },
     { label: '下单数量', value: `${props.quantity} 张` },
     { label: '预计权利金', value: money(props.projectedPremium) },
-    { label: '执行价', value: money(props.candidate.strike) },
-    { label: '保本价', value: money(props.projectedBreakeven) },
-    { label: '下单限价', value: money(props.candidate.limitPrice) },
+    { label: '执行价', value: money(props.candidate.strike, 'USDT', 0) },
+    { label: '保本价', value: money(props.projectedBreakeven, 'USDT', 0) },
+    { label: '当前价格', value: money(props.candidate.limitPrice, 'USDT', 0) },
     { label: '被行权概率', value: percent(props.candidate.exerciseProbability) },
     { label: '距现货', value: signedPercent(props.candidate.strikeDistancePercent) },
   ]

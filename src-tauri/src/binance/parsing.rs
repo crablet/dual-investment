@@ -11,9 +11,10 @@ use serde_json::Value;
 
 use crate::domain::{
     AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot,
-    OptionAssetBalance, OptionContract, OptionMarkPrice, OptionPosition, SimpleEarnAssetBalance,
-    SimpleEarnFlexibleProduct, SimpleEarnRedemptionRecord, SimpleEarnSubscriptionRecord,
-    SpotAccountSnapshot, SpotAssetBalance, UniversalTransferRecord,
+    OptionAssetBalance, OptionContract, OptionMarkPrice, OptionOrderBook, OptionPosition,
+    OptionTicker, OrderBookLevel, SimpleEarnAssetBalance, SimpleEarnFlexibleProduct,
+    SimpleEarnRedemptionRecord, SimpleEarnSubscriptionRecord, SpotAccountSnapshot,
+    SpotAssetBalance, UniversalTransferRecord,
 };
 
 /// 解析期权账户快照，字段名保持贴近 Binance EAPI 响应。
@@ -415,6 +416,65 @@ fn parse_mark_price(value: &Value) -> AppResult<OptionMarkPrice> {
         delta: decimal_field(value, "delta")?,
         high_price_limit: optional_decimal_field(value, "highPriceLimit")?.unwrap_or(Decimal::ZERO),
         low_price_limit: optional_decimal_field(value, "lowPriceLimit")?.unwrap_or(Decimal::ZERO),
+    })
+}
+
+/// 解析期权 24h ticker 列表。
+pub(super) fn parse_option_tickers(value: &Value) -> AppResult<Vec<OptionTicker>> {
+    value
+        .as_array()
+        .ok_or_else(|| AppError::Binance("Binance option ticker 响应不是数组".to_string()))?
+        .iter()
+        .map(parse_option_ticker)
+        .collect()
+}
+
+fn parse_option_ticker(value: &Value) -> AppResult<OptionTicker> {
+    Ok(OptionTicker {
+        symbol: string_field(value, "symbol")?,
+        bid_price: optional_decimal_field(value, "bidPrice")?.unwrap_or(Decimal::ZERO),
+    })
+}
+
+/// 解析单个期权订单簿。
+pub(super) fn parse_option_order_book(value: &Value) -> AppResult<OptionOrderBook> {
+    Ok(OptionOrderBook {
+        bids: parse_order_book_side(value, "bids", "买盘")?,
+    })
+}
+
+fn parse_order_book_side(value: &Value, key: &str, label: &str) -> AppResult<Vec<OrderBookLevel>> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| AppError::Binance(format!("Binance 订单簿响应缺少{label}数组")))?
+        .iter()
+        .map(|level| parse_order_book_level(level, label))
+        .collect()
+}
+
+fn parse_order_book_level(value: &Value, label: &str) -> AppResult<OrderBookLevel> {
+    let values = value
+        .as_array()
+        .ok_or_else(|| AppError::Binance(format!("Binance 订单簿{label}档位不是数组")))?;
+    let price = decimal_array_value(values, 0, label, "价格")?;
+    let quantity = decimal_array_value(values, 1, label, "数量")?;
+    Ok(OrderBookLevel { price, quantity })
+}
+
+fn decimal_array_value(
+    values: &[Value],
+    index: usize,
+    label: &str,
+    field: &str,
+) -> AppResult<Decimal> {
+    let text = values
+        .get(index)
+        .map(value_to_string)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| AppError::Binance(format!("Binance 订单簿{label}缺少{field}")))?;
+    Decimal::from_str(&text).map_err(|error| {
+        AppError::Binance(format!("Binance 订单簿{label}{field}无法解析：{error}"))
     })
 }
 

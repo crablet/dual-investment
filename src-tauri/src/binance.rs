@@ -26,17 +26,18 @@ use tokio::time::sleep;
 use self::http::{encode_query, is_timestamp_error, is_transient_query_error, request_error};
 use self::parsing::{
     decimal_field, ensure_success_response, parse_account_snapshot, parse_exchange_info,
-    parse_exercise_records, parse_mark_prices, parse_option_positions, parse_order_ack,
-    parse_simple_earn_flexible_product_page, parse_simple_earn_position_page,
-    parse_simple_earn_redemption_records, parse_simple_earn_subscription_records,
-    parse_spot_account, parse_spot_price_tickers, parse_universal_transfer_records,
-    value_to_string,
+    parse_exercise_records, parse_mark_prices, parse_option_order_book, parse_option_positions,
+    parse_option_tickers, parse_order_ack, parse_simple_earn_flexible_product_page,
+    parse_simple_earn_position_page, parse_simple_earn_redemption_records,
+    parse_simple_earn_subscription_records, parse_spot_account, parse_spot_price_tickers,
+    parse_universal_transfer_records, value_to_string,
 };
 use crate::domain::{
     AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot, OptionContract,
-    OptionMarkPrice, OptionPosition, SimpleEarnAssetBalance, SimpleEarnFlexibleProduct,
-    SimpleEarnRedemptionRecord, SimpleEarnSnapshot, SimpleEarnSubscriptionRecord,
-    SpotAccountSnapshot, StrategyDirection, StrategyRequest, UniversalTransferRecord,
+    OptionMarkPrice, OptionOrderBook, OptionPosition, OptionTicker, SimpleEarnAssetBalance,
+    SimpleEarnFlexibleProduct, SimpleEarnRedemptionRecord, SimpleEarnSnapshot,
+    SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyDirection, StrategyRequest,
+    UniversalTransferRecord,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -111,10 +112,30 @@ impl BinanceClient {
         parse_exchange_info(&response)
     }
 
-    /// 查询期权 mark price，用于候选估算与价格上下限校验。
+    /// 查询期权 mark price，用于候选 greeks 估算与价格上下限校验。
     pub async fn option_mark_prices(&self) -> AppResult<Vec<OptionMarkPrice>> {
         let response = self.public_get(&self.eapi_base, "/eapi/v1/mark").await?;
         parse_mark_prices(&response)
+    }
+
+    /// 查询期权 24h ticker，用买一价作为候选可主动卖出的估算价。
+    pub async fn option_tickers(&self) -> AppResult<Vec<OptionTicker>> {
+        let response = self.public_get(&self.eapi_base, "/eapi/v1/ticker").await?;
+        parse_option_tickers(&response)
+    }
+
+    /// 查询单个期权合约订单簿。
+    ///
+    /// 真实卖出 IOC 下单前必须用当前买一价和买一量重新计算限价，不能复用候选扫描快照。
+    pub async fn option_order_book(&self, symbol: &str) -> AppResult<OptionOrderBook> {
+        let query = encode_query(&[
+            ("symbol".to_string(), symbol.to_string()),
+            ("limit".to_string(), "10".to_string()),
+        ]);
+        let response = self
+            .public_get(&self.eapi_base, &format!("/eapi/v1/depth?{query}"))
+            .await?;
+        parse_option_order_book(&response)
     }
 
     /// 发送真实 Binance 期权卖出限价 IOC 订单。

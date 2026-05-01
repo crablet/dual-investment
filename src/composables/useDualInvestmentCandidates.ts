@@ -33,7 +33,7 @@ export const candidateSortColumns: Array<{ key: CandidateSortKey, label: string 
   { key: 'strike', label: '目标价' },
   { key: 'annualized', label: '年化' },
   { key: 'expiry', label: '到期' },
-  { key: 'limitPrice', label: '标记价格' },
+  { key: 'limitPrice', label: '当前价格' },
   { key: 'exerciseProbability', label: '被行权概率' },
 ]
 

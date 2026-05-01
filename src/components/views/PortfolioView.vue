@@ -130,7 +130,7 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
               <td>BTC</td>
               <td>{{ order.direction === 'sellPut' ? '卖出看跌（义务）' : '卖出看涨（义务）' }}</td>
               <td>{{ decimal(order.quantity) }} BTC</td>
-              <td>{{ money(order.strike) }}</td>
+              <td>{{ money(order.strike, 'USDT', 0) }}</td>
               <td>{{ localDateTimeLabel(order.expiryAt) }}</td>
               <td class="positive">{{ money(order.estimatedPnl) }}</td>
               <td>{{ order.status === 'partiallyFilled' ? '部分成交' : '运行中' }}</td>

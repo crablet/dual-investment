@@ -19,6 +19,7 @@
 - 候选扫描使用 BTCUSDT 现货价过滤方向：低买只保留执行价低于现货的 Put，高卖只保留执行价高于现货的 Call；候选到期范围保持 1-90 天。
 - 期权订单和请求必须携带 Binance exchangeInfo.expiryDate 派生的精确 expiryAt；到期结算价格只来自 Binance 行权记录接口，不得用现货价替代。
 - 期权下单价格和数量必须满足 Binance PRICE_FILTER.tickSize 与 LOT_SIZE.stepSize；默认保证金占用率风控上限为 60%。
+- 期权卖出 IOC 下单限价必须来自当前 Binance 买一价：候选可用 24h ticker 的买一价估算，真实发送前必须重新读取 order book 买一价和买一量；买一量不足以覆盖目标数量时阻断下单，不得自动下探到更低买盘价，也不得用 mark price、现货价或前端缓存价作为最终下单价格。
 - 下单或补齐需要资金时，只能基于现货/期权余额和 Simple Earn 真实持仓准备资金；请求确认后等待账户快照反映到账，等待期间只允许查询，不得重复发送资金动作。
 - 到期结算后的期权闲置 USDT 归集是批次级收尾动作：结算批次完成后创建 settlement_sweeps 任务并延迟约 5 分钟执行；不得按每个订单重复发送 OPTION_MAIN；同一 chain_id 已确认的划转/申购必须续跑下一步，不得重复发送；低于 10 USDT 不自动归集；存在待恢复记录、未完成结算或未完成补齐时跳过或延后归集。
 - OPTION_MAIN 确认成功后必须等待现货账户快照反映到账，才能申购 Simple Earn；等待期间只允许查询，不得重复发送划转或申购请求。
@@ -38,6 +39,7 @@
 - Naive UI 全局主题配置放在 src/theme/；App.vue 只负责 provider、视图组合和应用级 wiring，不堆叠主题常量或业务逻辑。
 - 双币赢和自动复投共用 src/components/views/DualInvestmentView.vue；候选筛选和下单入口只放在“双币赢”页。订单页可以提供持仓接管入口，恢复中心可以展示恢复记录，但不得把接管状态展示成恢复记录。
 - 前端只做展示派生：订单年化只展示 StrategyOrder.annualized，收益分类不得从日志推断，账户估值由 Rust 提供，无法定价时显示“暂无估值”。下单进度事件、日志和图表交互不得作为交易事实来源。
+- 前端展示精度按业务语义控制，不要全局修改 money() 或 decimal() 默认精度。BTC/USDT 期权目标价、执行价、下单前复核的当前价格和保本价可按整数展示；真实成交均价、权利金、手续费、结算参考价、收益、账户估值和资产数量必须保留有业务意义的小数精度。
 - 账户资产展示统一复用 src/utils/balances.ts 聚合同名资产；页面不得直接遍历原始 balances 后把来源硬编码成“现货”。同名资产可合并展示，但 tooltip 或明细必须保留真实账户来源。
 - 到期信息统一展示 expiryAt 的本地日期时间；总览事件日历只从快照派生。
 - 金融领域类型集中在 src-tauri/src/domain.rs；策略计算在 strategy.rs 和 src-tauri/src/strategy/；状态编排在 app_state.rs 和 src-tauri/src/app_state/。

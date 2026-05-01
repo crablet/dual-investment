@@ -75,7 +75,7 @@ function signedPercent(value: string | number) {
       @click="emit('select', candidate)"
     >
       <span>
-        <strong>{{ money(candidate.strike) }}</strong>
+        <strong>{{ money(candidate.strike, 'USDT', 0) }}</strong>
         <em>
           距现货 {{ signedPercent(candidate.strikeDistancePercent) }}
         </em>
@@ -85,7 +85,7 @@ function signedPercent(value: string | number) {
         <strong>{{ localDateTimeLabel(candidate.expiryAt) }}</strong>
         <em>{{ daysUntil(candidate.expiryAt) }} 天</em>
       </span>
-      <span>{{ money(candidate.limitPrice) }}</span>
+      <span>{{ money(candidate.limitPrice, 'USDT', 0) }}</span>
       <span>{{ percent(candidate.exerciseProbability) }}</span>
     </button>
   </div>

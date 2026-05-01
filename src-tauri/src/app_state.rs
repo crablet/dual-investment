@@ -81,7 +81,7 @@ struct LiveAccounts {
 
 /// 发送期权订单前必须重新读取的实盘输入。
 ///
-/// 下单不能复用候选扫描缓存，因为合约过滤器、mark price 和账户保证金都可能已经变化。
+/// 下单不能复用候选扫描缓存，因为合约过滤器、mark greeks、盘口和账户保证金都可能已经变化。
 struct OrderLiveInputs {
     account: OptionAccountSnapshot,
     contracts: Vec<OptionContract>,
@@ -682,7 +682,7 @@ impl AppState {
 
     /// 从 Binance 实盘数据扫描候选，并缓存给前端快照使用。
     ///
-    /// 账户、合约、mark price 和现货价格并发读取，减少一次刷新候选的等待时间。
+    /// 账户、合约、mark greeks、期权买一价和现货价格并发读取，减少一次刷新候选的等待时间。
     pub async fn scan_candidates(&self) -> AppResult<CandidateScanResult> {
         let client = self.live_client().await?;
         let account_task = spawn_binance_request({
@@ -696,6 +696,10 @@ impl AppState {
         let marks_task = spawn_binance_request({
             let client = client.clone();
             async move { client.option_mark_prices().await }
+        });
+        let tickers_task = spawn_binance_request({
+            let client = client.clone();
+            async move { client.option_tickers().await }
         });
         let spot_account_task = spawn_binance_request({
             let client = client.clone();
@@ -714,26 +718,29 @@ impl AppState {
         let account = join_binance_request(account_task).await;
         let contracts = join_binance_request(contracts_task).await;
         let marks = join_binance_request(marks_task).await;
+        let tickers = join_binance_request(tickers_task).await;
         let spot_account = join_binance_request(spot_account_task).await;
         let earn = join_binance_request(earn_task).await;
         let spot_price = join_binance_request(spot_price_task).await;
         let account = account?;
         let contracts = contracts?;
         let marks = marks?;
+        let tickers = tickers?;
         let spot_account = spot_account?;
         let earn = earn?;
         let spot_price = spot_price?;
         let funding_available_usdt =
             spot_asset_free(&spot_account, "USDT") + flexible_earn_asset_amount(&earn, "USDT");
-        let result = strategy::build_candidates(
-            &contracts,
-            &marks,
-            &auto_rule,
-            &account,
-            &orders,
+        let result = strategy::build_candidates(strategy::CandidateBuildInputs {
+            contracts: &contracts,
+            marks: &marks,
+            tickers: &tickers,
+            rule: &auto_rule,
+            account: &account,
+            orders: &orders,
             spot_price,
             funding_available_usdt,
-        );
+        });
         {
             let mut cached_candidates = self.candidates.write().await;
             cached_candidates.clone_from(&result.candidates);
@@ -1249,7 +1256,45 @@ impl AppState {
         };
         request.option_symbol = Some(contract.symbol.clone());
         request.expiry_at = contract.expiry_at;
-        request.limit_price = strategy::option_sell_limit_price(request.limit_price, contract);
+        progress.emit(
+            OrderProgressStage::Validate,
+            OrderProgressStatus::Running,
+            "正在读取 Binance 当前买一价和买一量并计算主动成交限价",
+            Some(&contract.symbol),
+            None,
+        );
+        let order_book = match client.option_order_book(&contract.symbol).await {
+            Ok(order_book) => order_book,
+            Err(error) => {
+                progress.emit(
+                    OrderProgressStage::Validate,
+                    OrderProgressStatus::Error,
+                    error.to_string(),
+                    Some(&contract.symbol),
+                    None,
+                );
+                return Err(error);
+            }
+        };
+        let Some(limit_price) = strategy::option_sell_taker_limit_price_for_quantity(
+            &order_book,
+            request.quantity,
+            contract,
+        ) else {
+            let error = AppError::RiskRejected(format!(
+                "{} 当前买一量不足以一次成交 {} 张，已阻止真实期权卖单",
+                contract.symbol, request.quantity
+            ));
+            progress.emit(
+                OrderProgressStage::Validate,
+                OrderProgressStatus::Error,
+                error.to_string(),
+                Some(&contract.symbol),
+                None,
+            );
+            return Err(error);
+        };
+        request.limit_price = limit_price;
         if let Err(error) = validate_contract_terms(&request, contract, &marks) {
             progress.emit(
                 OrderProgressStage::Validate,
