@@ -8,26 +8,8 @@ import type { BalanceRow, DecimalString } from '@/types/domain'
 import { NTooltip } from 'naive-ui'
 import { computed } from 'vue'
 import { useFormat } from '@/composables/useFormat'
-import { isZeroDecimalString, sumDecimalStrings } from '@/utils/decimal'
-
-interface BalanceDetail {
-  key: string
-  asset: string
-  source: string
-  free: DecimalString
-  locked: DecimalString
-  usdtValue: DecimalString
-  usdtValueKnown: boolean
-}
-
-interface AggregatedBalance {
-  asset: string
-  free: DecimalString
-  usdtValue: DecimalString
-  usdtValueKnown: boolean
-  detailLabel: string
-  details: BalanceDetail[]
-}
+import { aggregateBalances } from '@/utils/balances'
+import { isZeroDecimalString } from '@/utils/decimal'
 
 const props = withDefaults(defineProps<{
   balances: BalanceRow[]
@@ -39,39 +21,6 @@ const props = withDefaults(defineProps<{
 const { decimal, money } = useFormat()
 
 const aggregatedBalances = computed(() => aggregateBalances(props.balances))
-
-function aggregateBalances(balances: BalanceRow[]): AggregatedBalance[] {
-  const grouped = new Map<string, BalanceDetail[]>()
-  for (const [index, balance] of balances.entries()) {
-    const asset = balance.asset
-    const details = grouped.get(asset) ?? []
-    details.push({
-      key: `${balance.source || '账户'}:${balance.asset}:${index}`,
-      asset: balance.asset,
-      source: balance.source || '账户',
-      free: balance.free,
-      locked: balance.locked,
-      usdtValue: balance.usdtValue,
-      usdtValueKnown: balance.usdtValueKnown,
-    })
-    grouped.set(asset, details)
-  }
-
-  return [...grouped.entries()].map(([asset, details]) => ({
-    asset,
-    details,
-    // 同名资产可能来自现货、期权保证金和 Simple Earn。列表展示聚合值，tooltip 保留来源明细。
-    free: sumDecimalStrings(details.map(detail => detail.free)),
-    usdtValue: sumDecimalStrings(details.map(detail => detail.usdtValue)),
-    usdtValueKnown: details.every(detail => detail.usdtValueKnown),
-    detailLabel: details.map(formatDetailLabel).join('；'),
-  }))
-}
-
-function formatDetailLabel(detail: BalanceDetail): string {
-  const locked = isZeroDecimalString(detail.locked) ? '' : `，锁定 ${detail.locked}`
-  return `${detail.source} ${detail.asset}：数量 ${detail.free}${locked}`
-}
 
 function valuationText(usdtValue: DecimalString, known: boolean): string {
   return known ? money(usdtValue) : '暂无估值'

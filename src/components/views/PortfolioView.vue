@@ -4,16 +4,17 @@
 展示期权义务仓和现货资产；所有资金事实来自后端快照，前端仅做展示聚合。
 -->
 <script setup lang="ts">
-import type { BalanceRow } from '@/types/domain'
 import type { PnlBreakdownItem } from '@/types/view'
+import { NTooltip } from 'naive-ui'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
 import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
+import { aggregateBalances } from '@/utils/balances'
 import { localDateTimeLabel } from '@/utils/date'
-import { decimalStringToDisplayNumber, sumDecimalStrings } from '@/utils/decimal'
+import { decimalStringHasValue, decimalStringToDisplayNumber, sumDecimalStrings } from '@/utils/decimal'
 
 const store = useAppStore()
 const { decimal, money } = useFormat()
@@ -57,29 +58,26 @@ const sellCallQuantity = computed(() =>
     .filter(order => order.direction === 'sellCall')
     .reduce((sum, order) => sum + decimalStringToDisplayNumber(order.quantity), 0),
 )
-const balanceBreakdown = computed<PnlBreakdownItem[]>(() => buildBalanceBreakdown(store.balances))
+const aggregatedBalances = computed(() => aggregateBalances(store.balances))
+const balanceBreakdown = computed<PnlBreakdownItem[]>(() => buildBalanceBreakdown())
 const balanceTotalValue = computed(() =>
   sumDecimalStrings(balanceBreakdown.value.map(item => item.value)),
 )
 
-function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
-  const grouped = new Map<string, string[]>()
-  for (const balance of balances) {
+function buildBalanceBreakdown(): PnlBreakdownItem[] {
+  const rows: PnlBreakdownItem[] = []
+  for (const balance of aggregatedBalances.value) {
     if (!balance.usdtValueKnown) {
       // 后端无法定价的资产不能参与比例图；账户概览仍会显示“暂无估值”。
       continue
     }
-    const asset = balance.asset.trim().toUpperCase()
-    const values = grouped.get(asset) ?? []
-    values.push(balance.usdtValue)
-    grouped.set(asset, values)
+    rows.push({
+      key: balance.asset,
+      label: balance.asset,
+      value: balance.usdtValue,
+    })
   }
-
-  return [...grouped.entries()].map(([asset, values]) => ({
-    key: asset,
-    label: asset,
-    value: sumDecimalStrings(values),
-  }))
+  return rows
 }
 </script>
 
@@ -138,12 +136,38 @@ function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
               <td>{{ order.status === 'partiallyFilled' ? '部分成交' : '运行中' }}</td>
             </tr>
             <tr
-              v-for="(balance, index) in store.balances"
-              :key="`${balance.source}:${balance.asset}:${index}`"
+              v-for="balance in aggregatedBalances"
+              :key="balance.asset"
             >
               <td>{{ balance.asset }}</td>
-              <td>现货</td>
-              <td>{{ decimal(balance.free) }}</td>
+              <td>
+                <NTooltip v-if="balance.details.length > 1" trigger="hover" placement="right">
+                  <template #trigger>
+                    <span class="balance-source-label" tabindex="0" :aria-label="balance.detailLabel">
+                      {{ balance.sourceLabel }}
+                    </span>
+                  </template>
+                  <div class="balance-tooltip">
+                    <div v-for="detail in balance.details" :key="detail.key" class="balance-tooltip-row">
+                      <strong>{{ detail.source }} {{ detail.asset }}</strong>
+                      <span>
+                        数量 {{ decimal(detail.free) }}
+                        <template v-if="decimalStringHasValue(detail.locked)">
+                          / 锁定 {{ decimal(detail.locked) }}
+                        </template>
+                      </span>
+                      <em>估值 {{ detail.usdtValueKnown ? money(detail.usdtValue) : '暂无估值' }}</em>
+                    </div>
+                  </div>
+                </NTooltip>
+                <span v-else>{{ balance.sourceLabel }}</span>
+              </td>
+              <td>
+                {{ decimal(balance.free) }}
+                <span v-if="decimalStringHasValue(balance.locked)" class="locked-quantity">
+                  / 锁定 {{ decimal(balance.locked) }}
+                </span>
+              </td>
               <td>--</td>
               <td>--</td>
               <td>--</td>
@@ -151,7 +175,7 @@ function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
             </tr>
           </tbody>
         </table>
-        <p v-if="store.orders.length === 0 && store.balances.length === 0" class="empty-state">暂无持仓明细</p>
+        <p v-if="obligationOrders.length === 0 && aggregatedBalances.length === 0" class="empty-state">暂无持仓明细</p>
       </div>
     </Panel>
 
@@ -167,3 +191,16 @@ function buildBalanceBreakdown(balances: BalanceRow[]): PnlBreakdownItem[] {
     </Panel>
   </div>
 </template>
+
+<style scoped>
+.balance-source-label {
+  border-bottom: 1px dashed var(--muted);
+  color: var(--text);
+  cursor: help;
+}
+
+.locked-quantity {
+  color: var(--muted);
+  font-size: 12px;
+}
+</style>
