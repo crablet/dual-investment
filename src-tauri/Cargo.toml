@@ -3,6 +3,7 @@ name = "dual-investment"
 version = "0.1.0"
 description = "Binance options and spot desktop strategy runner."
 authors = ["dual-investment contributors"]
+license = "AGPL-3.0-only"
 edition = "2024"
 rust-version = "1.95"
 

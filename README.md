@@ -60,6 +60,10 @@ Binance 期权是现金结算；到期 ITM 后，应用会通过额外的现货�
 
 默认 Linux 打包目标是 deb 和 rpm，产物位于 src-tauri/target/release/bundle/。AppImage 当前不作为默认目标。
 
+## 许可证
+
+本项目自有源码、文档和资源以 GNU Affero General Public License v3.0 授权发布，SPDX 标识为 `AGPL-3.0-only`，详见 [LICENSE](./LICENSE)。
+
 ## 项目结构
 
     src/

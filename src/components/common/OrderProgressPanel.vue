@@ -101,7 +101,6 @@ function stepIcon(step: OrderProgressStepView) {
 
     <div class="order-progress-footer">
       <span v-if="progress.exchangeOrderId">交易所订单号 {{ progress.exchangeOrderId }}</span>
-      <span v-else>进度只展示脱敏摘要</span>
       <NButton size="small" secondary @click="emit('viewOrders')">查看策略订单</NButton>
     </div>
   </section>

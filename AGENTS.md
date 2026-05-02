@@ -7,6 +7,7 @@
 - 不要把 API Secret、签名 query、Binance 原始响应或敏感上下文写入日志、SQLite、前端 store 或导出文件。API Key/Secret 只允许通过 src-tauri/src/secrets.rs 写入系统 keyring。
 - 金额、价格、数量、权利金、手续费、保证金和收益率不得用 f64；Rust 使用 rust_decimal::Decimal，前端以字符串承接。
 - 业务事实只来自 Binance 实盘接口或本地 SQLite 中已记录的真实事件；日志、进度事件和前端派生状态只用于展示或排障。
+- 项目自有源码、文档和资源默认使用 AGPL-3.0-only；新增文件不得引入与 AGPL 冲突的许可证声明。
 - 开发阶段不维护旧 IPC、旧前端 DTO 或旧 SQLite JSON payload 兼容；删字段时同步 Rust DTO、TypeScript 类型和 Pinia 状态，不用 serde(default)、别名字段或前端 fallback 保留旧结构。不要在应用代码里保留开发期 SQLite 迁移、清表或兼容分支；本地测试库只用一次性命令或临时脚本处理，脚本不要提交。
 
 ## 交易安全
