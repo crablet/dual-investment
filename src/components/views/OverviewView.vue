@@ -1,10 +1,9 @@
 <!--
 总览视图。
 
-组合账户、收益、待办、事件日历和活跃策略；具体数据都来自 Pinia 快照派生。
+组合账户、收益、活跃策略、自动状态和事件日历；具体数据都来自 Pinia 快照派生。
 -->
 <script setup lang="ts">
-import type { AppViewId } from '@/stores/app'
 import { computed } from 'vue'
 import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
@@ -13,84 +12,10 @@ import MetricCard from '@/components/common/MetricCard.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useAppStore } from '@/stores/app'
 
-interface PendingTask {
-  id: string
-  tone: string
-  text: string
-  view: AppViewId
-  visible: boolean
-}
-
 const store = useAppStore()
 
 // 总览只展示最近几条活跃策略作为入口；完整订单事实仍在订单页和后端快照中。
 const activeStrategies = computed(() => store.runningOrders.slice(0, 4))
-
-const expiringOrdersCount = computed(() => {
-  // 7 天内到期是看板提醒口径，不参与结算判断；结算扫描只看 Rust 的 expiryAt。
-  const today = new Date()
-  const threshold = new Date(today.getTime() + 7 * 86400_000)
-  return store.orders.filter((order) => {
-    const expiry = new Date(order.expiryAt)
-    return expiry >= today && expiry <= threshold
-  }).length
-})
-
-const runtimeHealthAttention = computed(() => {
-  // health 只表示后台同步运行状况。订单、资金和日历事实不从 health 推断。
-  const health = store.health
-  return Boolean(
-    health
-    && (health.consecutiveFailures > 0 || health.skippedTicks > 0)
-    && (health.status === 'degraded' || health.status === 'attention'),
-  )
-})
-
-const runtimeHealthText = computed(() => {
-  const health = store.health
-  if (!health) {
-    return '后台同步状态未知'
-  }
-  if (health.consecutiveFailures > 0) {
-    return `后台同步连续失败 ${health.consecutiveFailures} 次`
-  }
-  return `后台同步已跳过 ${health.skippedTicks} 轮`
-})
-
-// 待办只从当前快照派生，不新增独立任务存储，避免和订单/候选状态漂移。
-const pendingTasks = computed<PendingTask[]>(() => {
-  const tasks: PendingTask[] = [
-    {
-      id: 'pending-recovery',
-      tone: 'warning',
-      text: `${store.pendingRecoveryCount} 条恢复记录待确认`,
-      view: 'orders',
-      visible: store.pendingRecoveryCount > 0,
-    },
-    {
-      id: 'runtime-health',
-      tone: 'warning',
-      text: runtimeHealthText.value,
-      view: 'risk',
-      visible: runtimeHealthAttention.value,
-    },
-    {
-      id: 'expiring-orders',
-      tone: '',
-      text: `${expiringOrdersCount.value} 个订单将在 7 天内到期`,
-      view: 'orders',
-      visible: expiringOrdersCount.value > 0,
-    },
-    {
-      id: 'candidate-count',
-      tone: 'blue',
-      text: `当前有 ${store.candidates.length} 个候选机会`,
-      view: 'dual',
-      visible: store.candidates.length > 0,
-    },
-  ]
-  return tasks.filter(item => item.visible)
-})
 
 const runtimeHealthLabel = computed(() => {
   const health = store.health
@@ -146,14 +71,13 @@ const autoStatusItems = computed(() => [
       />
     </Panel>
 
-    <Panel title="待处理事项" class="span-6">
-      <div class="task-list">
-        <p v-if="pendingTasks.length === 0" class="empty-state">暂无待处理事项</p>
-        <div v-for="(task, index) in pendingTasks" :key="task.id" class="task-row">
-          <span class="task-index" :class="task.tone">{{ index + 1 }}</span>
-          {{ task.text }}
-          <button type="button" @click="store.openView(task.view)">查看</button>
-        </div>
+    <Panel title="活跃策略" class="span-6">
+      <div class="order-strip">
+        <article v-for="order in activeStrategies" :key="order.id">
+          <strong>{{ order.id }}</strong>
+          <span>{{ order.optionSymbol }}</span>
+          <em>{{ order.settlementAction }}</em>
+        </article>
       </div>
     </Panel>
 
@@ -175,16 +99,6 @@ const autoStatusItems = computed(() => [
 
     <Panel title="事件日历看板" class="span-12">
       <EventCalendarBoard />
-    </Panel>
-
-    <Panel title="活跃策略" class="span-12">
-      <div class="order-strip">
-        <article v-for="order in activeStrategies" :key="order.id">
-          <strong>{{ order.id }}</strong>
-          <span>{{ order.optionSymbol }}</span>
-          <em>{{ order.settlementAction }}</em>
-        </article>
-      </div>
     </Panel>
   </div>
 </template>

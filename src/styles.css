@@ -225,9 +225,8 @@ input {
   color: var(--muted);
 }
 
-/* 通用列表组：保持账户、待办、订单详情和义务仓等信息块的垂直节奏一致。 */
+/* 通用列表组：保持账户、订单详情和义务仓等信息块的垂直节奏一致。 */
 .account-list,
-.task-list,
 .detail-list,
 .calendar-list,
 .obligation-list {
@@ -285,7 +284,6 @@ input {
 }
 
 .account-row,
-.task-row,
 .detail-list p,
 .calendar-list article,
 .obligation-list article {
@@ -493,39 +491,6 @@ input {
   border-radius: 8px;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.018);
-}
-
-.task-row button {
-  border: 1px solid rgba(245, 182, 37, 0.3);
-  border-radius: 6px;
-  color: var(--gold);
-  background: rgba(245, 182, 37, 0.07);
-  cursor: pointer;
-}
-
-.task-row {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  justify-content: initial;
-  text-align: left;
-}
-
-.task-index {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  color: #071017;
-  background: var(--gold);
-}
-
-.task-index.warning {
-  background: #ff9c1a;
-}
-.task-index.blue {
-  background: var(--blue);
-  color: white;
 }
 
 .auto-status-panel {
@@ -974,7 +939,7 @@ input {
 
 .order-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   gap: 10px;
 }
 

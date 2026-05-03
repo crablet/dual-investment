@@ -125,7 +125,6 @@ export const useAppStore = defineStore('app', () => {
   const health = computed(() => snapshot.value?.health)
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
   const fundingAttempts = computed(() => snapshot.value?.fundingAttempts ?? [])
-  const pendingRecoveryCount = computed(() => health.value?.pendingRecoveryCount ?? 0)
   const runningOrders = computed(() =>
     orders.value.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
   )
@@ -629,7 +628,6 @@ export const useAppStore = defineStore('app', () => {
     health,
     orderAttempts,
     fundingAttempts,
-    pendingRecoveryCount,
     runningOrders,
     isLoading,
     isBusy,
