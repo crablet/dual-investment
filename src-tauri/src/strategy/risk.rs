@@ -1,7 +1,7 @@
 //! 风控快照派生。
 //!
 //! 风险值从 Binance 期权账户快照和 Rust 侧规则计算，前端只展示结果。默认保证金占用
-//! 上限在这里定义，调整时需要同步更新 README/AGENTS 中的业务约束。
+//! 上限和最终下单校验容差在这里定义，调整时需要同步更新 README/AGENTS 中的业务约束。
 
 use chrono::Utc;
 use rust_decimal::Decimal;
@@ -12,6 +12,9 @@ use crate::domain::{OptionAccountSnapshot, RiskAlert, RiskSeverity, RiskSnapshot
 
 /// 默认保证金占用率风控上限。
 pub const DEFAULT_MAX_MARGIN_USAGE: Decimal = dec!(60);
+
+/// 最终下单风控允许账户快照相对配置上限上浮的百分点。
+pub const DEFAULT_MARGIN_USAGE_TOLERANCE_POINTS: Decimal = dec!(5);
 
 /// 构造未连接状态下的空风险快照。
 pub fn empty_risk_snapshot() -> RiskSnapshot {

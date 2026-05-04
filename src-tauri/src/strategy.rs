@@ -19,5 +19,8 @@ pub use candidates::{
     option_sell_taker_limit_price_for_quantity, required_margin, status_from_exchange,
 };
 pub use orders::{annualized_from_order_terms, order_from_adopted_position, order_from_request};
-pub use risk::{DEFAULT_MAX_MARGIN_USAGE, empty_risk_snapshot, risk_snapshot_from_account};
+pub use risk::{
+    DEFAULT_MARGIN_USAGE_TOLERANCE_POINTS, DEFAULT_MAX_MARGIN_USAGE, empty_risk_snapshot,
+    risk_snapshot_from_account,
+};
 pub use rules::default_auto_rule;
