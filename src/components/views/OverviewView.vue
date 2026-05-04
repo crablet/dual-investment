@@ -10,6 +10,7 @@ import DonutChart from '@/components/common/DonutChart.vue'
 import EventCalendarBoard from '@/components/common/EventCalendarBoard.vue'
 import MetricCard from '@/components/common/MetricCard.vue'
 import Panel from '@/components/common/Panel.vue'
+import ActiveStrategyList from '@/components/overview/ActiveStrategyList.vue'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
@@ -72,13 +73,7 @@ const autoStatusItems = computed(() => [
     </Panel>
 
     <Panel title="活跃策略" class="span-6">
-      <div class="order-strip">
-        <article v-for="order in activeStrategies" :key="order.id">
-          <strong>{{ order.id }}</strong>
-          <span>{{ order.optionSymbol }}</span>
-          <em>{{ order.settlementAction }}</em>
-        </article>
-      </div>
+      <ActiveStrategyList :orders="activeStrategies" />
     </Panel>
 
     <Panel title="自动定投状态" class="span-6 auto-status-panel">
