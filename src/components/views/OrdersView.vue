@@ -70,7 +70,6 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
     { label: '执行价', value: money(order.strike, 'USDT', 0) },
     { label: '成交数量', value: `${order.filledQuantity} / ${order.quantity} 张` },
     { label: '成交均价', value: money(order.avgPrice) },
-    { label: '手续费', value: money(order.fee) },
     { label: '权利金', value: money(order.premium) },
     { label: '保本价', value: money(order.breakeven) },
     { label: '结算参考价', value: money(order.settlementPrice) },
@@ -78,7 +77,6 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
     { label: '现货状态', value: order.spotOrderStatus || '--' },
     { label: '现货成交数量', value: `${order.spotFilledQuantity} BTC` },
     { label: '现货成交均价', value: money(order.spotAvgPrice) },
-    { label: '现货手续费', value: order.spotFee },
     { label: '到期补齐', value: order.settlementAction },
     { label: '补齐结果', value: order.rebalanceMessage || '--' },
   ]

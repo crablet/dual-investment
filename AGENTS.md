@@ -5,7 +5,8 @@
 - 默认使用中文沟通。
 - 只保留 Binance 实盘路径；不要恢复 mock、离线占位数据、模式切换或浏览器业务 fallback。普通浏览器只用于布局检查，缺少 Tauri runtime 时应明确报错。
 - 不要把 API Secret、签名 query、Binance 原始响应或敏感上下文写入日志、SQLite、前端 store 或导出文件。API Key/Secret 只允许通过 src-tauri/src/secrets.rs 写入系统 keyring。
-- 金额、价格、数量、权利金、手续费、保证金和收益率不得用 f64；Rust 使用 rust_decimal::Decimal，前端以字符串承接。
+- 金额、价格、数量、权利金、保证金和收益率不得用 f64；Rust 使用 rust_decimal::Decimal，前端以字符串承接。
+- Binance 手续费率随账户等级变化且对当前策略评估影响很小，应用内收益口径主动忽略期权和现货交易手续费；不要解析、保存或展示 Binance `fee`/`commission`，也不要从权利金或现货浮动盈亏中扣减手续费。`StrategyOrder`、`ExchangeOrderAck` 和前端 IPC DTO 不保留手续费字段。
 - 业务事实只来自 Binance 实盘接口或本地 SQLite 中已记录的真实事件；日志、进度事件和前端派生状态只用于展示或排障。
 - 项目自有源码、文档和资源默认使用 AGPL-3.0-only；新增文件不得引入与 AGPL 冲突的许可证声明。
 - 开发阶段不维护旧 IPC、旧前端 DTO 或旧 SQLite JSON payload 兼容；删字段时同步 Rust DTO、TypeScript 类型和 Pinia 状态，不用 serde(default)、别名字段或前端 fallback 保留旧结构。不要在应用代码里保留开发期 SQLite 迁移、清表或兼容分支；本地测试库只用一次性命令或临时脚本处理，脚本不要提交。
@@ -41,7 +42,7 @@
 - Naive UI 全局主题配置放在 src/theme/；App.vue 只负责 provider、视图组合和应用级 wiring，不堆叠主题常量或业务逻辑。
 - 双币赢和自动复投共用 src/components/views/DualInvestmentView.vue；候选筛选和下单入口只放在“双币赢”页。订单页可以提供持仓接管入口，恢复中心可以展示恢复记录，但不得把接管状态展示成恢复记录。
 - 前端只做展示派生：订单年化只展示 StrategyOrder.annualized，收益分类不得从日志推断，账户估值由 Rust 提供，无法定价时显示“暂无估值”。下单进度事件、日志和图表交互不得作为交易事实来源。
-- 前端展示精度按业务语义控制，不要全局修改 money() 或 decimal() 默认精度。BTC/USDT 期权目标价、执行价、下单前复核的当前价格和保本价可按整数展示；真实成交均价、权利金、手续费、结算参考价、收益、账户估值和资产数量必须保留有业务意义的小数精度。
+- 前端展示精度按业务语义控制，不要全局修改 money() 或 decimal() 默认精度。BTC/USDT 期权目标价、执行价、下单前复核的当前价格和保本价可按整数展示；真实成交均价、权利金、结算参考价、收益、账户估值和资产数量必须保留有业务意义的小数精度。
 - 账户资产展示统一复用 src/utils/balances.ts 聚合同名资产；页面不得直接遍历原始 balances 后把来源硬编码成“现货”。同名资产可合并展示，但 tooltip 或明细必须保留真实账户来源。
 - 到期信息统一展示 expiryAt 的本地日期时间；总览事件日历只从快照派生。
 - 金融领域类型集中在 src-tauri/src/domain.rs；策略计算在 strategy.rs 和 src-tauri/src/strategy/；状态编排在 app_state.rs 和 src-tauri/src/app_state/。

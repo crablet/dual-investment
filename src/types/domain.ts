@@ -1,7 +1,7 @@
 // Rust/Tauri IPC 领域类型。
 //
 // 这些接口镜像 `src-tauri/src/domain.rs` 中序列化到前端的 DTO。金额、价格、数量、
-// 权利金、手续费和收益率都以字符串承接，前端只在展示层临时格式化，不能把这些字段
+// 权利金和收益率都以字符串承接，前端只在展示层临时格式化，不能把这些字段
 // 当作 JavaScript number 再回传为交易事实。
 
 /** Decimal 通过 IPC 以字符串传输，避免金融精度被 JS number 截断。 */
@@ -90,9 +90,7 @@ export interface StrategyOrder {
   quantity: DecimalString
   filledQuantity: DecimalString
   avgPrice: DecimalString
-  fee: DecimalString
   premium: DecimalString
-  estimatedPnl: DecimalString
   annualized: DecimalString
   breakeven: DecimalString
   exchangeStatus: string
@@ -107,7 +105,6 @@ export interface StrategyOrder {
   rebalanceMessage: string
   spotFilledQuantity: DecimalString
   spotAvgPrice: DecimalString
-  spotFee: DecimalString
 }
 
 /** 可由本机接管监控的 Binance 当前期权持仓。 */

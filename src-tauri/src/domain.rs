@@ -256,11 +256,7 @@ pub struct StrategyOrder {
     #[serde(with = "rust_decimal::serde::str")]
     pub avg_price: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
-    pub fee: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
     pub premium: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub estimated_pnl: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub annualized: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
@@ -280,8 +276,6 @@ pub struct StrategyOrder {
     pub spot_filled_quantity: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub spot_avg_price: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub spot_fee: Decimal,
 }
 
 /// 自动复投规则。
@@ -900,7 +894,7 @@ pub struct OptionOrderBook {
 
 /// 交易所订单查询或下单响应的归一化结构。
 ///
-/// 期权和现货接口字段不完全一致，`binance.rs` 会在解析时补齐均价、手续费等公共字段。
+/// 期权和现货接口字段不完全一致，`binance.rs` 会在解析时补齐成交数量和均价等公共字段。
 #[derive(Clone, Debug)]
 pub struct ExchangeOrderAck {
     pub order_id: String,
@@ -911,7 +905,6 @@ pub struct ExchangeOrderAck {
     pub avg_price: Decimal,
     pub price: Decimal,
     pub quantity: Decimal,
-    pub fee: Decimal,
     pub create_time: Option<DateTime<Utc>>,
     pub update_time: Option<DateTime<Utc>>,
 }

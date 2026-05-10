@@ -83,9 +83,7 @@ pub(super) fn apply_option_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck
     if ack.avg_price > Decimal::ZERO {
         order.avg_price = ack.avg_price;
     }
-    order.fee = ack.fee;
     order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
-    order.estimated_pnl = order.premium - order.fee;
     let annualized_quantity = if order.filled_quantity > Decimal::ZERO {
         order.filled_quantity
     } else {
@@ -119,7 +117,6 @@ pub(super) fn apply_option_position(order: &mut StrategyOrder, position: &Option
         order.avg_price = position.entry_price;
     }
     order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
-    order.estimated_pnl = order.premium - order.fee;
     let annualized_quantity = if order.filled_quantity > Decimal::ZERO {
         order.filled_quantity
     } else {
@@ -146,7 +143,6 @@ pub(super) fn apply_spot_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) 
     order.spot_order_status.clone_from(&ack.status);
     order.spot_filled_quantity = ack.executed_qty;
     order.spot_avg_price = ack.avg_price;
-    order.spot_fee = ack.fee;
     order.updated_at = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
     let expected = order.filled_quantity;
     if ack.status == "FILLED" && ack.executed_qty >= expected {

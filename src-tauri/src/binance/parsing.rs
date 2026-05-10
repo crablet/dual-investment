@@ -480,7 +480,7 @@ fn decimal_array_value(
 
 /// 归一化期权/现货订单响应。
 ///
-/// Binance 不同接口的成交数量、均价和手续费字段不完全一致，这里集中归一化。
+/// Binance 不同接口的成交数量和均价字段不完全一致，这里集中归一化。
 pub(super) fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
     let order_id = value
         .get("orderId")
@@ -496,9 +496,6 @@ pub(super) fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
     let avg_price = optional_decimal_field(value, "avgPrice")?
         .or_else(|| average_price_from_spot_ack(value, executed_qty))
         .unwrap_or(price);
-    let fee = optional_decimal_field(value, "fee")?
-        .or_else(|| fee_from_fills(value))
-        .unwrap_or(Decimal::ZERO);
     let transact_time = value
         .get("transactTime")
         .and_then(Value::as_i64)
@@ -518,7 +515,6 @@ pub(super) fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
         avg_price,
         price,
         quantity,
-        fee,
         create_time: value
             .get("createTime")
             .and_then(Value::as_i64)
@@ -551,21 +547,6 @@ fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> Option<D
     } else {
         Some((quote_qty / executed_qty).round_dp(8))
     }
-}
-
-/// 从现货 fills 汇总手续费。
-fn fee_from_fills(value: &Value) -> Option<Decimal> {
-    // 现货 fills 里可能逐笔返回手续费；这里只汇总数值，不保留逐笔原始响应。
-    value
-        .get("fills")
-        .and_then(Value::as_array)
-        .map(|fills| {
-            fills
-                .iter()
-                .filter_map(|fill| optional_decimal_field(fill, "commission").ok().flatten())
-                .sum::<Decimal>()
-        })
-        .filter(|fee| *fee > Decimal::ZERO)
 }
 
 /// 解析行权记录。

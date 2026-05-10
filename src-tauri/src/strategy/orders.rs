@@ -64,7 +64,7 @@ fn preview_candidate(request: &StrategyRequest) -> StrategyCandidate {
 
 /// 从下单请求和 Binance 订单回报构造本地订单。
 ///
-/// 成交数量、均价、手续费和交易所状态以 `ack` 为准；请求只提供策略方向和用户确认的参数。
+/// 成交数量、均价和交易所状态以 `ack` 为准；请求只提供策略方向和用户确认的参数。
 pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> StrategyOrder {
     let preview = preview_candidate(request);
     let now = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
@@ -107,9 +107,7 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         quantity: request.quantity,
         filled_quantity: ack.executed_qty,
         avg_price,
-        fee: ack.fee,
         premium,
-        estimated_pnl: premium - ack.fee,
         annualized,
         breakeven: preview.breakeven,
         exchange_status: ack.status.clone(),
@@ -127,7 +125,6 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         rebalance_message: String::new(),
         spot_filled_quantity: Decimal::ZERO,
         spot_avg_price: Decimal::ZERO,
-        spot_fee: Decimal::ZERO,
     }
 }
 
@@ -164,9 +161,7 @@ pub fn order_from_adopted_position(
         quantity: position.quantity,
         filled_quantity: position.quantity,
         avg_price: position.entry_price,
-        fee: Decimal::ZERO,
         premium,
-        estimated_pnl: premium,
         annualized,
         breakeven: breakeven_from_entry(contract.strike_price, position.entry_price, direction),
         exchange_status: "POSITION".to_string(),
@@ -188,7 +183,6 @@ pub fn order_from_adopted_position(
         rebalance_message: "已从 Binance 当前期权持仓接管，本机继续监控到期结算".to_string(),
         spot_filled_quantity: Decimal::ZERO,
         spot_avg_price: Decimal::ZERO,
-        spot_fee: Decimal::ZERO,
     }
 }
 

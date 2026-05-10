@@ -121,7 +121,7 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
               <th>数量</th>
               <th>均价/执行价</th>
               <th>到期日</th>
-              <th>浮动盈亏</th>
+              <th>已收权利金</th>
               <th>状态</th>
             </tr>
           </thead>
@@ -132,7 +132,7 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
               <td>{{ decimal(order.quantity) }} BTC</td>
               <td>{{ money(order.strike, 'USDT', 0) }}</td>
               <td>{{ localDateTimeLabel(order.expiryAt) }}</td>
-              <td class="positive">{{ money(order.estimatedPnl) }}</td>
+              <td class="positive">{{ money(order.premium) }}</td>
               <td>{{ order.status === 'partiallyFilled' ? '部分成交' : '运行中' }}</td>
             </tr>
             <tr
