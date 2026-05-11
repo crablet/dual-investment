@@ -33,7 +33,6 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             get_app_snapshot,
             connect_binance,
