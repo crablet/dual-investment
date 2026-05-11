@@ -8,33 +8,21 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use super::candidates::{
-    breakeven_from_entry, days_until_expiry, direction_from_option_side, estimate_annualized,
-    status_from_exchange,
+    breakeven_from_entry, direction_from_option_side, estimate_annualized, status_from_exchange,
 };
 use crate::domain::{
-    ExchangeOrderAck, OptionContract, OptionPosition, RecommendationLevel, StrategyCandidate,
-    StrategyDirection, StrategyOrder, StrategyOrderSource, StrategyRequest, StrategyStatus,
+    ExchangeOrderAck, OptionContract, OptionPosition, StrategyDirection, StrategyOrder,
+    StrategyOrderSource, StrategyRequest, StrategyStatus,
 };
 
-/// 基于下单请求构造本地预览。
+/// 从下单请求和 Binance 订单回报构造本地订单。
 ///
-/// 预览用于 UI 展示和订单字段初始计算，真实下单仍必须经过合约解析、风控和 Binance 回报。
-fn preview_candidate(request: &StrategyRequest) -> StrategyCandidate {
-    let premium = (request.limit_price * request.quantity).round_dp(2);
-    let breakeven = match request.direction {
-        StrategyDirection::SellPut => request.strike - request.limit_price,
-        StrategyDirection::SellCall => request.strike + request.limit_price,
-    };
-    let expiry_at = request.expiry_at;
-    let expiry_days = days_until_expiry(expiry_at).max(1);
-    let annualized = estimate_annualized(premium, request.strike, request.quantity, expiry_days);
-    StrategyCandidate {
-        id: request
-            .candidate_id
-            .clone()
-            .unwrap_or_else(|| format!("manual-{}", Uuid::new_v4())),
-        symbol: request.symbol.clone(),
-        option_symbol: request.option_symbol.clone().unwrap_or_else(|| {
+/// 成交数量、均价和交易所状态以 `ack` 为准；请求只提供策略方向和用户确认的参数。
+pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> StrategyOrder {
+    let now = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
+    let opened_at = ack.create_time.or(ack.update_time).unwrap_or(now);
+    let option_symbol = if ack.symbol.is_empty() {
+        request.option_symbol.clone().unwrap_or_else(|| {
             format!(
                 "BTC-{}-{}-{}",
                 request.expiry.format("%y%m%d"),
@@ -44,31 +32,10 @@ fn preview_candidate(request: &StrategyRequest) -> StrategyCandidate {
                     StrategyDirection::SellCall => "C",
                 }
             )
-        }),
-        direction: request.direction,
-        expiry: request.expiry,
-        expiry_at,
-        strike: request.strike,
-        quantity: request.quantity,
-        limit_price: request.limit_price,
-        premium,
-        annualized,
-        exercise_probability: Decimal::ZERO,
-        breakeven,
-        spot_price: Decimal::ZERO,
-        strike_distance_percent: Decimal::ZERO,
-        recommendation: RecommendationLevel::Watch,
-        reason: "基于用户输入限价的订单预览".to_string(),
-    }
-}
-
-/// 从下单请求和 Binance 订单回报构造本地订单。
-///
-/// 成交数量、均价和交易所状态以 `ack` 为准；请求只提供策略方向和用户确认的参数。
-pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> StrategyOrder {
-    let preview = preview_candidate(request);
-    let now = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
-    let opened_at = ack.create_time.or(ack.update_time).unwrap_or(now);
+        })
+    } else {
+        ack.symbol.clone()
+    };
     let avg_price = if ack.avg_price > Decimal::ZERO {
         ack.avg_price
     } else {
@@ -94,11 +61,7 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         exchange_order_id: Some(ack.order_id.clone()),
         client_order_id: ack.client_order_id.clone(),
         symbol: request.symbol.clone(),
-        option_symbol: if ack.symbol.is_empty() {
-            preview.option_symbol
-        } else {
-            ack.symbol.clone()
-        },
+        option_symbol,
         direction: request.direction,
         status,
         expiry: request.expiry,
@@ -109,7 +72,7 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         avg_price,
         premium,
         annualized,
-        breakeven: preview.breakeven,
+        breakeven: breakeven_from_entry(request.strike, request.limit_price, request.direction),
         exchange_status: ack.status.clone(),
         created_at: now,
         updated_at: now,

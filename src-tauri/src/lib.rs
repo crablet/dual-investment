@@ -1,6 +1,6 @@
 //! Tauri 应用入口库。
 //!
-//! 这里组装插件、IPC command、应用状态和系统托盘。具体业务逻辑分散在状态、
+//! 这里组装插件、IPC command 和应用状态。具体业务逻辑分散在状态、
 //! Binance、策略和持久化模块中，入口只负责 wiring。
 
 mod app_state;
@@ -12,15 +12,14 @@ mod logs;
 mod persistence;
 mod secrets;
 mod strategy;
-mod tray;
 
 use app_state::AppState;
 use commands::{
     adopt_option_positions, clear_log_files, connect_binance, connect_saved_binance,
     forget_binance_credentials, get_app_snapshot, get_log_snapshot,
     list_adoptable_option_positions, open_current_log_file, open_log_folder, place_manual_strategy,
-    recover_funding_attempt, recover_order_attempt, resolve_funding_attempt, run_auto_once,
-    run_settlement_scan, save_auto_rule, scan_candidates, sync_live_state, toggle_auto_strategy,
+    recover_funding_attempt, recover_order_attempt, resolve_funding_attempt, run_settlement_scan,
+    scan_candidates, sync_live_state,
 };
 use tauri::Manager;
 
@@ -42,8 +41,6 @@ pub fn run() {
             forget_binance_credentials,
             scan_candidates,
             place_manual_strategy,
-            save_auto_rule,
-            toggle_auto_strategy,
             recover_order_attempt,
             recover_funding_attempt,
             resolve_funding_attempt,
@@ -51,7 +48,6 @@ pub fn run() {
             adopt_option_positions,
             sync_live_state,
             run_settlement_scan,
-            run_auto_once,
             get_log_snapshot,
             open_current_log_file,
             open_log_folder,
@@ -62,7 +58,6 @@ pub fn run() {
             let app_state =
                 AppState::new_in(data_dir).expect("failed to initialize application state");
             app.manage(app_state);
-            tray::build(app.handle())?;
             Ok(())
         })
         .run(tauri::generate_context!())

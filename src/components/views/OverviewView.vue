@@ -1,7 +1,7 @@
 <!--
 总览视图。
 
-组合账户、收益、活跃策略、自动状态和事件日历；具体数据都来自 Pinia 快照派生。
+组合账户、收益、活跃策略、运行状态和事件日历；具体数据都来自 Pinia 快照派生。
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
@@ -29,17 +29,12 @@ const runtimeHealthLabel = computed(() => {
   return '待处理'
 })
 
-const autoStatusItems = computed(() => [
-  // 这里是导航状态摘要，不是自动策略执行条件；真正门禁仍在 Rust 后台 tick 中判断。
+const runtimeStatusItems = computed(() => [
+  // 这里只展示后台维护状态；恢复、结算和资金动作仍以 Rust 快照和门禁为准。
   {
     label: '后台同步',
     value: runtimeHealthLabel.value,
     tone: store.health?.status === 'healthy' ? 'active' : store.health?.status === 'idle' ? 'neutral' : 'paused',
-  },
-  {
-    label: '自动扫描',
-    value: store.autoRule?.enabled ? '已启用' : '已暂停',
-    tone: store.autoRule?.enabled ? 'active' : 'paused',
   },
   {
     label: '快速成交',
@@ -76,19 +71,12 @@ const autoStatusItems = computed(() => [
       <ActiveStrategyList :orders="activeStrategies" />
     </Panel>
 
-    <Panel title="自动定投状态" class="span-6 auto-status-panel">
-      <div class="auto-state">
-        <div class="auto-scan-card">
-          <span>扫描计划</span>
-          <strong>{{ store.autoRule?.schedule ?? '未设置' }}</strong>
-          <em>{{ store.settings?.connected ? '已连接' : '等待连接' }}</em>
-        </div>
-        <div class="auto-status-list">
-          <p v-for="item in autoStatusItems" :key="item.label" class="auto-status-item">
-            <span>{{ item.label }}</span>
-            <strong class="auto-status-value" :class="[`tone-${item.tone}`]">{{ item.value }}</strong>
-          </p>
-        </div>
+    <Panel title="运行状态" class="span-6 runtime-status-panel">
+      <div class="runtime-status-list">
+        <p v-for="item in runtimeStatusItems" :key="item.label" class="runtime-status-item">
+          <span>{{ item.label }}</span>
+          <strong class="runtime-status-value" :class="[`tone-${item.tone}`]">{{ item.value }}</strong>
+        </p>
       </div>
     </Panel>
 

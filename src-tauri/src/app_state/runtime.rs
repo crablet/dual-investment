@@ -1,11 +1,11 @@
 //! 运行期辅助函数。
 //!
-//! 这里封装 Binance 客户端重建、异步查询任务、计划时间解析和客户端订单号生成。
+//! 这里封装 Binance 客户端重建、异步查询任务和客户端订单号生成。
 //! 它只处理内存中的运行状态，不直接读取或写入 keyring。
 
 use std::future::Future;
 
-use chrono::{NaiveTime, Utc};
+use chrono::Utc;
 
 use super::RuntimeConfig;
 use crate::binance::BinanceClient;
@@ -68,21 +68,6 @@ pub(super) fn client_from_runtime(runtime: &RuntimeConfig) -> AppResult<BinanceC
         .clone()
         .ok_or_else(|| AppError::Config("缺少 Binance API Secret".to_string()))?;
     BinanceClient::new(api_key, api_secret)
-}
-
-/// 从中文计划字符串中提取执行时间，无法解析时使用默认时间。
-pub(super) fn parse_schedule_time(schedule: &str) -> NaiveTime {
-    for segment in schedule
-        .split(|character: char| character.is_whitespace() || character == ',' || character == '，')
-    {
-        if let Some((hour, minute)) = segment.split_once(':')
-            && let (Ok(hour), Ok(minute)) = (hour.parse::<u32>(), minute.parse::<u32>())
-            && let Some(time) = NaiveTime::from_hms_opt(hour, minute, 0)
-        {
-            return time;
-        }
-    }
-    NaiveTime::from_hms_opt(11, 30, 0).expect("default auto schedule time is valid")
 }
 
 /// 生成期权订单客户端订单号。

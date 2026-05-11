@@ -493,54 +493,17 @@ input {
   background: rgba(255, 255, 255, 0.018);
 }
 
-.auto-status-panel {
+.runtime-status-panel {
   container-type: inline-size;
 }
 
-.auto-state {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
-  align-items: stretch;
-  min-width: 0;
-}
-
-@container (min-width: 860px) {
-  .auto-state {
-    grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.1fr);
-  }
-}
-
-.auto-scan-card {
-  display: grid;
-  align-content: center;
-  gap: 6px;
-  min-width: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.auto-scan-card strong {
-  display: block;
-  font-size: 28px;
-  line-height: 1.1;
-}
-
-.auto-scan-card span,
-.auto-scan-card em {
-  color: var(--muted);
-  font-style: normal;
-}
-
-.auto-status-list {
+.runtime-status-list {
   display: grid;
   gap: 10px;
   min-width: 0;
 }
 
-.auto-status-item {
+.runtime-status-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -555,7 +518,7 @@ input {
   overflow: hidden;
 }
 
-.auto-status-item span {
+.runtime-status-item span {
   color: var(--muted);
   min-width: 0;
   overflow: hidden;
@@ -563,7 +526,7 @@ input {
   white-space: nowrap;
 }
 
-.auto-status-value {
+.runtime-status-value {
   display: inline-flex;
   flex: 0 0 auto;
   justify-content: center;
@@ -577,18 +540,18 @@ input {
   white-space: nowrap;
 }
 
-.auto-status-value.tone-active {
+.runtime-status-value.tone-active {
   color: #071017;
   background: var(--gold);
 }
 
-.auto-status-value.tone-neutral {
+.runtime-status-value.tone-neutral {
   color: var(--gold);
   border: 1px solid rgba(245, 182, 37, 0.34);
   background: rgba(245, 182, 37, 0.08);
 }
 
-.auto-status-value.tone-paused {
+.runtime-status-value.tone-paused {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.06);
 }
@@ -671,11 +634,6 @@ input {
 .event-filter-dot.tone-green,
 .event-day-dots .tone-green {
   background: var(--green);
-}
-
-.event-filter-dot.tone-blue,
-.event-day-dots .tone-blue {
-  background: var(--blue);
 }
 
 .event-filter-dot.tone-purple,
@@ -844,10 +802,6 @@ input {
   border-color: rgba(82, 198, 111, 0.32);
 }
 
-.event-detail-card.tone-blue {
-  border-color: rgba(95, 143, 245, 0.34);
-}
-
 .event-detail-card.tone-purple {
   border-color: rgba(142, 112, 255, 0.34);
 }
@@ -955,16 +909,6 @@ input {
   font-style: normal;
 }
 
-.native-input {
-  width: 100%;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--text);
-  background: rgba(0, 0, 0, 0.18);
-}
-
 .dual-workbench {
   /* 双币赢主工作台左侧浏览候选、右侧固定下单卡片，符合重复扫描和下单的工作流。 */
   display: grid;
@@ -981,8 +925,7 @@ input {
 
 .direction-switch,
 .candidate-board,
-.order-card,
-.auto-card {
+.order-card {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
@@ -990,8 +933,7 @@ input {
 }
 
 .candidate-board h3,
-.order-card h3,
-.auto-card h3 {
+.order-card h3 {
   margin: 0;
   font-size: 18px;
   line-height: 1.25;
@@ -1147,15 +1089,13 @@ input {
   min-width: 0;
 }
 
-.order-card,
-.auto-card {
+.order-card {
   display: grid;
   gap: 14px;
   padding: 16px;
 }
 
-.order-card header,
-.auto-card header {
+.order-card header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1204,16 +1144,12 @@ input {
   white-space: nowrap;
 }
 
-.order-form,
-.auto-card-body,
-.auto-rule-grid {
+.order-form {
   display: grid;
   gap: 12px;
 }
 
-.order-form label,
-.auto-card-body label,
-.auto-rule-grid label {
+.order-form label {
   display: grid;
   gap: 7px;
   color: var(--muted);
@@ -1313,39 +1249,6 @@ input {
   color: var(--red);
 }
 
-.advanced-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.02);
-  cursor: pointer;
-}
-
-.advanced-toggle span {
-  color: var(--muted);
-}
-
-.advanced-toggle strong {
-  color: var(--gold);
-}
-
-.compact-range {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
-}
-
-.auto-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
 /* 通用操作按钮组，允许换行以保护窄宽度下的按钮文字。 */
 .button-row {
   display: flex;
@@ -1356,13 +1259,6 @@ input {
 
 .button-row.compact {
   margin-top: 12px;
-}
-
-.range-row,
-.checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 .summary-cards {

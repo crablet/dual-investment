@@ -1,57 +1,36 @@
 # AGENTS.md
 
-## 核心原则
+## 基线
 
 - 默认使用中文沟通。
-- 只保留 Binance 实盘路径；不要恢复 mock、离线占位数据、模式切换或浏览器业务 fallback。普通浏览器只用于布局检查，缺少 Tauri runtime 时应明确报错。
-- 不要把 API Secret、签名 query、Binance 原始响应或敏感上下文写入日志、SQLite、前端 store 或导出文件。API Key/Secret 只允许通过 src-tauri/src/secrets.rs 写入系统 keyring。
-- 金额、价格、数量、权利金、保证金和收益率不得用 f64；Rust 使用 rust_decimal::Decimal，前端以字符串承接。
-- Binance 手续费率随账户等级变化且对当前策略评估影响很小，应用内收益口径主动忽略期权和现货交易手续费；不要解析、保存或展示 Binance `fee`/`commission`，也不要从权利金或现货浮动盈亏中扣减手续费。`StrategyOrder`、`ExchangeOrderAck` 和前端 IPC DTO 不保留手续费字段。
-- 业务事实只来自 Binance 实盘接口或本地 SQLite 中已记录的真实事件；日志、进度事件和前端派生状态只用于展示或排障。
-- 项目自有源码、文档和资源默认使用 AGPL-3.0-only；新增文件不得引入与 AGPL 冲突的许可证声明。
-- 开发阶段不维护旧 IPC、旧前端 DTO 或旧 SQLite JSON payload 兼容；删字段时同步 Rust DTO、TypeScript 类型和 Pinia 状态，不用 serde(default)、别名字段或前端 fallback 保留旧结构。不要在应用代码里保留开发期 SQLite 迁移、清表或兼容分支；本地测试库只用一次性命令或临时脚本处理，脚本不要提交。
-- 仓库不保留任何单元测试、集成测试、测试夹具或快照代码。开发过程中可以临时编写和运行测试辅助验证，但交付前必须删除测试文件、内嵌测试模块、测试专用依赖与配置；不得提交，也不得通过忽略规则把它们长期隐藏在工作区。
+- 项目只保留 Binance 实盘路径；不要恢复 mock、离线占位、模式切换或浏览器业务 fallback。普通浏览器仅用于布局检查，缺少 Tauri runtime 时应明确报错。
+- 新的期权策略只能由用户在“双币赢”页手动发起；不要恢复自动策略、自动下单、系统托盘或其他常驻入口。既有订单仍需完成恢复、结算和资金收尾。
+- v1 只支持 BTC/USDT；新增标的前必须补齐合约过滤、保证金估算、风控和验证。
+- 业务事实只来自 Binance 实盘接口或 SQLite 中记录的真实事件；日志、进度事件和前端派生状态不是事实源。
+- 金额、价格、数量、权利金、保证金和收益率不得使用 f64；Rust 使用 rust_decimal::Decimal，前端以字符串承接。
+- 当前收益模型忽略期权和现货手续费；不要引入 fee/commission 字段、保存逻辑或收益扣减。
+- API Key/Secret 仅可经 src-tauri/src/secrets.rs 写入系统 keyring。Secret、签名 query、Binance 原始响应及敏感上下文不得进入日志、SQLite、前端状态或导出文件。
+- 项目自有源码、文档和资源使用 AGPL-3.0-only，不得引入冲突的许可证声明。
+- 开发期不保留旧 IPC、DTO 或 SQLite payload 兼容；结构变更要同步收敛 Rust、TypeScript 和 Pinia，不在应用代码中保留迁移或兼容分支。
+- 仓库不保留测试、夹具或快照；临时验证代码、依赖和配置必须在交付前删除。
 
-## 交易安全
+## 实盘安全
 
-- v1 只支持 BTC/USDT；新增标的前必须补齐合约过滤器、保证金估算、风险规则和验证。
-- 所有下单、Simple Earn 申购/赎回、现货-期权划转和到期补齐都是真实资金动作，必须有显式门禁、后端串行保护、恢复记录和脱敏日志。
-- 已保存凭据只能自动重连 Binance，不得自动开启策略、下单或移动资金；凭据缺失、权限不足等人工错误应暂停自动重连并明确提示。自动策略默认关闭，开启必须二次确认，重启后仍保持关闭。
-- 存在 order_attempts 或 funding_attempts 待恢复记录时，必须阻断自动执行、手动下单和后续资金动作。
-- 手动期权下单最终门禁必须是应用内复核弹窗：冻结用户发送订单时的候选和数量快照，展示足够确认方向、合约、价格、数量、到期、预计收益和风险的事实，用户确认后才允许传 confirmLive=true。
-- 候选扫描使用 BTCUSDT 现货价过滤方向：低买只保留执行价低于现货的 Put，高卖只保留执行价高于现货的 Call；候选到期范围保持 1-90 天。
-- 期权订单和请求必须携带 Binance exchangeInfo.expiryDate 派生的精确 expiryAt；到期结算价格只来自 Binance 行权记录接口，不得用现货价替代。
-- 期权下单价格和数量必须满足 Binance PRICE_FILTER.tickSize 与 LOT_SIZE.stepSize；默认保证金占用率配置上限为 60%，资金准备、风险提醒和闲置资金归集仍以 60% 为基准。发送订单前的最终风控允许 5 个百分点的快照容差，预计占用率不高于 65% 时通过，超过 65% 时阻断；不得把容差用于减少补资或增加归集金额。
-- 期权卖出 IOC 下单限价必须来自当前 Binance 买一价：候选可用 24h ticker 的买一价估算，真实发送前必须重新读取 order book 买一价和买一量；买一量不足以覆盖目标数量时阻断下单，不得自动下探到更低买盘价，也不得用 mark price、现货价或前端缓存价作为最终下单价格。
-- 下单或补齐需要资金时，只能基于现货/期权余额和 Simple Earn 真实持仓准备资金；请求确认后等待账户快照反映到账，等待期间只允许查询，不得重复发送资金动作。
-- 到期结算后的期权闲置 USDT 归集是批次级收尾动作：结算批次完成后创建 settlement_sweeps 任务并延迟约 5 分钟执行；不得按每个订单重复发送 OPTION_MAIN；同一 chain_id 已确认的划转/申购必须续跑下一步，不得重复发送；低于 10 USDT 不自动归集；存在待恢复记录、未完成结算或未完成补齐时跳过或延后归集。
-- OPTION_MAIN 确认成功后必须等待现货账户快照反映到账，才能申购 Simple Earn；等待期间只允许查询，不得重复发送划转或申购请求。
+- 下单、Simple Earn、账户划转和到期补齐都是真实资金动作，必须有显式门禁、后端串行保护、恢复记录和脱敏日志。
+- 修改连接、后台同步、订单、资金、恢复、接管或结算逻辑前，必须阅读 [实盘交易安全](docs/trading-safety.md)。
+- 已保存凭据只能用于重连 Binance，不得触发下单或资金移动；凭据缺失、权限不足等人工错误应暂停自动重连并明确提示。
+- 存在未确认的 order_attempts 或 funding_attempts 时，必须阻断手动下单和后续资金动作。
+- 手动期权下单必须冻结候选与数量快照并经过应用内复核；用户确认后才允许发送 confirmLive=true。
 
-## 恢复与接管
+## 代码边界
 
-- 下单或现货补齐结果不确定时，不要盲目重发真实订单；必须按 clientOrderId 或交易所订单号重新查询 Binance，并保留 order_attempts 恢复记录。
-- 期权订单若被 Binance 确认为 EXPIRED、REJECTED、CANCELED 或 CANCELLED 且成交数量为 0，必须标记失败，不得创建、恢复或继续跟踪为活跃 StrategyOrder。
-- Simple Earn 和 Universal Transfer 必须先写入 funding_attempts 再发送 Binance；结果不确定时只按交易所引用或同类型、同资产、同金额的唯一历史记录确认，不唯一则进入 blocked。
-- 资金恢复查询失败只记录为临时错误并按慢退避重查，不计入有效“查不到”次数；只有 Binance 历史接口成功返回但仍无法确认时，才增加 effective_query_count。恢复记录应保留脱敏诊断字段：查询窗口、下次查询时间、有效查询次数、临时错误次数和错误分类。
-- blocked 资金记录只能在人工核对 Binance 事实后解除为 confirmed 或 failed；解除操作只更新恢复记录和脱敏日志，不得重新发送资金请求。
-- Binance 期权持仓接管只允许从当前义务仓和 exchangeInfo 创建本地跟踪订单；接管入口不下单、不移动资金、不混入恢复记录。接管订单使用 StrategyOrder.source = adoptedPosition，后续同步以当前持仓和到期行权记录为事实来源。
+- 前端只展示 Rust 快照提供的金融事实，不重新计算年化、估值、收益或恢复状态。跨页面状态放在 src/stores/app.ts，view 组件只做组合。
+- 账户资产统一经 src/utils/balances.ts 聚合同名资产，并保留真实账户来源。
+- 金融模型和策略计算放在 src-tauri/src/domain.rs 与 src-tauri/src/strategy/；状态编排放在 app_state.rs 与 src-tauri/src/app_state/。
+- Binance 通信只放在 binance.rs 与 src-tauri/src/binance/；凭据和文件日志分别只由 secrets.rs 与 logs.rs 处理。
 
-## 前端与后端边界
+## 验证
 
-- 前端使用 Vue 3、script setup、Pinia、Naive UI、Vite；跨页面状态源保持在 src/stores/app.ts，route/view 级组件只做组合。
-- Naive UI 全局主题配置放在 src/theme/；App.vue 只负责 provider、视图组合和应用级 wiring，不堆叠主题常量或业务逻辑。
-- 双币赢和自动复投共用 src/components/views/DualInvestmentView.vue；候选筛选和下单入口只放在“双币赢”页。订单页可以提供持仓接管入口，恢复中心可以展示恢复记录，但不得把接管状态展示成恢复记录。
-- 前端只做展示派生：订单年化只展示 StrategyOrder.annualized，收益分类不得从日志推断，账户估值由 Rust 提供，无法定价时显示“暂无估值”。下单进度事件、日志和图表交互不得作为交易事实来源。
-- 前端展示精度按业务语义控制，不要全局修改 money() 或 decimal() 默认精度。BTC/USDT 期权目标价、执行价、下单前复核的当前价格和保本价可按整数展示；真实成交均价、权利金、结算参考价、收益、账户估值和资产数量必须保留有业务意义的小数精度。
-- 账户资产展示统一复用 src/utils/balances.ts 聚合同名资产；页面不得直接遍历原始 balances 后把来源硬编码成“现货”。同名资产可合并展示，但 tooltip 或明细必须保留真实账户来源。
-- 到期信息统一展示 expiryAt 的本地日期时间；总览事件日历只从快照派生。
-- 金融领域类型集中在 src-tauri/src/domain.rs；策略计算在 strategy.rs 和 src-tauri/src/strategy/；状态编排在 app_state.rs 和 src-tauri/src/app_state/。
-- Binance 请求、签名、Simple Earn、Universal Transfer、历史查询和期权持仓查询只放在 binance.rs 及 src-tauri/src/binance/。系统凭据读写只放在 secrets.rs；文件日志读写只放在 logs.rs，日志按 logs/YYYY-MM-DD.log 追加 JSONL，只允许脱敏摘要。
-- 所有 command 返回 Result<T, String>，内部用 AppError 表达错误。订单和恢复记录保存可恢复事实，日志只做追加记录。
-
-## 验证要求
-
-- 前端改动先运行 pnpm lint，修到无问题后运行 pnpm typecheck；涉及依赖、构建、Vite 或 ESLint 配置时再运行 pnpm build。
-- Rust 改动先运行 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings，修到没有问题后再运行 cargo fmt --manifest-path src-tauri/Cargo.toml。
-- Tauri 启动路径、图标、窗口或托盘改动需要实际运行 pnpm tauri:dev。
-- UI 改动需要检查 1180px 最小桌面宽度下没有文字重叠和表格溢出不可用问题。
+- 前端改动运行 pnpm lint、pnpm typecheck；依赖、构建或工具配置变化时再运行 pnpm build。
+- Rust 改动运行 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings，通过后运行 cargo fmt --manifest-path src-tauri/Cargo.toml。
+- Tauri 启动、图标或窗口改动实际运行 pnpm tauri:dev；UI 改动检查 1180px 最小宽度下无文字重叠或不可用溢出。

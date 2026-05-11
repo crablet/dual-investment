@@ -1,6 +1,6 @@
 // 事件日历派生逻辑。
 //
-// 日历只从当前应用快照派生订单、到期、结算、补齐、自动复投、风险和恢复事件。
+// 日历只从当前应用快照派生订单、到期、结算、补齐、风险和恢复事件。
 
 import type { MaybeRefOrGetter } from 'vue'
 import type { AppViewId } from '@/stores/app'
@@ -8,12 +8,9 @@ import type { FundingAttemptView, OrderAttemptView, RiskAlert, StrategyOrder } f
 import { computed, toValue } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
-  addDays,
-  formatDateKey,
   localDateKey,
   localTimeLabel,
   parseDateKey,
-  scheduleTimeLabel,
   startOfDay,
 } from '@/utils/date'
 import { decimalStringHasValue } from '@/utils/decimal'
@@ -25,13 +22,12 @@ export type CalendarEventType
     | 'expiry'
     | 'settlement'
     | 'rebalance'
-    | 'auto'
     | 'risk'
     | 'recovery'
     | 'system'
 
 /** 日历角标颜色语义，保持和全局交易终端配色一致。 */
-export type CalendarEventTone = 'gold' | 'green' | 'blue' | 'purple' | 'red' | 'gray'
+export type CalendarEventTone = 'gold' | 'green' | 'purple' | 'red' | 'gray'
 
 /** 从当前快照派生出的单条日历事件。 */
 export interface CalendarEvent {
@@ -64,7 +60,6 @@ export const calendarEventTypes: CalendarEventTypeMeta[] = [
   { id: 'expiry', label: '到期', tone: 'purple' },
   { id: 'settlement', label: '结算', tone: 'green' },
   { id: 'rebalance', label: '补齐', tone: 'green' },
-  { id: 'auto', label: '自动复投', tone: 'blue' },
   { id: 'risk', label: '风险', tone: 'red' },
   { id: 'recovery', label: '恢复', tone: 'gray' },
   { id: 'system', label: '系统', tone: 'gray' },
@@ -86,11 +81,6 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
     // 日历事件是快照的展示索引，不持久化；刷新后会重新从订单/恢复记录生成。
     for (const order of store.orders) {
       rows.push(...eventsFromOrder(order))
-    }
-
-    if (store.settings?.autoEnabled && store.autoRule?.enabled) {
-      // 自动复投计划事件只是提醒用户扫描时间，不表示当天一定会下单。
-      rows.push(...autoEventsBetween(start, end, store.autoRule.schedule, store.autoRule.quantity, store.autoRule.minAnnualized))
     }
 
     for (const alert of store.risk?.alerts ?? []) {
@@ -231,35 +221,6 @@ function eventFromFundingAttempt(attempt: FundingAttemptView): CalendarEvent | u
     targetView: 'orders',
     priority: attempt.status === 'blocked' ? 94 : 54,
   }
-}
-
-/** 按当前自动规则生成可见日期范围内的计划扫描事件。 */
-function autoEventsBetween(
-  start: Date,
-  end: Date,
-  schedule: string,
-  quantity: string,
-  minAnnualized: string,
-): CalendarEvent[] {
-  const rows: CalendarEvent[] = []
-  const timeLabel = scheduleTimeLabel(schedule)
-
-  for (let day = new Date(start); day <= end; day = addDays(day, 1)) {
-    const date = formatDateKey(day)
-    rows.push({
-      id: `auto-${date}`,
-      type: 'auto',
-      date,
-      timeLabel,
-      title: '自动复投扫描',
-      detail: `${quantity} 张，目标年化不低于 ${minAnnualized}%`,
-      tone: 'blue',
-      targetView: 'dual',
-      priority: 45,
-    })
-  }
-
-  return rows
 }
 
 function hasRebalanceEvent(order: StrategyOrder) {

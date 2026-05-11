@@ -152,7 +152,7 @@ export function useDualInvestmentCandidates() {
       return '可以放宽年化、被行权概率或距现货筛选，也可以一键重置筛选条件。'
     }
     if (currentDirectionCandidateCount.value === 0 && otherDirectionCandidateCount.value > 0) {
-      return `本次扫描只有${otherDirectionLabel.value}候选，当前没有${activeDirectionLabel.value}候选。可以放宽自动复投规则，或切换到${otherDirectionLabel.value}查看。`
+      return `本次扫描只有${otherDirectionLabel.value}候选，当前没有${activeDirectionLabel.value}候选。可以切换到${otherDirectionLabel.value}查看。`
     }
     return '当前到期日筛选没有命中；候选浏览范围为 1-90 天，可以切换到所有到期日，或重新扫描候选。'
   })

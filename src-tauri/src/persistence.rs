@@ -1,6 +1,6 @@
 //! 本地 `SQLite` 持久化层。
 //!
-//! 这里只保存业务事件、订单快照、自动规则和恢复记录；API Key/Secret 永远不进入
+//! 这里只保存业务事件、订单快照和恢复记录；API Key/Secret 永远不进入
 //! SQLite。订单和审计以追加/替换业务事实的方式保存，便于应用重启后从真实交易所状态恢复。
 
 use std::path::Path;
@@ -11,9 +11,8 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 
 use crate::domain::{
-    AppError, AppResult, AutoInvestmentRule, FundingAttempt, FundingAttemptKind,
-    FundingAttemptStatus, OrderAttempt, OrderAttemptStatus, SettlementSweep, SettlementSweepStatus,
-    StrategyDirection, StrategyOrder,
+    AppError, AppResult, FundingAttempt, FundingAttemptKind, FundingAttemptStatus, OrderAttempt,
+    OrderAttemptStatus, SettlementSweep, SettlementSweepStatus, StrategyDirection, StrategyOrder,
 };
 
 pub struct Persistence {
@@ -101,12 +100,6 @@ impl Persistence {
                     message TEXT NOT NULL,
                     scheduled_at TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS auto_rule (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    payload TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
 
@@ -282,44 +275,6 @@ impl Persistence {
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
         Ok(())
-    }
-
-    /// 保存自动复投规则。
-    ///
-    /// 规则可持久化，但应用启动时会强制关闭自动执行状态。
-    pub fn save_auto_rule(&self, rule: &AutoInvestmentRule) -> AppResult<()> {
-        let payload =
-            serde_json::to_string(rule).map_err(|error| AppError::Storage(error.to_string()))?;
-        self.connection
-            .execute(
-                "INSERT OR REPLACE INTO auto_rule (id, payload, updated_at) VALUES (1, ?1, ?2)",
-                params![payload, Utc::now().to_rfc3339()],
-            )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-        Ok(())
-    }
-
-    /// 读取自动复投规则；没有保存过则由策略层提供默认值。
-    pub fn load_auto_rule(&self) -> AppResult<Option<AutoInvestmentRule>> {
-        let mut statement = self
-            .connection
-            .prepare("SELECT payload FROM auto_rule WHERE id = 1")
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-        let mut rows = statement
-            .query([])
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-        let Some(row) = rows
-            .next()
-            .map_err(|error| AppError::Storage(error.to_string()))?
-        else {
-            return Ok(None);
-        };
-        let payload = row
-            .get::<_, String>(0)
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-        serde_json::from_str::<AutoInvestmentRule>(&payload)
-            .map(Some)
-            .map_err(|error| AppError::Storage(error.to_string()))
     }
 
     /// 按更新时间倒序读取订单。

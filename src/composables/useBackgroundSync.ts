@@ -1,6 +1,7 @@
 // 应用后台同步调度器。
 //
-// 同步只刷新快照、推进恢复和尝试已保存凭据重连；它不能自动开启策略、下单或移动资金。
+// 前端只负责定时调用快照、实盘同步和已保存凭据重连，不创建新的期权策略订单。
+// Rust 的实盘同步会推进既有恢复、结算、现货补齐和资金收尾，真实动作仍由后端门禁决定。
 
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'

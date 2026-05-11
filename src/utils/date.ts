@@ -84,12 +84,3 @@ export function localDateTimeLabel(value: string) {
     hour12: false,
   })}`
 }
-
-/** 从中文计划文本中提取 HH:mm。 */
-export function scheduleTimeLabel(schedule: string) {
-  const matched = schedule.match(/([01]?\d|2[0-3]):([0-5]\d)/)
-  if (!matched) {
-    return '计划'
-  }
-  return `${matched[1].padStart(2, '0')}:${matched[2]}`
-}

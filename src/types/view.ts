@@ -50,7 +50,6 @@ export interface OrderProgressStepView {
 /** 手动下单进度展示模型。 */
 export interface OrderProgressView {
   flowId: string
-  source: string
   status: OrderProgressStatus
   steps: OrderProgressStepView[]
   optionSymbol?: string

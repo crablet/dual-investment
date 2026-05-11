@@ -412,7 +412,6 @@ fn parse_mark_price(value: &Value) -> AppResult<OptionMarkPrice> {
     Ok(OptionMarkPrice {
         symbol: string_field(value, "symbol")?,
         mark_price: decimal_field(value, "markPrice")?,
-        mark_iv: decimal_field(value, "markIV")?,
         delta: decimal_field(value, "delta")?,
         high_price_limit: optional_decimal_field(value, "highPriceLimit")?.unwrap_or(Decimal::ZERO),
         low_price_limit: optional_decimal_field(value, "lowPriceLimit")?.unwrap_or(Decimal::ZERO),

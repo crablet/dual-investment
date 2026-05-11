@@ -8,7 +8,6 @@ import type {
   AdoptOptionPositionsRequest,
   AppSettings,
   AppSnapshot,
-  AutoInvestmentRule,
   CandidateScanResult,
   ConnectBinanceRequest,
   FundingAttemptView,
@@ -17,7 +16,6 @@ import type {
   ResolveFundingAttemptRequest,
   StrategyOrder,
   StrategyRequest,
-  ToggleAutoRequest,
 } from '@/types/domain'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -47,9 +45,6 @@ export const api = {
   scanCandidates: () => call<CandidateScanResult>('scan_candidates'),
   placeManualStrategy: (request: StrategyRequest) =>
     call<StrategyOrder>('place_manual_strategy', { request }),
-  saveAutoRule: (rule: AutoInvestmentRule) => call<AutoInvestmentRule>('save_auto_rule', { rule }),
-  toggleAutoStrategy: (request: ToggleAutoRequest) =>
-    call<AppSettings>('toggle_auto_strategy', { request }),
   recoverOrderAttempt: (attemptId: string) =>
     call<StrategyOrder>('recover_order_attempt', { attemptId }),
   recoverFundingAttempt: (attemptId: string) =>
@@ -62,7 +57,6 @@ export const api = {
     call<StrategyOrder[]>('adopt_option_positions', { request }),
   syncLiveState: () => call<AppSnapshot>('sync_live_state'),
   runSettlementScan: () => call<StrategyOrder[]>('run_settlement_scan'),
-  runAutoOnce: () => call<StrategyOrder | null>('run_auto_once'),
   getLogSnapshot: () => call<LogSnapshot>('get_log_snapshot'),
   openCurrentLogFile: () => call<void>('open_current_log_file'),
   openLogFolder: () => call<void>('open_log_folder'),

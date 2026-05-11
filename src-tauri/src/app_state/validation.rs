@@ -1,6 +1,6 @@
 //! 应用状态层校验规则。
 //!
-//! 本模块在真实下单、自动执行和到期补齐前校验业务边界、Binance 合约过滤器、
+//! 本模块在真实下单和到期补齐前校验业务边界、Binance 合约过滤器、
 //! 精度、保证金和本地风控。前端传入的字段只能作为请求意图，最终以这里和 Binance
 //! 返回的事实为准。
 
@@ -10,9 +10,9 @@ use rust_decimal_macros::dec;
 
 use super::funding::{spot_asset_free, spot_rebalance_required_asset};
 use crate::domain::{
-    AppError, AppResult, AutoInvestmentRule, OptionAccountSnapshot, OptionContract,
-    OptionMarkPrice, SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyOrderSource,
-    StrategyRequest, StrategyStatus,
+    AppError, AppResult, OptionAccountSnapshot, OptionContract, OptionMarkPrice,
+    SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyOrderSource, StrategyRequest,
+    StrategyStatus,
 };
 use crate::strategy;
 
@@ -33,19 +33,6 @@ pub(super) fn validate_request(request: &StrategyRequest) -> AppResult<()> {
     }
     if request.limit_price <= Decimal::ZERO {
         return Err(AppError::RiskRejected("限价必须大于 0".to_string()));
-    }
-    Ok(())
-}
-
-/// 校验自动复投规则边界。
-pub(super) fn validate_auto_rule(rule: &AutoInvestmentRule) -> AppResult<()> {
-    if rule.quantity < dec!(0.01) {
-        return Err(AppError::RiskRejected(
-            "自动定投数量不能小于 0.01 张".to_string(),
-        ));
-    }
-    if rule.min_days_to_expiry < 1 || rule.max_days_to_expiry < rule.min_days_to_expiry {
-        return Err(AppError::RiskRejected("到期天数区间无效".to_string()));
     }
     Ok(())
 }
@@ -263,13 +250,6 @@ pub(super) fn validate_spot_rebalance(
         )));
     }
     Ok(())
-}
-
-pub(super) fn should_consume_auto_day_after_error(error: &AppError) -> bool {
-    match error {
-        AppError::Binance(message) => message.contains("未成交终态"),
-        _ => true,
-    }
 }
 
 /// 判断下单/现货补齐请求是否处于结果不确定状态，需要先查交易所事实再恢复。

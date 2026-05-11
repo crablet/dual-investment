@@ -33,7 +33,6 @@ pub(super) fn request_from_option_attempt(
         ack.avg_price
     };
     Ok(StrategyRequest {
-        candidate_id: None,
         client_flow_id: None,
         symbol: attempt.symbol.clone(),
         option_symbol: Some(attempt.option_symbol.clone()),

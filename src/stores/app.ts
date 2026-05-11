@@ -8,14 +8,12 @@ import type {
   AdoptOptionPositionsRequest,
   AppSettings,
   AppSnapshot,
-  AutoInvestmentRule,
   ConnectBinanceRequest,
   FundingAttemptManualResolution,
   OrderProgressEvent,
   OrderProgressStatus,
   StrategyOrder,
   StrategyRequest,
-  ToggleAutoRequest,
 } from '@/types/domain'
 import type {
   MetricCardModel,
@@ -51,11 +49,9 @@ type RequestKey
     | 'scan'
     | 'sync'
     | 'settlement'
-    | 'auto'
     | 'recover'
     | 'adopt'
     | 'order'
-    | 'rule'
 
 /** 请求包装选项。silent 请求用于后台轮询，不清空前台错误提示。 */
 interface RunOptions {
@@ -86,11 +82,9 @@ function emptyPending(): Record<RequestKey, number> {
     scan: 0,
     sync: 0,
     settlement: 0,
-    auto: 0,
     recover: 0,
     adopt: 0,
     order: 0,
-    rule: 0,
   }
 }
 
@@ -121,7 +115,6 @@ export const useAppStore = defineStore('app', () => {
   const orders = computed(() => snapshot.value?.orders ?? [])
   const pnl = computed(() => snapshot.value?.pnl)
   const risk = computed(() => snapshot.value?.risk)
-  const autoRule = computed(() => snapshot.value?.autoRule)
   const health = computed(() => snapshot.value?.health)
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
   const fundingAttempts = computed(() => snapshot.value?.fundingAttempts ?? [])
@@ -252,7 +245,6 @@ export const useAppStore = defineStore('app', () => {
       ? orderProgress.value
       : {
           flowId: event.flowId,
-          source: event.source,
           status: 'running' as OrderProgressStatus,
           startedAt: event.timestamp,
           updatedAt: event.timestamp,
@@ -320,7 +312,6 @@ export const useAppStore = defineStore('app', () => {
       ? orderProgress.value
       : {
           flowId,
-          source: 'manual',
           status: 'running' as OrderProgressStatus,
           startedAt: now,
           updatedAt: now,
@@ -352,7 +343,7 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  /** 应用启动：先读取快照，再尝试用 keyring 凭据自动连接，但不自动开启策略。 */
+  /** 应用启动：先读取快照，再尝试用 keyring 凭据自动连接。连接后的实盘同步可能推进既有结算或资金动作。 */
   async function bootstrap() {
     await refresh()
     if (snapshot.value?.settings.savedCredentials && !snapshot.value.settings.connected) {
@@ -377,7 +368,7 @@ export const useAppStore = defineStore('app', () => {
     const next = await run('connect', () => api.connectSavedBinance(), options)
     patchSettings(next)
     if (next?.connected) {
-      // 自动重连只恢复连接和同步快照，不会开启自动策略或发起资金/订单动作。
+      // 自动重连成功后会执行完整实盘同步；它不创建新的期权策略订单，但可能推进既有结算、补齐和资金收尾。
       resetAutoReconnect()
       await syncLiveState(options)
       return true
@@ -435,7 +426,7 @@ export const useAppStore = defineStore('app', () => {
     await refreshViewData(view)
   }
 
-  /** 根据视图刷新所需数据。重复点击导航只刷新数据，不会自动开启策略或下单。 */
+  /** 根据视图刷新所需数据；实盘同步不创建新的期权策略订单，但可能推进既有恢复、结算和资金动作。 */
   async function refreshViewData(view: AppViewId = activeView.value, options: RunOptions = {}) {
     if (view === 'dual') {
       if (settings.value?.connected) {
@@ -481,14 +472,6 @@ export const useAppStore = defineStore('app', () => {
     if (next && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: mergeOrdersByUpdatedAt(next, snapshot.value.orders) }
       // 结算扫描可能产生风险状态、恢复记录或资金结果，完成后拉完整快照校正局部合并。
-      await refresh()
-    }
-  }
-
-  async function runAutoOnce() {
-    const order = await run('auto', () => api.runAutoOnce())
-    if (order && snapshot.value) {
-      snapshot.value = { ...snapshot.value, orders: [order, ...snapshot.value.orders] }
       await refresh()
     }
   }
@@ -560,25 +543,6 @@ export const useAppStore = defineStore('app', () => {
     await refresh({ silent: true })
   }
 
-  async function saveRule(rule: AutoInvestmentRule) {
-    const next = await run('rule', () => api.saveAutoRule(rule))
-    if (next && snapshot.value) {
-      snapshot.value = { ...snapshot.value, autoRule: next }
-    }
-  }
-
-  async function toggleAuto(request: ToggleAutoRequest) {
-    const next = await run('rule', () => api.toggleAutoStrategy(request))
-    patchSettings(next)
-    if (snapshot.value?.autoRule) {
-      // 前端先同步开关展示；二次确认、待恢复阻断和真实执行门禁都在 Rust 侧兜底。
-      snapshot.value = {
-        ...snapshot.value,
-        autoRule: { ...snapshot.value.autoRule, enabled: request.enabled },
-      }
-    }
-  }
-
   function patchSettings(next?: AppSettings) {
     if (next && snapshot.value) {
       snapshot.value = { ...snapshot.value, settings: next }
@@ -624,7 +588,6 @@ export const useAppStore = defineStore('app', () => {
     pnl,
     pnlBreakdown,
     risk,
-    autoRule,
     health,
     orderAttempts,
     fundingAttempts,
@@ -643,15 +606,12 @@ export const useAppStore = defineStore('app', () => {
     scan,
     syncLiveState,
     runSettlementScan,
-    runAutoOnce,
     recoverAttempt,
     recoverFundingAttempt,
     resolveFundingAttempt,
     loadAdoptableOptionPositions,
     adoptOptionPositions,
     placeStrategy,
-    saveRule,
-    toggleAuto,
     openView,
     refreshViewData,
   }

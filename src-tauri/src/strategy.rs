@@ -1,14 +1,13 @@
 //! 策略计算与风控派生逻辑。
 //!
-//! 这个模块只处理纯业务计算：候选过滤、收益估算、风险快照、订单状态归一化和
-//! 自动复投默认规则。它不直接访问 Binance、不保存数据，也不读取系统凭据。
+//! 这个模块只处理纯业务计算：候选过滤、收益估算、风险快照和订单状态归一化。
+//! 它不直接访问 Binance、不保存数据，也不读取系统凭据。
 
 mod balances;
 mod candidates;
 mod math;
 mod orders;
 mod risk;
-mod rules;
 
 pub use balances::{
     build_balances, build_simple_earn_balances, build_spot_balances,
@@ -23,4 +22,3 @@ pub use risk::{
     DEFAULT_MARGIN_USAGE_TOLERANCE_POINTS, DEFAULT_MAX_MARGIN_USAGE, empty_risk_snapshot,
     risk_snapshot_from_account,
 };
-pub use rules::default_auto_rule;

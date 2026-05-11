@@ -1,7 +1,7 @@
 <!--
 双币赢工作台。
 
-统一承载候选浏览、手动下单和自动复投规则；没有独立自动复投页面或 mock 数据路径。
+统一承载候选浏览和手动下单；没有 mock 数据路径。
 -->
 <script setup lang="ts">
 import type { StrategyCandidate } from '@/types/domain'
@@ -9,23 +9,17 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   RefreshCw,
-  Save,
-  ShieldCheck,
   Zap,
 } from '@lucide/vue'
 import {
   NButton,
-  NCheckbox,
   NIcon,
   NInputNumber,
-  NSlider,
-  NSwitch,
 } from 'naive-ui'
 import { shallowRef } from 'vue'
 import OrderProgressPanel from '@/components/common/OrderProgressPanel.vue'
 import CandidateTable from '@/components/dual/CandidateTable.vue'
 import OrderReviewDialog from '@/components/orders/OrderReviewDialog.vue'
-import { useAutoRuleForm } from '@/composables/useAutoRuleForm'
 import {
   expiryFilters,
   useDualInvestmentCandidates,
@@ -67,13 +61,6 @@ const {
   selectCandidate,
   resetCandidateFilters,
 } = useDualInvestmentCandidates()
-const {
-  advancedAutoOpen,
-  ruleForm,
-  saveAutoRule,
-  toggleAuto,
-  runAutoNow,
-} = useAutoRuleForm()
 const orderReviewVisible = shallowRef(false)
 const orderReview = shallowRef<ManualOrderReview>()
 
@@ -121,7 +108,6 @@ function confirmOrderReview() {
   const { candidate, quantity } = review
   // 手动下单也走真实 Binance 订单，只有复核弹窗确认后才传 `confirmLive: true`。
   void store.placeStrategy({
-    candidateId: candidate.id,
     symbol: candidate.symbol,
     optionSymbol: candidate.optionSymbol,
     direction: candidate.direction,
@@ -285,69 +271,6 @@ function confirmOrderReview() {
           @close="store.clearOrderProgress"
           @view-orders="store.openView('orders')"
         />
-      </section>
-
-      <section class="auto-card">
-        <header>
-          <div>
-            <span class="order-eyebrow">自动复投</span>
-            <h3>{{ store.settings?.autoEnabled ? '已启用' : '未启用' }}</h3>
-          </div>
-          <NSwitch :value="store.settings?.autoEnabled ?? false" @update:value="toggleAuto" />
-        </header>
-
-        <div class="auto-card-body">
-          <label>
-            扫描计划
-            <input v-model="ruleForm.schedule" class="native-input">
-          </label>
-          <label>
-            每次下单数量
-            <NInputNumber v-model:value="ruleForm.quantity" :min="0.01" :step="0.01" />
-          </label>
-
-          <button class="advanced-toggle" type="button" @click="advancedAutoOpen = !advancedAutoOpen">
-            <span>筛选条件</span>
-            <strong>{{ percent(ruleForm.minAnnualized) }} 起</strong>
-          </button>
-
-          <div v-if="advancedAutoOpen" class="auto-rule-grid">
-            <label>
-              预计年化 ≥ {{ percent(ruleForm.minAnnualized) }}
-              <NSlider v-model:value="ruleForm.minAnnualized" :min="5" :max="60" :step="1" />
-            </label>
-            <label>
-              Delta 绝对值 ≤ {{ ruleForm.maxDeltaAbs }}
-              <NSlider v-model:value="ruleForm.maxDeltaAbs" :min="0.05" :max="0.8" :step="0.01" />
-            </label>
-            <label>
-              Mark IV 代理 ≤ {{ percent(ruleForm.maxIvRank, 0) }}
-              <NSlider v-model:value="ruleForm.maxIvRank" :min="10" :max="100" :step="1" />
-            </label>
-            <div class="range-row compact-range">
-              <span>到期</span>
-              <NInputNumber v-model:value="ruleForm.minDaysToExpiry" :min="1" />
-              <span>至</span>
-              <NInputNumber v-model:value="ruleForm.maxDaysToExpiry" :min="ruleForm.minDaysToExpiry" />
-              <span>天</span>
-            </div>
-            <div class="checkbox-row">
-              <NCheckbox v-model:checked="ruleForm.includeBtc">BTC</NCheckbox>
-              <NCheckbox v-model:checked="ruleForm.excludeSameDirection">排除同方向持仓</NCheckbox>
-            </div>
-          </div>
-        </div>
-
-        <div class="auto-actions">
-          <NButton secondary :loading="store.isLoading('rule')" @click="saveAutoRule">
-            <template #icon><NIcon :component="Save" /></template>
-            保存规则
-          </NButton>
-          <NButton secondary :disabled="!store.settings?.autoEnabled" :loading="store.isLoading('auto')" @click="runAutoNow">
-            <template #icon><NIcon :component="ShieldCheck" /></template>
-            执行一次
-          </NButton>
-        </div>
       </section>
     </aside>
 

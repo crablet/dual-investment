@@ -21,7 +21,7 @@ use std::{
     time::Duration as StdDuration,
 };
 
-use chrono::{Duration, Local, NaiveDate, Utc};
+use chrono::{Duration, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tauri::AppHandle;
@@ -33,9 +33,8 @@ use self::adoption::{
     normalized_unique_symbols,
 };
 use self::funding::{
-    flexible_earn_asset_amount, option_funding_shortfall, option_idle_usdt_sweep_amount,
-    round_down_funding_amount, round_up_funding_amount, spot_asset_free,
-    spot_rebalance_required_asset,
+    option_funding_shortfall, option_idle_usdt_sweep_amount, round_down_funding_amount,
+    round_up_funding_amount, spot_asset_free, spot_rebalance_required_asset,
 };
 use self::orders::{
     apply_option_ack, apply_option_position, apply_spot_ack, combined_balances, is_spot_attempt,
@@ -44,25 +43,24 @@ use self::orders::{
 use self::progress::OrderProgressEmitter;
 use self::runtime::{
     client_from_runtime, join_binance_request, make_client_order_id, make_spot_client_order_id,
-    parse_schedule_time, spawn_binance_request, verify_binance_access,
+    spawn_binance_request, verify_binance_access,
 };
 use self::validation::{
     enforce_risk_rules, has_exchange_order_ref, is_in_the_money, is_trackable_order,
-    is_uncertain_submit_error, resolve_contract, should_consume_auto_day_after_error,
-    should_settle_order, should_sync_option_order, validate_auto_rule, validate_contract_order,
-    validate_contract_terms, validate_request, validate_spot_rebalance,
+    is_uncertain_submit_error, resolve_contract, should_settle_order, should_sync_option_order,
+    validate_contract_order, validate_contract_terms, validate_request, validate_spot_rebalance,
 };
 use crate::binance::BinanceClient;
 use crate::domain::{
     AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppError, AppResult, AppSettings,
-    AppSnapshot, AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest, FundingAttempt,
-    FundingAttemptKind, FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView,
-    LogLevel, LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
+    AppSnapshot, CandidateScanResult, ConnectBinanceRequest, FundingAttempt, FundingAttemptKind,
+    FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView, LogLevel,
+    LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
     OrderAttemptStatus, OrderAttemptView, OrderProgressStage, OrderProgressStatus,
     ResolveFundingAttemptRequest, RuntimeHealth, RuntimeHealthStatus, SettlementSweep,
     SettlementSweepStatus, SimpleEarnRedemptionRecord, SimpleEarnSnapshot,
     SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate, StrategyDirection,
-    StrategyOrder, StrategyRequest, StrategyStatus, ToggleAutoRequest, UniversalTransferRecord,
+    StrategyOrder, StrategyRequest, StrategyStatus, UniversalTransferRecord,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -404,7 +402,6 @@ fn is_uncertain_funding_error(error: &AppError) -> bool {
 /// API Key 和 Secret 只允许留在内存中用于重建 Binance 客户端，不能写入日志、
 /// `SQLite` 或前端快照；前端只能通过 `settings()` 获取脱敏状态。
 #[derive(Clone, Debug)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct RuntimeConfig {
     /// 当前进程是否已经验证过 Binance 连接和交易权限。
     pub connected: bool,
@@ -414,8 +411,6 @@ pub struct RuntimeConfig {
     pub api_secret: Option<String>,
     /// 系统 keyring 是否存在完整凭据。
     pub saved_credentials: bool,
-    /// 自动策略开关；启动时默认 false，避免重启后直接自动下单。
-    pub auto_enabled: bool,
     /// 手动下单体验开关，不绕过后端真实下单门禁。
     pub quick_execution: bool,
 }
@@ -427,7 +422,6 @@ impl Default for RuntimeConfig {
             api_key: None,
             api_secret: None,
             saved_credentials: secrets::has_binance_credentials(),
-            auto_enabled: false,
             quick_execution: true,
         }
     }
@@ -439,7 +433,6 @@ impl RuntimeConfig {
         AppSettings {
             connected: self.connected,
             saved_credentials: self.saved_credentials,
-            auto_enabled: self.auto_enabled,
             quick_execution: self.quick_execution,
         }
     }
@@ -454,12 +447,10 @@ pub struct AppState {
     runtime: Arc<RwLock<RuntimeConfig>>,
     client: Arc<RwLock<Option<BinanceClient>>>,
     candidates: Arc<RwLock<Vec<StrategyCandidate>>>,
-    auto_rule: Arc<RwLock<AutoInvestmentRule>>,
     orders: Arc<RwLock<Vec<StrategyOrder>>>,
     persistence: Arc<Mutex<Persistence>>,
     logs: Arc<LogStore>,
     worker_started: Arc<AtomicBool>,
-    last_auto_scan_day: Arc<RwLock<Option<NaiveDate>>>,
     health: Arc<RwLock<RuntimeHealthState>>,
     maintenance_lock: Arc<AsyncMutex<()>>,
     trade_lock: Arc<AsyncMutex<()>>,
@@ -477,29 +468,21 @@ impl AppState {
 
     /// 从持久化层恢复状态。
     ///
-    /// 启动时只加载仍可跟踪的订单，包括没有原始订单号的接管订单；自动策略强制关闭，
-    /// 避免应用重启后直接自动下单。
+    /// 启动时只加载仍可跟踪的订单，包括没有原始订单号的接管订单。
     fn from_persistence(persistence: Persistence, logs: LogStore) -> AppResult<Self> {
         let orders = persistence
             .list_orders()?
             .into_iter()
             .filter(is_trackable_order)
             .collect();
-        let mut auto_rule = persistence
-            .load_auto_rule()?
-            .unwrap_or_else(|| strategy::default_auto_rule(false));
-        auto_rule.enabled = false;
-
         let state = Self {
             runtime: Arc::new(RwLock::new(RuntimeConfig::default())),
             client: Arc::new(RwLock::new(None)),
             candidates: Arc::new(RwLock::new(Vec::new())),
-            auto_rule: Arc::new(RwLock::new(auto_rule)),
             orders: Arc::new(RwLock::new(orders)),
             persistence: Arc::new(Mutex::new(persistence)),
             logs: Arc::new(logs),
             worker_started: Arc::new(AtomicBool::new(false)),
-            last_auto_scan_day: Arc::new(RwLock::new(None)),
             health: Arc::new(RwLock::new(RuntimeHealthState::default())),
             maintenance_lock: Arc::new(AsyncMutex::new(())),
             trade_lock: Arc::new(AsyncMutex::new(())),
@@ -513,7 +496,6 @@ impl AppState {
     /// 已连接时会实时读取 Binance 账户和现货价格；未连接时返回本地缓存和明确的空风险/收益状态。
     pub async fn snapshot(&self) -> AppResult<AppSnapshot> {
         let settings = self.runtime.read().await.settings();
-        let auto_rule = self.auto_rule.read().await.clone();
         let candidates = self.candidates.read().await.clone();
         let orders = self.orders.read().await.clone();
         let accounts = self.live_accounts_if_connected().await?;
@@ -563,7 +545,6 @@ impl AppState {
                 strategy::risk_snapshot_from_account,
             ),
             settings,
-            auto_rule,
             orders,
             order_attempts,
             funding_attempts,
@@ -657,7 +638,6 @@ impl AppState {
         runtime.connected = false;
         runtime.api_key = None;
         runtime.api_secret = None;
-        runtime.auto_enabled = false;
         runtime.saved_credentials = false;
         let settings = runtime.settings();
         drop(runtime);
@@ -669,10 +649,6 @@ impl AppState {
             let mut candidates = self.candidates.write().await;
             candidates.clear();
         }
-        {
-            let mut rule = self.auto_rule.write().await;
-            rule.enabled = false;
-        }
         self.record_log(
             "account.credentials.deleted",
             "已从系统 keyring 删除 Binance API 凭据",
@@ -682,13 +658,9 @@ impl AppState {
 
     /// 从 Binance 实盘数据扫描候选，并缓存给前端快照使用。
     ///
-    /// 账户、合约、mark greeks、期权买一价和现货价格并发读取，减少一次刷新候选的等待时间。
+    /// 合约、mark greeks、期权买一价和现货价格并发读取，减少一次刷新候选的等待时间。
     pub async fn scan_candidates(&self) -> AppResult<CandidateScanResult> {
         let client = self.live_client().await?;
-        let account_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.option_account().await }
-        });
         let contracts_task = spawn_binance_request({
             let client = client.clone();
             async move { client.exchange_info().await }
@@ -701,45 +673,23 @@ impl AppState {
             let client = client.clone();
             async move { client.option_tickers().await }
         });
-        let spot_account_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.spot_account().await }
-        });
-        let earn_task = spawn_binance_request({
-            let client = client.clone();
-            async move { client.simple_earn_snapshot().await }
-        });
         let spot_price_task = spawn_binance_request({
             let client = client.clone();
             async move { client.spot_price("BTCUSDT").await }
         });
-        let auto_rule = self.auto_rule.read().await.clone();
-        let orders = self.orders.read().await.clone();
-        let account = join_binance_request(account_task).await;
         let contracts = join_binance_request(contracts_task).await;
         let marks = join_binance_request(marks_task).await;
         let tickers = join_binance_request(tickers_task).await;
-        let spot_account = join_binance_request(spot_account_task).await;
-        let earn = join_binance_request(earn_task).await;
         let spot_price = join_binance_request(spot_price_task).await;
-        let account = account?;
         let contracts = contracts?;
         let marks = marks?;
         let tickers = tickers?;
-        let spot_account = spot_account?;
-        let earn = earn?;
         let spot_price = spot_price?;
-        let funding_available_usdt =
-            spot_asset_free(&spot_account, "USDT") + flexible_earn_asset_amount(&earn, "USDT");
         let result = strategy::build_candidates(strategy::CandidateBuildInputs {
             contracts: &contracts,
             marks: &marks,
             tickers: &tickers,
-            rule: &auto_rule,
-            account: &account,
-            orders: &orders,
             spot_price,
-            funding_available_usdt,
         });
         {
             let mut cached_candidates = self.candidates.write().await;
@@ -780,70 +730,7 @@ impl AppState {
                 "存在待确认恢复记录，已暂停新的真实下单".to_string(),
             ));
         }
-        self.place_live_strategy(request, "manual", &progress).await
-    }
-
-    /// 保存自动复投规则。
-    ///
-    /// 保存规则不改变自动策略开启状态；开启/关闭必须走 `toggle_auto_strategy`。
-    pub async fn save_auto_rule(&self, rule: AutoInvestmentRule) -> AppResult<AutoInvestmentRule> {
-        let mut rule = rule;
-        validate_auto_rule(&rule)?;
-        rule.enabled = self.runtime.read().await.auto_enabled;
-        {
-            let mut stored = self.auto_rule.write().await;
-            *stored = rule.clone();
-        }
-        self.persistence
-            .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
-            .save_auto_rule(&rule)?;
-        self.record_log("strategy.rule.saved", "自动定投规则已保存")?;
-        Ok(rule)
-    }
-
-    /// 开启或暂停自动复投。
-    ///
-    /// 开启时必须已连接 Binance，并且请求里带有二次确认。
-    pub async fn toggle_auto_strategy(&self, request: ToggleAutoRequest) -> AppResult<AppSettings> {
-        let mut runtime = self.runtime.write().await;
-        if request.enabled && !runtime.connected {
-            return Err(AppError::Config("请先连接 Binance API".to_string()));
-        }
-        if request.enabled && !request.confirm_live {
-            return Err(AppError::RiskRejected(
-                "自动策略开启需要二次确认".to_string(),
-            ));
-        }
-        if request.enabled && self.pending_recovery_count()? > 0 {
-            return Err(AppError::RiskRejected(
-                "存在待确认恢复记录，已暂停开启自动策略".to_string(),
-            ));
-        }
-        runtime.auto_enabled = request.enabled;
-        let settings = runtime.settings();
-        drop(runtime);
-
-        {
-            let mut rule = self.auto_rule.write().await;
-            rule.enabled = request.enabled;
-            self.persistence
-                .lock()
-                .map_err(|error| AppError::Storage(error.to_string()))?
-                .save_auto_rule(&rule)?;
-        }
-        if request.enabled {
-            self.ensure_background_worker();
-        }
-        self.record_log(
-            "strategy.auto.toggled",
-            if request.enabled {
-                "自动定投已启用，后台调度器会按规则扫描并自动下单"
-            } else {
-                "自动定投已暂停"
-            },
-        )?;
-        Ok(settings)
+        self.place_live_strategy(request, &progress).await
     }
 
     /// 根据恢复记录重新查询 Binance 并恢复本地订单状态。
@@ -1055,33 +942,6 @@ impl AppState {
         self.settle_due_orders().await
     }
 
-    /// 手动执行一次自动策略。
-    ///
-    /// 如果存在推荐候选，会直接发送 Binance 订单，因此必须要求自动策略已启用。
-    pub async fn run_auto_once(&self) -> AppResult<Option<StrategyOrder>> {
-        let runtime = self.runtime.read().await.clone();
-        if !runtime.connected {
-            return Err(AppError::Config("请先连接 Binance API".to_string()));
-        }
-        if !runtime.auto_enabled {
-            return Err(AppError::RiskRejected("自动定投未启用".to_string()));
-        }
-        let _maintenance_guard = self.maintenance_lock.lock().await;
-        self.recover_due_funding_attempts().await?;
-        if self.pending_recovery_count()? > 0 {
-            return Err(AppError::RiskRejected(
-                "存在待确认恢复记录，已暂停自动策略".to_string(),
-            ));
-        }
-        self.run_due_settlement_sweeps().await?;
-        if self.pending_recovery_count()? > 0 {
-            return Err(AppError::RiskRejected(
-                "存在待确认恢复记录，已暂停自动策略".to_string(),
-            ));
-        }
-        self.execute_auto_strategy().await
-    }
-
     /// 返回设置页日志快照。
     pub fn log_snapshot(&self) -> AppResult<LogSnapshot> {
         self.logs.snapshot()
@@ -1184,7 +1044,6 @@ impl AppState {
     async fn place_live_strategy(
         &self,
         mut request: StrategyRequest,
-        source: &str,
         progress: &OrderProgressEmitter,
     ) -> AppResult<StrategyOrder> {
         progress.emit(
@@ -1417,7 +1276,7 @@ impl AppState {
             return Err(error);
         }
         if let Err(error) = self.record_log(
-            &format!("strategy.order.{source}.attempted"),
+            "strategy.order.manual.attempted",
             &format!(
                 "{} {} {} 张，合约 {}，价格 {}",
                 request.symbol,
@@ -1442,7 +1301,7 @@ impl AppState {
             Err(error) => {
                 if is_uncertain_submit_error(&error) {
                     self.record_warning(
-                        &format!("strategy.order.{source}.submit_uncertain"),
+                        "strategy.order.manual.submit_uncertain",
                         &format!(
                             "{} 下单请求结果不确定，正在按客户端订单号查询 Binance",
                             contract.symbol
@@ -1522,7 +1381,7 @@ impl AppState {
             attempt.updated_at = Utc::now();
             self.save_order_attempt(&attempt)?;
             self.record_log(
-                &format!("strategy.order.{source}.failed"),
+                "strategy.order.manual.failed",
                 &format!("{} {}", contract.symbol, message),
             )?;
             progress.emit(
@@ -1570,7 +1429,7 @@ impl AppState {
             return Err(error);
         }
         if let Err(error) = self.record_log(
-            &format!("strategy.order.{source}.created"),
+            "strategy.order.manual.created",
             &format!(
                 "{} {} {} 张，执行价 {}，交易所状态 {}",
                 order.symbol,
@@ -2196,44 +2055,9 @@ impl AppState {
         Ok(())
     }
 
-    /// 执行一次自动策略：扫描候选并选择第一条推荐机会下单。
-    async fn execute_auto_strategy(&self) -> AppResult<Option<StrategyOrder>> {
-        let result = self.scan_candidates().await?;
-        // 自动策略只接受 Rust 策略层标记为 Recommended 的第一条候选，不在前端重新排名。
-        let Some(candidate) = result.candidates.into_iter().find(|candidate| {
-            candidate.recommendation == crate::domain::RecommendationLevel::Recommended
-        }) else {
-            self.record_log("strategy.auto.no_candidate", "本次自动扫描无推荐候选")?;
-            return Ok(None);
-        };
-
-        let _trade_guard = self.trade_lock.lock().await;
-        // 进入 place_live_strategy 后不再逐笔确认；是否允许自动下单由开启自动策略时的门禁决定。
-        let order = self
-            .place_live_strategy(
-                StrategyRequest {
-                    candidate_id: Some(candidate.id),
-                    client_flow_id: None,
-                    symbol: candidate.symbol,
-                    option_symbol: Some(candidate.option_symbol),
-                    direction: candidate.direction,
-                    expiry: candidate.expiry,
-                    expiry_at: candidate.expiry_at,
-                    strike: candidate.strike,
-                    quantity: candidate.quantity,
-                    limit_price: candidate.limit_price,
-                    confirm_live: true,
-                },
-                "auto",
-                &OrderProgressEmitter::disabled("auto"),
-            )
-            .await?;
-        Ok(Some(order))
-    }
-
     /// 后台轮询任务的一次 tick。
     ///
-    /// 只做同步、结算和按计划自动扫描，不会在未启用自动策略时下单。
+    /// 只做恢复、订单同步和到期结算，不会创建新的策略订单。
     async fn background_tick(&self) -> AppResult<()> {
         if !self.runtime.read().await.connected {
             return Ok(());
@@ -2248,48 +2072,7 @@ impl AppState {
             return Ok(());
         }
         self.settle_due_orders().await?;
-        if self.should_run_auto_now().await {
-            match self.execute_auto_strategy().await {
-                Ok(_) => self.mark_auto_scan_day().await,
-                Err(error) => {
-                    if should_consume_auto_day_after_error(&error) {
-                        self.mark_auto_scan_day().await;
-                    }
-                    return Err(error);
-                }
-            }
-        }
         Ok(())
-    }
-
-    /// 判断当前是否到了当天自动策略执行时间。
-    ///
-    /// `last_auto_scan_day` 确保每天最多自动执行一次。
-    async fn should_run_auto_now(&self) -> bool {
-        let runtime = self.runtime.read().await.clone();
-        if !runtime.connected || !runtime.auto_enabled {
-            return false;
-        }
-        let rule = self.auto_rule.read().await.clone();
-        if !rule.enabled {
-            return false;
-        }
-        if self.pending_recovery_count().unwrap_or(1) > 0 {
-            return false;
-        }
-        let now = Local::now();
-        let scheduled = parse_schedule_time(&rule.schedule);
-        if now.time() < scheduled {
-            return false;
-        }
-        let today = now.date_naive();
-        *self.last_auto_scan_day.read().await != Some(today)
-    }
-
-    async fn mark_auto_scan_day(&self) {
-        let today = Local::now().date_naive();
-        let mut last = self.last_auto_scan_day.write().await;
-        *last = Some(today);
     }
 
     /// 启动后台轮询任务。

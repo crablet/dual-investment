@@ -1,7 +1,7 @@
-//! 双币赢候选扫描与推荐排序。
+//! 双币赢候选扫描与排序。
 //!
-//! 输入数据来自 Binance 合约、买一价、mark greeks、账户快照和本地真实订单。
-//! 这里只构造可展示候选和推荐等级，不发送订单，也不把规则不命中的候选直接隐藏成“没有机会”。
+//! 输入数据来自 Binance 合约、买一价、mark greeks 和现货价格。
+//! 这里只构造可展示候选，不发送订单。
 
 use std::collections::HashMap;
 
@@ -11,30 +11,26 @@ use rust_decimal_macros::dec;
 
 use super::math::{abs_decimal, align_decimal_down_to_step, max_decimal, min_decimal};
 use crate::domain::{
-    AutoInvestmentRule, CandidateScanResult, OptionAccountSnapshot, OptionContract,
-    OptionMarkPrice, OptionOrderBook, OptionTicker, RecommendationLevel, StrategyCandidate,
-    StrategyDirection, StrategyOrder, StrategyStatus,
+    CandidateScanResult, OptionContract, OptionMarkPrice, OptionOrderBook, OptionTicker,
+    StrategyCandidate, StrategyDirection, StrategyStatus,
 };
 
 const BROWSE_MIN_DAYS_TO_EXPIRY: i64 = 1;
 const BROWSE_MAX_DAYS_TO_EXPIRY: i64 = 90;
+const DEFAULT_CANDIDATE_QUANTITY: Decimal = dec!(0.01);
 
-/// 候选扫描所需的 Binance 实盘输入和本地状态。
+/// 候选扫描所需的 Binance 实盘输入。
 #[derive(Clone, Copy)]
 pub struct CandidateBuildInputs<'a> {
     pub contracts: &'a [OptionContract],
     pub marks: &'a [OptionMarkPrice],
     pub tickers: &'a [OptionTicker],
-    pub rule: &'a AutoInvestmentRule,
-    pub account: &'a OptionAccountSnapshot,
-    pub orders: &'a [StrategyOrder],
     pub spot_price: Decimal,
-    pub funding_available_usdt: Decimal,
 }
 
-/// 根据 Binance 合约、买一价、mark greeks、账户和规则构造候选列表。
+/// 根据 Binance 合约、买一价、mark greeks 和现货价格构造候选列表。
 ///
-/// 候选可见范围固定为到期 1-90 天；自动复投规则只影响推荐等级，不决定候选是否可见。
+/// 候选可见范围固定为到期 1-90 天，并使用 0.01 张作为手动下单初始数量。
 /// 方向过滤必须使用 BTCUSDT 现货价：低买只保留现货价下方 Put，高卖只保留现货价上方 Call。
 #[allow(clippy::too_many_lines)]
 pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult {
@@ -42,11 +38,7 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
         contracts,
         marks,
         tickers,
-        rule,
-        account,
-        orders,
         spot_price,
-        funding_available_usdt,
     } = inputs;
 
     if spot_price <= Decimal::ZERO {
@@ -63,18 +55,6 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
         .iter()
         .map(|ticker| (ticker.symbol.as_str(), ticker))
         .collect::<HashMap<_, _>>();
-    let has_open_direction = |direction| {
-        orders.iter().any(|order| {
-            order.direction == direction
-                && matches!(
-                    order.status,
-                    StrategyStatus::Pending
-                        | StrategyStatus::Running
-                        | StrategyStatus::PartiallyFilled
-                )
-        })
-    };
-
     let mut candidates = Vec::new();
 
     for contract in contracts {
@@ -86,7 +66,9 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
             continue;
         }
 
-        if rule.quantity < contract.min_qty || rule.quantity > contract.max_qty {
+        if DEFAULT_CANDIDATE_QUANTITY < contract.min_qty
+            || DEFAULT_CANDIDATE_QUANTITY > contract.max_qty
+        {
             continue;
         }
 
@@ -112,8 +94,7 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
             }
 
             let delta_abs = abs_decimal(mark.delta);
-            let iv_rank = (mark.mark_iv * dec!(100)).round_dp(2);
-            let quantity = rule.quantity;
+            let quantity = DEFAULT_CANDIDATE_QUANTITY;
             // 候选展示使用 Binance 买一价估算卖出 IOC 的可主动成交限价；
             // 真实下单前会重新读取订单簿并按当时买盘深度重算。
             let limit_price = option_sell_taker_limit_price(ticker.bid_price, contract);
@@ -134,39 +115,6 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
                 StrategyDirection::SellPut => contract.strike_price - limit_price,
                 StrategyDirection::SellCall => contract.strike_price + limit_price,
             };
-            let required_margin = required_margin(contract, direction, quantity);
-            let available_margin = account
-                .asset("USDT")
-                .map_or(Decimal::ZERO, |asset| asset.available)
-                + funding_available_usdt;
-            // 规则命中只影响推荐等级；不命中规则但仍有保证金的候选会保留为 Watch，方便排查。
-            let passes_rule = rule.include_btc
-                && (!rule.exclude_same_direction || !has_open_direction(direction))
-                && days_to_expiry >= rule.min_days_to_expiry
-                && days_to_expiry <= rule.max_days_to_expiry
-                && annualized >= rule.min_annualized
-                && delta_abs <= rule.max_delta_abs
-                && iv_rank <= rule.max_iv_rank
-                && available_margin >= required_margin;
-            let recommendation = if passes_rule {
-                RecommendationLevel::Recommended
-            } else if annualized >= Decimal::ZERO && available_margin >= required_margin {
-                RecommendationLevel::Watch
-            } else {
-                RecommendationLevel::Reject
-            };
-            let reason = if passes_rule {
-                format!(
-                    "来自 Binance 合约、买一价和 mark greeks，满足当前自动规则，mark IV 代理值 {iv_rank}%"
-                )
-            } else if available_margin < required_margin {
-                "可用保证金不足，暂不建议下单".to_string()
-            } else {
-                format!(
-                    "来自 Binance 合约、买一价和 mark greeks，未完全满足当前自动规则，mark IV 代理值 {iv_rank}%"
-                )
-            };
-
             Some(StrategyCandidate {
                 id: format!("{}-{}", contract.symbol, Utc::now().timestamp()),
                 symbol: contract.underlying.clone(),
@@ -183,8 +131,6 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
                 breakeven,
                 spot_price,
                 strike_distance_percent,
-                recommendation,
-                reason,
             })
         })() {
             candidates.push(candidate);
@@ -208,7 +154,9 @@ pub(super) fn days_until_expiry(expiry_at: chrono::DateTime<Utc>) -> i64 {
     (seconds + 86_399) / 86_400
 }
 
-/// 估算年化收益率。
+/// 按“权利金 ÷ (执行价 × 数量基数) × 365 ÷ 到期天数”估算单利年化百分比。
+///
+/// 调用方负责按候选或真实订单语义传入数量基数和到期天数；这里不扣交易手续费。
 pub(super) fn estimate_annualized(
     premium: Decimal,
     strike: Decimal,
@@ -391,21 +339,12 @@ fn calculate_strike_distance_percent(strike: Decimal, spot_price: Decimal) -> De
     (((strike - spot_price) / spot_price) * dec!(100)).round_dp(2)
 }
 
-/// 推荐等级排序权重。
-fn recommendation_rank(level: RecommendationLevel) -> u8 {
-    match level {
-        RecommendationLevel::Reject => 0,
-        RecommendationLevel::Watch => 1,
-        RecommendationLevel::Recommended => 2,
-    }
-}
-
-/// 候选排序：推荐优先，其次年化高优先，再按精确到期时间近优先。
+/// 候选排序：年化高优先，再按精确到期时间近优先。
 fn sort_candidates(candidates: &mut [StrategyCandidate]) {
     candidates.sort_by(|left, right| {
-        recommendation_rank(right.recommendation)
-            .cmp(&recommendation_rank(left.recommendation))
-            .then_with(|| right.annualized.cmp(&left.annualized))
+        right
+            .annualized
+            .cmp(&left.annualized)
             .then_with(|| left.expiry_at.cmp(&right.expiry_at))
     });
 }

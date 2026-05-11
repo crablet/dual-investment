@@ -8,8 +8,8 @@ use rust_decimal_macros::dec;
 
 use crate::decimal_utils::{max_decimal, min_decimal, positive_decimal};
 use crate::domain::{
-    OptionAccountSnapshot, OptionContract, SimpleEarnSnapshot, SpotAccountSnapshot,
-    StrategyDirection, StrategyOrder, StrategyRequest,
+    OptionAccountSnapshot, OptionContract, SpotAccountSnapshot, StrategyDirection, StrategyOrder,
+    StrategyRequest,
 };
 use crate::strategy;
 
@@ -85,15 +85,6 @@ pub(super) fn spot_rebalance_required_asset(order: &StrategyOrder) -> (&'static 
 /// 查询现货账户某资产可用余额，缺失资产按 0 处理。
 pub(super) fn spot_asset_free(account: &SpotAccountSnapshot, asset: &str) -> Decimal {
     account.asset(asset).map_or(Decimal::ZERO, |row| row.free)
-}
-
-/// 汇总 Simple Earn 活期且可赎回的指定资产数量。
-pub(super) fn flexible_earn_asset_amount(earn: &SimpleEarnSnapshot, asset: &str) -> Decimal {
-    earn.balances
-        .iter()
-        .filter(|balance| balance.flexible && balance.can_redeem && balance.asset == asset)
-        .map(|balance| balance.amount)
-        .sum()
 }
 
 /// 资金准备时向上取整，避免小数截断导致真实可用余额仍不足。

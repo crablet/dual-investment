@@ -10,8 +10,8 @@ use tauri_plugin_opener::OpenerExt;
 use crate::app_state::AppState;
 use crate::domain::{
     AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppSettings, AppSnapshot,
-    AutoInvestmentRule, CandidateScanResult, ConnectBinanceRequest, FundingAttemptView,
-    LogSnapshot, ResolveFundingAttemptRequest, StrategyOrder, StrategyRequest, ToggleAutoRequest,
+    CandidateScanResult, ConnectBinanceRequest, FundingAttemptView, LogSnapshot,
+    ResolveFundingAttemptRequest, StrategyOrder, StrategyRequest,
 };
 
 /// 获取应用完整快照。
@@ -65,27 +65,6 @@ pub async fn place_manual_strategy(
 ) -> Result<StrategyOrder, String> {
     state
         .place_manual_strategy(request, app)
-        .await
-        .map_err(to_command_error)
-}
-
-/// 保存自动复投规则。
-#[tauri::command]
-pub async fn save_auto_rule(
-    state: State<'_, AppState>,
-    rule: AutoInvestmentRule,
-) -> Result<AutoInvestmentRule, String> {
-    state.save_auto_rule(rule).await.map_err(to_command_error)
-}
-
-/// 开启或暂停自动复投。
-#[tauri::command]
-pub async fn toggle_auto_strategy(
-    state: State<'_, AppState>,
-    request: ToggleAutoRequest,
-) -> Result<AppSettings, String> {
-    state
-        .toggle_auto_strategy(request)
         .await
         .map_err(to_command_error)
 }
@@ -158,12 +137,6 @@ pub async fn sync_live_state(state: State<'_, AppState>) -> Result<AppSnapshot, 
 #[tauri::command]
 pub async fn run_settlement_scan(state: State<'_, AppState>) -> Result<Vec<StrategyOrder>, String> {
     state.run_settlement_scan().await.map_err(to_command_error)
-}
-
-/// 手动执行一次自动复投流程。
-#[tauri::command]
-pub async fn run_auto_once(state: State<'_, AppState>) -> Result<Option<StrategyOrder>, String> {
-    state.run_auto_once().await.map_err(to_command_error)
 }
 
 /// 读取文件日志快照。

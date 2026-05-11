@@ -95,14 +95,6 @@ pub enum StrategyOrderSource {
     AdoptedPosition,
 }
 
-/// 候选机会的内部推荐等级。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RecommendationLevel {
-    Recommended,
-    Watch,
-    Reject,
-}
-
 /// 风险提醒严重程度。
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -113,12 +105,10 @@ pub enum RiskSeverity {
 
 /// 前端设置页和导航状态需要展示的运行配置，不包含 API Key 或 Secret。
 #[derive(Clone, Debug, Serialize)]
-#[allow(clippy::struct_excessive_bools)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub connected: bool,
     pub saved_credentials: bool,
-    pub auto_enabled: bool,
     pub quick_execution: bool,
 }
 
@@ -219,9 +209,6 @@ pub struct StrategyCandidate {
     pub spot_price: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike_distance_percent: Decimal,
-    #[serde(skip_serializing)]
-    pub recommendation: RecommendationLevel,
-    pub reason: String,
 }
 
 /// 候选扫描结果。
@@ -276,28 +263,6 @@ pub struct StrategyOrder {
     pub spot_filled_quantity: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub spot_avg_price: Decimal,
-}
-
-/// 自动复投规则。
-///
-/// `enabled` 会在应用启动时强制重置为 false；保存规则不等于开启自动下单。
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AutoInvestmentRule {
-    pub enabled: bool,
-    pub schedule: String,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub quantity: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub min_annualized: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub max_delta_abs: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub max_iv_rank: Decimal,
-    pub min_days_to_expiry: i64,
-    pub max_days_to_expiry: i64,
-    pub include_btc: bool,
-    pub exclude_same_direction: bool,
 }
 
 /// 风控提醒。
@@ -709,7 +674,6 @@ pub enum OrderProgressStatus {
 #[serde(rename_all = "camelCase")]
 pub struct OrderProgressEvent {
     pub flow_id: String,
-    pub source: String,
     pub stage: OrderProgressStage,
     pub status: OrderProgressStatus,
     pub message: String,
@@ -856,13 +820,12 @@ pub struct OptionContract {
 
 /// Binance mark price 行情。
 ///
-/// mark price 只用于价格上下限校验；Delta 和 IV 用于候选风险估算。
+/// mark price 用于价格上下限校验，Delta 用于估算候选被行权概率。
 /// 下单限价必须来自可主动成交的盘口买盘，真实成交价格以订单回报为准。
 #[derive(Clone, Debug)]
 pub struct OptionMarkPrice {
     pub symbol: String,
     pub mark_price: Decimal,
-    pub mark_iv: Decimal,
     pub delta: Decimal,
     pub high_price_limit: Decimal,
     pub low_price_limit: Decimal,
@@ -966,7 +929,6 @@ pub struct AppSnapshot {
     pub orders: Vec<StrategyOrder>,
     pub pnl: PnlReport,
     pub risk: RiskSnapshot,
-    pub auto_rule: AutoInvestmentRule,
     pub order_attempts: Vec<OrderAttemptView>,
     pub funding_attempts: Vec<FundingAttemptView>,
 }
@@ -981,13 +943,13 @@ pub struct ConnectBinanceRequest {
     pub api_secret: String,
 }
 
-/// 手动或自动下单请求。
+/// 手动下单或订单恢复使用的请求。
 ///
 /// `confirm_live` 是真实下单门禁；手动下单必须由前端显式确认后才传 true。
+/// 请求携带用户确认的合约与数量等输入，不携带候选 ID 或预览年化；订单年化必须由 Binance 回报生成。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyRequest {
-    pub candidate_id: Option<String>,
     pub client_flow_id: Option<String>,
     pub symbol: String,
     pub option_symbol: Option<String>,
@@ -1000,16 +962,6 @@ pub struct StrategyRequest {
     pub quantity: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub limit_price: Decimal,
-    pub confirm_live: bool,
-}
-
-/// 开关自动复投的请求。
-///
-/// 自动策略开启后，符合规则的自动订单不会逐笔确认，因此开启动作必须二次确认。
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToggleAutoRequest {
-    pub enabled: bool,
     pub confirm_live: bool,
 }
 

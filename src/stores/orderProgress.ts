@@ -36,7 +36,6 @@ export function createInitialOrderProgress(
 ): OrderProgressView {
   return {
     flowId,
-    source: 'manual',
     status: 'running',
     optionSymbol: request.optionSymbol,
     startedAt: now,
@@ -52,7 +51,6 @@ export function createInitialOrderProgress(
  */
 export function createOrderProgressFromOrder(flowId: string, order: StrategyOrder): StrategyRequest {
   return {
-    candidateId: undefined,
     clientFlowId: flowId,
     symbol: order.symbol,
     optionSymbol: order.optionSymbol,

@@ -36,7 +36,6 @@ export type StrategyOrderSource = 'liveOrder' | 'adoptedPosition'
 export interface AppSettings {
   connected: boolean
   savedCredentials: boolean
-  autoEnabled: boolean
   quickExecution: boolean
 }
 
@@ -67,7 +66,6 @@ export interface StrategyCandidate {
   breakeven: DecimalString
   spotPrice: DecimalString
   strikeDistancePercent: DecimalString
-  reason: string
 }
 
 export interface CandidateScanResult {
@@ -128,20 +126,6 @@ export interface AdoptableOptionPositionView {
 export interface AdoptOptionPositionsRequest {
   symbols: string[]
   confirmLive: boolean
-}
-
-/** 自动复投规则；保存规则不代表已经开启自动策略。 */
-export interface AutoInvestmentRule {
-  enabled: boolean
-  schedule: string
-  quantity: DecimalString
-  minAnnualized: DecimalString
-  maxDeltaAbs: DecimalString
-  maxIvRank: DecimalString
-  minDaysToExpiry: number
-  maxDaysToExpiry: number
-  includeBtc: boolean
-  excludeSameDirection: boolean
 }
 
 /** 可展示的风险提醒；后端负责保证内容脱敏。 */
@@ -256,7 +240,6 @@ export interface ResolveFundingAttemptRequest {
 /** 手动下单进度事件，只用于前端反馈，不作为交易事实来源。 */
 export interface OrderProgressEvent {
   flowId: string
-  source: string
   stage: OrderProgressStage
   status: OrderProgressStatus
   message: string
@@ -274,7 +257,6 @@ export interface AppSnapshot {
   orders: StrategyOrder[]
   pnl: PnlReport
   risk: RiskSnapshot
-  autoRule: AutoInvestmentRule
   orderAttempts: OrderAttemptView[]
   fundingAttempts: FundingAttemptView[]
 }
@@ -285,9 +267,8 @@ export interface ConnectBinanceRequest {
   apiSecret: string
 }
 
-/** 策略下单请求。`confirmLive` 是真实下单门禁。 */
+/** 携带用户确认输入的下单请求；不携带候选 ID 或预览年化，`confirmLive` 是实盘门禁。 */
 export interface StrategyRequest {
-  candidateId?: string
   clientFlowId?: string
   symbol: string
   optionSymbol?: string
@@ -297,11 +278,5 @@ export interface StrategyRequest {
   strike: DecimalString
   quantity: DecimalString
   limitPrice: DecimalString
-  confirmLive: boolean
-}
-
-/** 开关自动复投请求；开启时必须经过二次确认。 */
-export interface ToggleAutoRequest {
-  enabled: boolean
   confirmLive: boolean
 }

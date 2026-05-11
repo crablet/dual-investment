@@ -61,11 +61,11 @@ export function buildMetrics(
     {
       id: 'status',
       title: '运行状态',
-      value: settings?.autoEnabled ? '运行中' : connected ? '已连接' : '未连接',
+      value: connected ? '已连接' : '未连接',
       subValue: 'Tauri 客户端',
       change: syncState,
       icon: 'activity',
-      tone: settings?.autoEnabled ? 'green' : connected ? 'gold' : 'gray',
+      tone: connected ? 'gold' : 'gray',
     },
   ]
 }
