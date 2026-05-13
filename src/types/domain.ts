@@ -39,7 +39,7 @@ export interface AppSettings {
   quickExecution: boolean
 }
 
-/** 账户资产行，可能来自期权保证金账户或现货账户。 */
+/** 账户资产展示行，可能来自期权保证金、现货或 Simple Earn。 */
 export interface BalanceRow {
   asset: string
   source: string

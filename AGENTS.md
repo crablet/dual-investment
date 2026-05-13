@@ -26,6 +26,7 @@
 
 - 前端只展示 Rust 快照提供的金融事实，不重新计算年化、估值、收益或恢复状态。跨页面状态放在 src/stores/app.ts，view 组件只做组合。
 - 账户资产统一经 src/utils/balances.ts 聚合同名资产，并保留真实账户来源。
+- 现货 `LD{asset}` 只有在同轮 Simple Earn 快照存在对应正余额资产时才可作为展示镜像过滤；不得按 `LD` 前缀或代码长度推断，也不得把展示去重结果用于资金事实判断。
 - 金融模型和策略计算放在 src-tauri/src/domain.rs 与 src-tauri/src/strategy/；状态编排放在 app_state.rs 与 src-tauri/src/app_state/。
 - Binance 通信只放在 binance.rs 与 src-tauri/src/binance/；凭据和文件日志分别只由 secrets.rs 与 logs.rs 处理。
 

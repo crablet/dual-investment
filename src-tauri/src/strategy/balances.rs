@@ -3,7 +3,7 @@
 //! 这里把期权保证金、现货和 Simple Earn 的真实账户快照转换成前端展示行，并按已保存订单
 //! 派生收益报告。无法估值的资产保留数量事实，但不参与 USDT 汇总。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
 use rust_decimal::Decimal;
@@ -60,17 +60,21 @@ pub fn build_balances(
 
 /// 从现货账户构造前端资产行。
 ///
-/// 现货账户里的 `LD*` 是 Simple Earn 镜像，必须忽略，避免和理财接口重复统计。
+/// 现货账户可能包含 Simple Earn 的 `LD{asset}` 镜像。只有同轮 Simple Earn 快照中
+/// 存在对应正余额资产时才过滤，避免重复展示，也避免按前缀猜测而隐藏真实现货资产。
+/// 该去重只用于展示；资金流程仍直接读取原始账户快照。
 pub fn build_spot_balances(
     account: &SpotAccountSnapshot,
+    earn: &SimpleEarnSnapshot,
     spot_prices: &HashMap<String, Decimal>,
 ) -> Vec<BalanceRow> {
+    let simple_earn_ledger_assets = simple_earn_ledger_assets(earn);
     account
         .balances
         .iter()
         .filter(|asset| {
             (asset.free > Decimal::ZERO || asset.locked > Decimal::ZERO)
-                && !is_simple_earn_ledger_asset(&asset.asset)
+                && !simple_earn_ledger_assets.contains(&asset.asset)
         })
         .map(|asset| {
             let valuation = asset_usdt_value(&asset.asset, asset.free + asset.locked, spot_prices);
@@ -165,12 +169,14 @@ fn positive_price(price: Option<&Decimal>) -> Option<Decimal> {
     price.copied().filter(|value| *value > Decimal::ZERO)
 }
 
-fn is_simple_earn_ledger_asset(asset: &str) -> bool {
-    // 现货账户中的 LD* 是理财镜像资产，真实理财数量由 Simple Earn 接口单独提供。
-    if asset.starts_with("LD") && asset.len() > 4 {
-        return true;
-    }
-    false
+fn simple_earn_ledger_assets(earn: &SimpleEarnSnapshot) -> HashSet<String> {
+    // 只依据同一次 Binance Simple Earn 快照识别镜像，避免按长度猜测而漏掉 LDU，
+    // 也避免误伤名称本身以 LD 开头的普通现货资产。
+    earn.balances
+        .iter()
+        .filter(|balance| balance.amount > Decimal::ZERO)
+        .map(|balance| format!("LD{}", balance.asset))
+        .collect()
 }
 
 /// 从真实订单和现货价格派生收益报告。

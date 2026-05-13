@@ -201,7 +201,7 @@ impl BinanceClient {
 
     /// 查询 Binance Simple Earn 活期和定期持仓。
     ///
-    /// 现货账户里的 `LD*` 资产只是理财镜像，账户概览应使用这里的真实理财持仓数量。
+    /// 现货账户可能包含 `LD{asset}` 理财镜像；账户概览使用这里的正余额持仓精确匹配去重。
     pub async fn simple_earn_snapshot(&self) -> AppResult<SimpleEarnSnapshot> {
         let mut balances = self
             .simple_earn_positions(

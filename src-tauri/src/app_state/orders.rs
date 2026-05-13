@@ -179,7 +179,7 @@ pub(super) fn is_spot_attempt(status: OrderAttemptStatus) -> bool {
     )
 }
 
-/// 合并期权保证金和现货资产行。
+/// 合并期权保证金、现货和 Simple Earn 资产展示行。
 pub(super) fn combined_balances(
     option: &OptionAccountSnapshot,
     spot: &SpotAccountSnapshot,
@@ -187,7 +187,7 @@ pub(super) fn combined_balances(
     spot_prices: &HashMap<String, Decimal>,
 ) -> Vec<BalanceRow> {
     let mut balances = strategy::build_balances(option, spot_prices);
-    balances.extend(strategy::build_spot_balances(spot, spot_prices));
+    balances.extend(strategy::build_spot_balances(spot, earn, spot_prices));
     balances.extend(strategy::build_simple_earn_balances(earn, spot_prices));
     balances
 }
