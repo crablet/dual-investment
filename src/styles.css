@@ -493,69 +493,6 @@ input {
   background: rgba(255, 255, 255, 0.018);
 }
 
-.runtime-status-panel {
-  container-type: inline-size;
-}
-
-.runtime-status-list {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.runtime-status-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0;
-  min-width: 0;
-  min-height: 44px;
-  padding: 8px 10px 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  overflow: hidden;
-}
-
-.runtime-status-item span {
-  color: var(--muted);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.runtime-status-value {
-  display: inline-flex;
-  flex: 0 0 auto;
-  justify-content: center;
-  align-items: center;
-  min-width: 74px;
-  min-height: 28px;
-  padding: 0 9px;
-  border-radius: 6px;
-  font-size: 13px;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.runtime-status-value.tone-active {
-  color: #071017;
-  background: var(--gold);
-}
-
-.runtime-status-value.tone-neutral {
-  color: var(--gold);
-  border: 1px solid rgba(245, 182, 37, 0.34);
-  background: rgba(245, 182, 37, 0.08);
-}
-
-.runtime-status-value.tone-paused {
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.06);
-}
-
 .event-calendar-board {
   /* 日历内部使用 container query，方便嵌入不同宽度的面板时自适应。 */
   container-type: inline-size;

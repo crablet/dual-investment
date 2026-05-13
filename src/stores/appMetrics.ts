@@ -1,13 +1,12 @@
-// 总览指标和收益构成的展示派生。
+// 总览指标的展示派生。
 //
-// 这些函数只把后端快照整理成卡片/图表模型，不做真实金融决策。金额求和使用
-// Decimal 字符串工具，避免为了 UI 汇总先转成 JavaScript number。
+// 这里只把后端快照整理成指标卡模型，不做真实金融决策。金额求和使用 Decimal
+// 字符串工具，避免为了 UI 汇总先转成 JavaScript number。
 
 import type { AppSettings, AppSnapshot } from '@/types/domain'
-import type { MetricCardModel, PnlBreakdownItem } from '@/types/view'
+import type { MetricCardModel } from '@/types/view'
 import {
   decimalStringToDisplayNumber,
-  isZeroDecimalString,
   sumDecimalStrings,
 } from '@/utils/decimal'
 
@@ -66,28 +65,6 @@ export function buildMetrics(
       change: syncState,
       icon: 'activity',
       tone: connected ? 'gold' : 'gray',
-    },
-  ]
-}
-
-/** 从收益报告派生图表构成；颜色按标签固定，正负只影响数值文字样式。 */
-export function buildPnlBreakdown(report: AppSnapshot['pnl'] | undefined): PnlBreakdownItem[] {
-  if (!report || (isZeroDecimalString(report.cumulative) && isZeroDecimalString(report.optionPremium))) {
-    return []
-  }
-
-  return [
-    {
-      key: 'option-premium',
-      label: '期权权利金',
-      value: report.optionPremium,
-      color: '#d89b2b',
-    },
-    {
-      key: 'floating-spot',
-      label: '现货补齐浮动盈亏',
-      value: report.floatingSpot,
-      color: '#5f8ff5',
     },
   ]
 }

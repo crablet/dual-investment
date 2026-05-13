@@ -1,7 +1,7 @@
 // 应用级 Pinia store。
 //
 // 这里是前端唯一的跨页面状态源：保存 Tauri 快照、请求 loading/error、当前视图，以及
-// 从快照派生出的指标和收益构成。真实业务计算仍以 Rust 返回的快照为准，前端只做展示层派生。
+// 从快照派生出的总览指标。真实业务计算仍以 Rust 返回的快照为准，前端只做展示层派生。
 
 import type {
   AdoptableOptionPositionView,
@@ -19,12 +19,11 @@ import type {
   MetricCardModel,
   OrderProgressNotice,
   OrderProgressView,
-  PnlBreakdownItem,
 } from '@/types/view'
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
 import { api } from '@/services/api'
-import { buildMetrics, buildPnlBreakdown } from '@/stores/appMetrics'
+import { buildMetrics } from '@/stores/appMetrics'
 import { mergeOrdersByUpdatedAt } from '@/stores/appSnapshot'
 import {
   formatReconnectDelay,
@@ -115,19 +114,17 @@ export const useAppStore = defineStore('app', () => {
   const orders = computed(() => snapshot.value?.orders ?? [])
   const pnl = computed(() => snapshot.value?.pnl)
   const risk = computed(() => snapshot.value?.risk)
-  const health = computed(() => snapshot.value?.health)
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
   const fundingAttempts = computed(() => snapshot.value?.fundingAttempts ?? [])
   const runningOrders = computed(() =>
     orders.value.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
   )
-  // 指标卡和收益构成从快照派生，避免再通过 IPC 请求 Rust 做轻量 UI 聚合。
+  // 指标卡从快照派生，避免再通过 IPC 请求 Rust 做轻量 UI 聚合。
   const metrics = computed<MetricCardModel[]>(() => buildMetrics(
     settings.value,
     balances.value,
     pnl.value,
   ))
-  const pnlBreakdown = computed<PnlBreakdownItem[]>(() => buildPnlBreakdown(pnl.value))
   const canAutoReconnect = computed(() =>
     Boolean(
       settings.value?.savedCredentials
@@ -586,9 +583,7 @@ export const useAppStore = defineStore('app', () => {
     candidates,
     orders,
     pnl,
-    pnlBreakdown,
     risk,
-    health,
     orderAttempts,
     fundingAttempts,
     runningOrders,
