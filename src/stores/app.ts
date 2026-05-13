@@ -70,7 +70,6 @@ export type AppViewId
     | 'orders'
     | 'portfolio'
     | 'analytics'
-    | 'risk'
     | 'settings'
 
 function emptyPending(): Record<RequestKey, number> {

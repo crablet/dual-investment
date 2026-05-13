@@ -162,7 +162,7 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
       title: order.status === 'rebalanceFailed' ? '现货补齐失败' : '现货补齐',
       detail: order.rebalanceMessage || `${order.optionSymbol} 现货补齐状态 ${order.spotOrderStatus || '--'}`,
       tone: order.status === 'rebalanceFailed' ? 'red' : 'green',
-      targetView: order.status === 'rebalanceFailed' ? 'risk' : 'portfolio',
+      targetView: order.status === 'rebalanceFailed' ? 'orders' : 'portfolio',
       priority: order.status === 'rebalanceFailed' ? 90 : 65,
     })
   }
@@ -180,7 +180,7 @@ function eventFromRiskAlert(alert: RiskAlert): CalendarEvent {
     title: alert.title,
     detail: alert.message,
     tone: alert.severity === 'high' || alert.severity === 'medium' ? 'red' : 'gold',
-    targetView: 'risk',
+    targetView: 'portfolio',
     priority: alert.severity === 'high' ? 95 : 80,
   }
 }

@@ -23,7 +23,6 @@ const views = {
   orders: defineAsyncComponent(() => import('@/components/views/OrdersView.vue')),
   portfolio: defineAsyncComponent(() => import('@/components/views/PortfolioView.vue')),
   analytics: defineAsyncComponent(() => import('@/components/views/AnalyticsView.vue')),
-  risk: defineAsyncComponent(() => import('@/components/views/RiskView.vue')),
   settings: defineAsyncComponent(() => import('@/components/views/SettingsView.vue')),
 }
 

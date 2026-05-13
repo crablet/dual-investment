@@ -7,7 +7,7 @@
 
 :root {
   color-scheme: dark;
-  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-family: 'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   font-synthesis: none;
   line-height: 1.5;
   text-rendering: optimizeLegibility;
@@ -110,7 +110,7 @@ input {
 }
 
 .view-grid {
-  /* 12 栅格用于总览/分析/风控等页面复用，具体 span 类控制模块宽度。 */
+  /* 12 栅格由各业务页面复用，具体 span 类控制模块宽度。 */
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 12px;
@@ -183,8 +183,7 @@ input {
   font-size: 34px;
 }
 
-.metric-card strong,
-.risk-score strong {
+.metric-card strong {
   display: block;
   margin-top: 4px;
   font-size: 25px;
@@ -1240,7 +1239,7 @@ input {
   overflow-wrap: anywhere;
 }
 
-/* 轻量条形图样式；真实风险/收益计算都在组件脚本或 Rust 快照中完成。 */
+/* 轻量条形图样式；展示宽度由调用组件派生，真实收益事实来自 Rust 快照。 */
 .bar-list {
   display: grid;
   gap: 16px;
@@ -1272,65 +1271,6 @@ input {
 
 .bar-list div:nth-child(3) strong {
   background: linear-gradient(90deg, var(--blue), #83a8ff);
-}
-
-.risk-score {
-  display: grid;
-  align-content: center;
-  gap: 8px;
-  min-height: 178px;
-  text-align: center;
-}
-
-.risk-score .n-icon {
-  justify-self: center;
-  color: var(--gold);
-  font-size: 34px;
-}
-
-.risk-score strong {
-  justify-self: center;
-}
-
-.risk-score > span {
-  color: var(--muted);
-}
-
-.risk-score .n-progress {
-  margin-top: 8px;
-}
-
-.alert-list {
-  display: grid;
-  gap: 10px;
-}
-
-.alert-list article {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
-.alert-severity-tag {
-  justify-self: start;
-  width: 44px;
-  min-width: 44px;
-}
-
-.alert-severity-tag .n-tag__content {
-  display: flex;
-  width: 100%;
-  justify-content: center;
-  text-align: center;
-}
-
-.alert-list span {
-  display: block;
-  color: var(--muted);
 }
 
 /* 窄桌面优先保持可读性：模块改为 6 栅格，表格继续由横向滚动承接。 */

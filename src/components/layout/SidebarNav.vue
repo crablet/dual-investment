@@ -12,7 +12,6 @@ import {
   ClipboardList,
   Home,
   Settings,
-  ShieldCheck,
   Wallet,
 } from '@lucide/vue'
 import { NIcon } from 'naive-ui'
@@ -26,7 +25,6 @@ const navItems = [
   { id: 'orders', label: '策略订单', icon: ClipboardList },
   { id: 'portfolio', label: '持仓与现货', icon: Wallet },
   { id: 'analytics', label: '收益分析', icon: BarChart3 },
-  { id: 'risk', label: '风险控制', icon: ShieldCheck },
   { id: 'settings', label: '设置', icon: Settings },
 ] as const satisfies ReadonlyArray<{ id: AppViewId, label: string, icon: Component }>
 </script>
