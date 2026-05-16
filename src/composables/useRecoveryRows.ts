@@ -5,28 +5,32 @@
 
 import type {
   FundingAttemptManualResolution,
+  FundingAttemptStatus,
   FundingAttemptView,
+  OrderAttemptStatus,
   OrderAttemptView,
 } from '@/types/domain'
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { attemptStatusText, fundingAttemptStatusText } from '@/utils/labels'
 
-export interface RecoveryRow {
+interface RecoveryRowBase {
   id: string
-  /** 区分订单恢复和资金恢复，点击操作时必须分派到不同 Rust command。 */
-  source: 'order' | 'funding'
   updatedAt: string
   type: string
   target: string
   amount: string
   exchangeRef: string
-  status: string
   factSource: string
   nextAction: string
   message: string
   diagnostics: string
 }
+
+/** 区分订单与资金恢复状态，点击操作时必须分派到对应 Rust command。 */
+export type RecoveryRow
+  = | RecoveryRowBase & { source: 'order', status: OrderAttemptStatus }
+    | RecoveryRowBase & { source: 'funding', status: FundingAttemptStatus }
 
 /** 组合订单页恢复中心的列表模型和行级操作。 */
 export function useRecoveryRows() {

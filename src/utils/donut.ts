@@ -158,10 +158,9 @@ export function buildDonutSegments(items: NormalizedDonutItem[], unit: string): 
 /** 决定中心总值：调用方显式值优先，否则汇总当前可见条目。 */
 export function resolveCenterValue(
   items: NormalizedDonutItem[],
-  center?: string,
   centerValue?: string,
 ) {
-  return centerValue ?? center ?? sumDecimalStrings(items.map(item => item.value))
+  return centerValue ?? sumDecimalStrings(items.map(item => item.value))
 }
 
 /** 根据 hover/focus 状态决定中心区域展示总览还是单个扇区。 */

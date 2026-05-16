@@ -10,25 +10,19 @@
 - 金额、价格、数量、权利金、保证金和收益率不得使用 f64；Rust 使用 rust_decimal::Decimal，前端以字符串承接。
 - 当前收益模型忽略期权和现货手续费；不要引入 fee/commission 字段、保存逻辑或收益扣减。
 - API Key/Secret 仅可经 src-tauri/src/secrets.rs 写入系统 keyring。Secret、签名 query、Binance 原始响应及敏感上下文不得进入日志、SQLite、前端状态或导出文件。
-- 项目自有源码、文档和资源使用 AGPL-3.0-only，不得引入冲突的许可证声明。
-- 开发期不保留旧 IPC、DTO 或 SQLite payload 兼容；结构变更要同步收敛 Rust、TypeScript 和 Pinia，不在应用代码中保留迁移或兼容分支。
+- 项目自有内容使用 AGPL-3.0-only，不得引入冲突的许可证声明。
+- 开发期不保留旧 IPC、DTO 或 SQLite 兼容；结构变更同步收敛 Rust、TypeScript 和 Pinia，不在应用代码中保留迁移分支。
 - 仓库不保留测试、夹具或快照；临时验证代码、依赖和配置必须在交付前删除。
 
 ## 实盘安全
 
-- 下单、Simple Earn、账户划转和到期补齐都是真实资金动作，必须有显式门禁、后端串行保护、恢复记录和脱敏日志。
-- 修改连接、后台同步、订单、资金、恢复、接管或结算逻辑前，必须阅读 [实盘交易安全](docs/trading-safety.md)。
+- 真实资金动作必须有显式门禁、后端串行保护、恢复记录和脱敏日志；修改连接、同步、订单、资金、恢复、接管或结算前，先阅读 [实盘交易安全](docs/trading-safety.md)。
 - 已保存凭据只能用于重连 Binance，不得触发下单或资金移动；凭据缺失、权限不足等人工错误应暂停自动重连并明确提示。
-- 存在未确认的 order_attempts 或 funding_attempts 时，必须阻断手动下单和后续资金动作。
-- 手动期权下单必须冻结候选与数量快照并经过应用内复核；用户确认后才允许发送 confirmLive=true。
 
 ## 代码边界
 
 - 前端只展示 Rust 快照提供的金融事实，不重新计算年化、估值、收益或恢复状态。跨页面状态放在 src/stores/app.ts，view 组件只做组合。
-- 账户资产统一经 src/utils/balances.ts 聚合同名资产，并保留真实账户来源。
-- 现货 `LD{asset}` 只有在同轮 Simple Earn 快照存在对应正余额资产时才可作为展示镜像过滤；不得按 `LD` 前缀或代码长度推断，也不得把展示去重结果用于资金事实判断。
-- 金融模型和策略计算放在 src-tauri/src/domain.rs 与 src-tauri/src/strategy/；状态编排放在 app_state.rs 与 src-tauri/src/app_state/。
-- Binance 通信只放在 binance.rs 与 src-tauri/src/binance/；凭据和文件日志分别只由 secrets.rs 与 logs.rs 处理。
+- 金融计算、状态编排、Binance 通信、凭据和文件日志分别留在现有 Rust 模块边界内。
 
 ## 验证
 

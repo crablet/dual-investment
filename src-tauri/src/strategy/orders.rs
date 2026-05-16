@@ -21,21 +21,6 @@ use crate::domain::{
 pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> StrategyOrder {
     let now = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
     let opened_at = ack.create_time.or(ack.update_time).unwrap_or(now);
-    let option_symbol = if ack.symbol.is_empty() {
-        request.option_symbol.clone().unwrap_or_else(|| {
-            format!(
-                "BTC-{}-{}-{}",
-                request.expiry.format("%y%m%d"),
-                request.strike,
-                match request.direction {
-                    StrategyDirection::SellPut => "P",
-                    StrategyDirection::SellCall => "C",
-                }
-            )
-        })
-    } else {
-        ack.symbol.clone()
-    };
     let avg_price = if ack.avg_price > Decimal::ZERO {
         ack.avg_price
     } else {
@@ -61,7 +46,7 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         exchange_order_id: Some(ack.order_id.clone()),
         client_order_id: ack.client_order_id.clone(),
         symbol: request.symbol.clone(),
-        option_symbol,
+        option_symbol: ack.symbol.clone(),
         direction: request.direction,
         status,
         expiry: request.expiry,

@@ -18,6 +18,14 @@ use crate::strategy;
 
 /// 校验下单请求的基础业务边界。
 pub(super) fn validate_request(request: &StrategyRequest) -> AppResult<()> {
+    if request.client_flow_id.trim().is_empty() {
+        return Err(AppError::Config("手动下单请求缺少流程 ID".to_string()));
+    }
+    if request.option_symbol.trim().is_empty() {
+        return Err(AppError::RiskRejected(
+            "手动下单必须指定 Binance 期权合约".to_string(),
+        ));
+    }
     if request.symbol != "BTCUSDT" {
         return Err(AppError::RiskRejected(
             "v1 仅支持 BTC/USDT 策略".to_string(),
@@ -37,38 +45,17 @@ pub(super) fn validate_request(request: &StrategyRequest) -> AppResult<()> {
     Ok(())
 }
 
-/// 找到与下单请求匹配的 Binance 合约。
-///
-/// 优先使用请求里的 option symbol；没有时才按方向、到期日和执行价搜索。
+/// 按用户复核时冻结的 option symbol 找到 Binance 合约。
 pub(super) fn resolve_contract<'a>(
     request: &StrategyRequest,
     contracts: &'a [OptionContract],
 ) -> AppResult<&'a OptionContract> {
-    if let Some(symbol) = request
-        .option_symbol
-        .as_deref()
-        .map(str::trim)
-        .filter(|symbol| !symbol.is_empty())
-    {
-        let contract = contracts
-            .iter()
-            .find(|contract| contract.symbol == symbol)
-            .ok_or_else(|| AppError::RiskRejected("未找到指定的 Binance 期权合约".to_string()))?;
-        ensure_contract_matches_request(request, contract)?;
-        return Ok(contract);
-    }
-
-    contracts
+    let contract = contracts
         .iter()
-        .find(|contract| {
-            contract.underlying == request.symbol
-                && contract.expiry == request.expiry
-                && contract.strike_price == request.strike
-                && contract.side == request.direction.option_type()
-        })
-        .ok_or_else(|| {
-            AppError::RiskRejected("未找到与方向、到期日和执行价匹配的 Binance 合约".to_string())
-        })
+        .find(|contract| contract.symbol == request.option_symbol.trim())
+        .ok_or_else(|| AppError::RiskRejected("未找到指定的 Binance 期权合约".to_string()))?;
+    ensure_contract_matches_request(request, contract)?;
+    Ok(contract)
 }
 
 /// 确认前端传来的合约代码与请求参数一致。
@@ -84,6 +71,11 @@ pub(super) fn ensure_contract_matches_request(
     if contract.expiry != request.expiry {
         return Err(AppError::RiskRejected(
             "期权合约到期日与下单到期日不一致".to_string(),
+        ));
+    }
+    if contract.expiry_at != request.expiry_at {
+        return Err(AppError::RiskRejected(
+            "期权合约精确到期时间与复核快照不一致，请重新扫描并复核".to_string(),
         ));
     }
     if contract.strike_price != request.strike {

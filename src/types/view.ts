@@ -10,15 +10,16 @@ import type {
   StrategyOrder,
 } from '@/types/domain'
 
+/** 前端步骤在收到后端事件前可以处于等待态；IPC 事件本身没有 `pending`。 */
+export type OrderProgressStepStatus = OrderProgressStatus | 'pending'
+
 /** 总览指标卡展示模型。 */
 export interface MetricCardModel {
   id: string
   title: string
   value: string
-  subValue: string
-  change: string
-  icon: string
-  tone: string
+  icon: 'wallet' | 'shield' | 'coins' | 'activity'
+  tone: 'gold' | 'blue' | 'gray'
 }
 
 /** 构成图展示项。 */
@@ -42,7 +43,7 @@ export interface BarListItem {
 export interface OrderProgressStepView {
   id: OrderProgressStage
   label: string
-  status: OrderProgressStatus
+  status: OrderProgressStepStatus
   message?: string
   timestamp?: string
 }

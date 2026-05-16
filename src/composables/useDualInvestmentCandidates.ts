@@ -1,6 +1,6 @@
 // 双币赢候选列表的前端交互状态。
 //
-// Rust 策略层已经完成实盘合约过滤、方向硬约束和推荐等级计算；这个 composable 只负责
+// Rust 策略层已经完成实盘合约过滤和方向硬约束；这个 composable 只负责
 // 页面上的方向切换、到期/年化筛选、稳定排序、默认选中和下单卡片展示估算。
 
 import type { StrategyCandidate, StrategyDirection } from '@/types/domain'

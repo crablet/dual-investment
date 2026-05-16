@@ -194,16 +194,10 @@ input {
   min-width: 0;
 }
 
-.metric-title,
-.metric-card em {
+.metric-title {
   display: block;
   margin: 0;
   color: var(--muted);
-  font-style: normal;
-}
-
-.metric-card em {
-  color: var(--green);
 }
 
 .metric-title,
@@ -216,9 +210,6 @@ input {
 }
 .tone-blue .metric-icon {
   color: var(--blue);
-}
-.tone-green .metric-icon {
-  color: var(--green);
 }
 .tone-gray .metric-icon {
   color: var(--muted);
@@ -348,19 +339,12 @@ input {
 }
 
 .account-asset strong,
-.account-asset small,
 .account-values strong,
 .account-values em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.account-asset small {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
 }
 
 .account-values {
@@ -1267,10 +1251,6 @@ input {
 
 .bar-list div:nth-child(2) strong {
   background: linear-gradient(90deg, var(--green), #74df8b);
-}
-
-.bar-list div:nth-child(3) strong {
-  background: linear-gradient(90deg, var(--blue), #83a8ff);
 }
 
 /* 窄桌面优先保持可读性：模块改为 6 栅格，表格继续由横向滚动承接。 */

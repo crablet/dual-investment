@@ -2,7 +2,15 @@
 //
 // 这里只维护 UI 标签和组件 tone。Rust 侧仍保留日志与错误提示所需的业务文案。
 
-import type { LogLevel, StrategyDirection, StrategyStatus } from '@/types/domain'
+import type {
+  FundingAttemptStatus,
+  LogLevel,
+  OrderAttemptStatus,
+  StrategyDirection,
+  StrategyStatus,
+} from '@/types/domain'
+
+type RecoveryStatus = FundingAttemptStatus | OrderAttemptStatus
 
 export const directionTextMap: Record<StrategyDirection, string> = {
   sellPut: '卖 Put 抄底',
@@ -36,7 +44,7 @@ export const statusToneMap: Record<StrategyStatus, 'default' | 'error' | 'info' 
   rebalanceFailed: 'error',
 }
 
-export const attemptStatusTextMap: Record<string, string> = {
+export const attemptStatusTextMap: Record<OrderAttemptStatus, string> = {
   attempted: '准备发送期权订单',
   exchange_ack: '交易所已接单',
   persisted: '订单已保存',
@@ -46,13 +54,9 @@ export const attemptStatusTextMap: Record<string, string> = {
   spot_exchange_ack: '现货交易所已接单',
   spot_persisted: '现货补齐已保存',
   spot_persist_failed: '现货补齐保存失败',
-  uncertain: '结果待确认',
-  pending: '处理中',
-  confirmed: '已确认',
-  blocked: '已阻断',
 }
 
-export const recoveryStatusToneMap: Record<string, 'default' | 'error' | 'info' | 'success' | 'warning'> = {
+export const recoveryStatusToneMap: Record<RecoveryStatus, 'error' | 'info' | 'success' | 'warning'> = {
   attempted: 'warning',
   exchange_ack: 'info',
   persisted: 'success',
@@ -68,7 +72,7 @@ export const recoveryStatusToneMap: Record<string, 'default' | 'error' | 'info' 
   blocked: 'error',
 }
 
-export const fundingAttemptStatusTextMap: Record<string, string> = {
+export const fundingAttemptStatusTextMap: Record<FundingAttemptStatus, string> = {
   attempted: '准备发送资金请求',
   exchange_ack: '交易所已返回引用',
   uncertain: '结果待确认',
@@ -90,18 +94,18 @@ export function strategyStatusText(status: StrategyStatus) {
 }
 
 /** 恢复记录状态中文文案。 */
-export function attemptStatusText(status: string) {
-  return attemptStatusTextMap[status] ?? status
+export function attemptStatusText(status: OrderAttemptStatus) {
+  return attemptStatusTextMap[status]
 }
 
 /** 恢复记录状态标签 tone。 */
-export function recoveryStatusTone(status: string) {
-  return recoveryStatusToneMap[status] ?? 'default'
+export function recoveryStatusTone(status: RecoveryStatus) {
+  return recoveryStatusToneMap[status]
 }
 
 /** 资金恢复记录状态中文文案。 */
-export function fundingAttemptStatusText(status: string) {
-  return fundingAttemptStatusTextMap[status] ?? attemptStatusText(status)
+export function fundingAttemptStatusText(status: FundingAttemptStatus) {
+  return fundingAttemptStatusTextMap[status]
 }
 
 /** 日志等级标签 tone。 */

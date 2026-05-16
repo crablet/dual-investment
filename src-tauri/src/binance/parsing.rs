@@ -94,7 +94,6 @@ fn parse_asset_balance(value: &Value) -> AppResult<OptionAssetBalance> {
         equity: decimal_field(value, "equity")?,
         available: decimal_field(value, "available")?,
         initial_margin: decimal_field(value, "initialMargin")?,
-        maint_margin: decimal_field(value, "maintMargin")?,
         adjusted_equity: decimal_field(value, "adjustedEquity")?,
     })
 }

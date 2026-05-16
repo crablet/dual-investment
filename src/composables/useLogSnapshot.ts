@@ -14,7 +14,7 @@ export function useLogSnapshot() {
   const error = shallowRef<string>()
 
   const loading = computed(() => pendingAction.value !== undefined)
-  const files = computed(() => snapshot.value?.files ?? [])
+  const hasFiles = computed(() => snapshot.value?.hasFiles ?? false)
   const recentEntries = computed(() => snapshot.value?.recentEntries ?? [])
 
   /**
@@ -65,7 +65,7 @@ export function useLogSnapshot() {
 
   return {
     snapshot,
-    files,
+    hasFiles,
     recentEntries,
     loading,
     pendingAction,

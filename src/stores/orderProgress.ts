@@ -9,7 +9,11 @@ import type {
   StrategyOrder,
   StrategyRequest,
 } from '@/types/domain'
-import type { OrderProgressStepView, OrderProgressView } from '@/types/view'
+import type {
+  OrderProgressStepStatus,
+  OrderProgressStepView,
+  OrderProgressView,
+} from '@/types/view'
 
 const orderProgressStages: Array<{ id: OrderProgressStage, label: string }> = [
   { id: 'validate', label: '校验' },
@@ -67,7 +71,7 @@ export function createOrderProgressFromOrder(flowId: string, order: StrategyOrde
 /** 构造五阶段进度列表，只有当前阶段带状态、消息和时间戳。 */
 export function createOrderProgressSteps(
   activeStage?: OrderProgressStage,
-  status: OrderProgressStatus = 'pending',
+  status: OrderProgressStepStatus = 'pending',
   message?: string,
   timestamp?: string,
 ): OrderProgressStepView[] {
@@ -91,7 +95,7 @@ export function progressStatusFromSteps(steps: OrderProgressStepView[]): OrderPr
   if (steps.some(step => step.status === 'running' || step.status === 'success')) {
     return 'running'
   }
-  return 'pending'
+  return 'running'
 }
 
 /**
@@ -111,7 +115,7 @@ export function markCurrentOrderStepError(
   const targetIndex = runningIndex >= 0 ? runningIndex : pendingIndex >= 0 ? pendingIndex : fallbackIndex
   return steps.map((step, index) =>
     index === targetIndex
-      ? { ...step, status: 'error' as OrderProgressStatus, message, timestamp }
+      ? { ...step, status: 'error' as OrderProgressStepStatus, message, timestamp }
       : step,
   )
 }

@@ -26,17 +26,34 @@ export type LogLevel = 'info' | 'warn' | 'error'
 /** 手动下单进度阶段，和 Rust 发出的脱敏进度事件保持一致。 */
 export type OrderProgressStage = 'validate' | 'funding' | 'risk' | 'submit' | 'persist'
 /** 手动下单进度状态，仅用于 UI 反馈，不作为订单事实。 */
-export type OrderProgressStatus = 'pending' | 'running' | 'success' | 'error'
-/** 后台同步健康状态，用于提醒和观测，不参与订单/资金事实判断。 */
-export type RuntimeHealthStatus = 'idle' | 'healthy' | 'degraded' | 'attention'
+export type OrderProgressStatus = 'running' | 'success' | 'error'
 /** 本地跟踪订单来源；接管仓位和本机下单不能用订单号是否存在来推断。 */
 export type StrategyOrderSource = 'liveOrder' | 'adoptedPosition'
+/** 订单与现货补齐恢复记录的持久化状态。 */
+export type OrderAttemptStatus
+  = | 'attempted'
+    | 'exchange_ack'
+    | 'persisted'
+    | 'failed'
+    | 'persist_failed'
+    | 'spot_attempted'
+    | 'spot_exchange_ack'
+    | 'spot_persisted'
+    | 'spot_persist_failed'
+/** 真实资金动作恢复记录的持久化状态。 */
+export type FundingAttemptStatus
+  = | 'attempted'
+    | 'exchange_ack'
+    | 'uncertain'
+    | 'pending'
+    | 'confirmed'
+    | 'failed'
+    | 'blocked'
 
 /** 前端可见运行设置，不包含明文 API Secret。 */
 export interface AppSettings {
   connected: boolean
   savedCredentials: boolean
-  quickExecution: boolean
 }
 
 /** 账户资产展示行，可能来自期权保证金、现货或 Simple Earn。 */
@@ -60,10 +77,8 @@ export interface StrategyCandidate {
   strike: DecimalString
   quantity: DecimalString
   limitPrice: DecimalString
-  premium: DecimalString
   annualized: DecimalString
   exerciseProbability: DecimalString
-  breakeven: DecimalString
   spotPrice: DecimalString
   strikeDistancePercent: DecimalString
 }
@@ -76,7 +91,7 @@ export interface CandidateScanResult {
 export interface StrategyOrder {
   id: string
   source: StrategyOrderSource
-  exchangeOrderId?: string
+  exchangeOrderId: string | null
   clientOrderId: string
   symbol: string
   optionSymbol: string
@@ -96,8 +111,8 @@ export interface StrategyOrder {
   updatedAt: string
   settlementAction: string
   settlementPrice: DecimalString
-  settledAt?: string
-  spotOrderId?: string
+  settledAt: string | null
+  spotOrderId: string | null
   spotClientOrderId: string
   spotOrderStatus: string
   rebalanceMessage: string
@@ -137,29 +152,12 @@ export interface RiskAlert {
   createdAt: string
 }
 
-/** 当前风险快照。 */
-export interface RiskSnapshot {
-  score: number
-  level: string
-  marginUsage: DecimalString
-  exerciseRisk: DecimalString
-  alerts: RiskAlert[]
-}
-
 /** 收益报告，图表构成由前端再派生。 */
 export interface PnlReport {
   cumulative: DecimalString
   today: DecimalString
   optionPremium: DecimalString
   floatingSpot: DecimalString
-}
-
-/** 后台调度器和恢复记录的运行健康快照。 */
-export interface RuntimeHealth {
-  status: RuntimeHealthStatus
-  consecutiveFailures: number
-  skippedTicks: number
-  pendingRecoveryCount: number
 }
 
 /** 文件日志记录，只展示后端写入的脱敏摘要。 */
@@ -171,20 +169,9 @@ export interface LogEntry {
   message: string
 }
 
-/** 本地日志文件元数据；用于判断是否允许清理日志，不直接暴露敏感内容。 */
-export interface LogFileInfo {
-  path: string
-  date: string
-  sizeBytes: number
-  entryCount: number
-  modifiedAt?: string
-}
-
-/** 设置页日志状态快照，只包含脱敏日志摘要和本地文件元数据。 */
+/** 设置页日志状态快照，只包含脱敏日志摘要和最小文件状态。 */
 export interface LogSnapshot {
-  directory: string
-  currentFile: string
-  files: LogFileInfo[]
+  hasFiles: boolean
   recentEntries: LogEntry[]
 }
 
@@ -194,11 +181,9 @@ export interface OrderAttemptView {
   clientOrderId: string
   symbol: string
   optionSymbol: string
-  direction: StrategyDirection
-  status: string
-  exchangeOrderId?: string
+  status: OrderAttemptStatus
+  exchangeOrderId: string | null
   message: string
-  createdAt: string
   updatedAt: string
 }
 
@@ -208,23 +193,21 @@ export interface FundingAttemptView {
   kindLabel: string
   asset: string
   amount: DecimalString
-  transferType?: string
-  productId?: string
-  exchangeRef?: string
-  status: string
+  transferType: string | null
+  productId: string | null
+  exchangeRef: string | null
+  status: FundingAttemptStatus
   message: string
   factSource: string
   nextAction: string
-  queryAfterAt?: string
+  queryAfterAt: string | null
   queryCount: number
   effectiveQueryCount: number
   transportErrorCount: number
-  submitErrorKind?: string
-  historyErrorKind?: string
-  historyCheckedAt?: string
-  historyWindowStartAt?: string
-  historyWindowEndAt?: string
-  createdAt: string
+  submitErrorKind: string | null
+  historyErrorKind: string | null
+  historyWindowStartAt: string | null
+  historyWindowEndAt: string | null
   updatedAt: string
 }
 
@@ -244,19 +227,18 @@ export interface OrderProgressEvent {
   status: OrderProgressStatus
   message: string
   timestamp: string
-  optionSymbol?: string
-  exchangeOrderId?: string
+  optionSymbol: string | null
+  exchangeOrderId: string | null
 }
 
 /** 前端一次刷新拿到的完整应用快照。 */
 export interface AppSnapshot {
   settings: AppSettings
-  health: RuntimeHealth
   balances: BalanceRow[]
   candidates: StrategyCandidate[]
   orders: StrategyOrder[]
   pnl: PnlReport
-  risk: RiskSnapshot
+  riskAlerts: RiskAlert[]
   orderAttempts: OrderAttemptView[]
   fundingAttempts: FundingAttemptView[]
 }
@@ -267,11 +249,11 @@ export interface ConnectBinanceRequest {
   apiSecret: string
 }
 
-/** 携带用户确认输入的下单请求；不携带候选 ID 或预览年化，`confirmLive` 是实盘门禁。 */
+/** 携带用户冻结并确认的合约输入；字段不能缺失后回退匹配，`confirmLive` 是实盘门禁。 */
 export interface StrategyRequest {
-  clientFlowId?: string
+  clientFlowId: string
   symbol: string
-  optionSymbol?: string
+  optionSymbol: string
   direction: StrategyDirection
   expiry: string
   expiryAt: string

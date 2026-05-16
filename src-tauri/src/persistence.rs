@@ -84,7 +84,6 @@ impl Persistence {
                     transport_error_count INTEGER NOT NULL,
                     submit_error_kind TEXT,
                     history_error_kind TEXT,
-                    history_checked_at TEXT,
                     history_window_start_at TEXT,
                     history_window_end_at TEXT,
                     created_at TEXT NOT NULL,
@@ -95,7 +94,6 @@ impl Persistence {
                     id TEXT PRIMARY KEY,
                     chain_id TEXT NOT NULL,
                     purpose TEXT NOT NULL,
-                    settled_symbols TEXT NOT NULL,
                     status TEXT NOT NULL,
                     message TEXT NOT NULL,
                     scheduled_at TEXT NOT NULL,
@@ -111,8 +109,8 @@ impl Persistence {
                     ON funding_attempts (updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_funding_attempts_status
                     ON funding_attempts (status, updated_at DESC);
-                CREATE INDEX IF NOT EXISTS idx_funding_attempts_chain
-                    ON funding_attempts (chain_id, kind);
+                CREATE INDEX IF NOT EXISTS idx_funding_attempts_chain_created
+                    ON funding_attempts (chain_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_settlement_sweeps_due
                     ON settlement_sweeps (status, scheduled_at);
                 ",
@@ -197,12 +195,11 @@ impl Persistence {
                     transport_error_count,
                     submit_error_kind,
                     history_error_kind,
-                    history_checked_at,
                     history_window_start_at,
                     history_window_end_at,
                     created_at,
                     updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
                 params![
                     attempt.id,
                     attempt.chain_id,
@@ -222,7 +219,6 @@ impl Persistence {
                     i64::from(attempt.transport_error_count),
                     attempt.submit_error_kind.as_deref(),
                     attempt.history_error_kind.as_deref(),
-                    attempt.history_checked_at.as_ref().map(DateTime::to_rfc3339),
                     attempt.history_window_start_at.as_ref().map(DateTime::to_rfc3339),
                     attempt.history_window_end_at.as_ref().map(DateTime::to_rfc3339),
                     attempt.created_at.to_rfc3339(),
@@ -235,26 +231,22 @@ impl Persistence {
 
     /// 保存到期结算后的批次级期权 USDT 归集任务。
     pub fn save_settlement_sweep(&self, sweep: &SettlementSweep) -> AppResult<()> {
-        let settled_symbols = serde_json::to_string(&sweep.settled_symbols)
-            .map_err(|error| AppError::Storage(error.to_string()))?;
         self.connection
             .execute(
                 "INSERT OR REPLACE INTO settlement_sweeps (
                     id,
                     chain_id,
                     purpose,
-                    settled_symbols,
                     status,
                     message,
                     scheduled_at,
                     created_at,
                     updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     sweep.id,
                     sweep.chain_id,
                     sweep.purpose,
-                    settled_symbols,
                     sweep.status.as_str(),
                     sweep.message,
                     sweep.scheduled_at.to_rfc3339(),
@@ -364,8 +356,8 @@ impl Persistence {
                 "SELECT id, chain_id, kind, purpose, asset, amount, transfer_type, product_id,
                         exchange_ref, status, message, query_after_at, send_count, query_count,
                         effective_query_count, transport_error_count, submit_error_kind,
-                        history_error_kind, history_checked_at, history_window_start_at,
-                        history_window_end_at, created_at, updated_at
+                        history_error_kind, history_window_start_at, history_window_end_at,
+                        created_at, updated_at
                  FROM funding_attempts
                  ORDER BY updated_at DESC
                  LIMIT ?1",
@@ -385,9 +377,27 @@ impl Persistence {
 
     /// 按资金链路读取恢复记录。
     pub fn list_funding_attempts_by_chain(&self, chain_id: &str) -> AppResult<Vec<FundingAttempt>> {
-        let mut attempts = self.list_funding_attempts(500)?;
-        attempts.retain(|attempt| attempt.chain_id == chain_id);
-        attempts.sort_by_key(|attempt| attempt.created_at);
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT id, chain_id, kind, purpose, asset, amount, transfer_type, product_id,
+                        exchange_ref, status, message, query_after_at, send_count, query_count,
+                        effective_query_count, transport_error_count, submit_error_kind,
+                        history_error_kind, history_window_start_at, history_window_end_at,
+                        created_at, updated_at
+                 FROM funding_attempts
+                 WHERE chain_id = ?1
+                 ORDER BY created_at ASC",
+            )
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        let mapped = statement
+            .query_map([chain_id], FundingAttemptRow::read)
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        let mut attempts = Vec::new();
+        for row in mapped {
+            let row = row.map_err(|error| AppError::Storage(error.to_string()))?;
+            attempts.push(row.into_attempt()?);
+        }
         Ok(attempts)
     }
 
@@ -401,7 +411,7 @@ impl Persistence {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT id, chain_id, purpose, settled_symbols, status, message,
+                "SELECT id, chain_id, purpose, status, message,
                         scheduled_at, created_at, updated_at
                  FROM settlement_sweeps
                  WHERE status = 'pending' AND scheduled_at <= ?1
@@ -420,30 +430,18 @@ impl Persistence {
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
                 ))
             })
             .map_err(|error| AppError::Storage(error.to_string()))?;
 
         let mut sweeps = Vec::new();
         for row in mapped {
-            let (
-                id,
-                chain_id,
-                purpose,
-                settled_symbols,
-                status,
-                message,
-                scheduled_at,
-                created_at,
-                updated_at,
-            ) = row.map_err(|error| AppError::Storage(error.to_string()))?;
+            let (id, chain_id, purpose, status, message, scheduled_at, created_at, updated_at) =
+                row.map_err(|error| AppError::Storage(error.to_string()))?;
             sweeps.push(SettlementSweep {
                 id,
                 chain_id,
                 purpose,
-                settled_symbols: serde_json::from_str(&settled_symbols)
-                    .map_err(|error| AppError::Storage(error.to_string()))?,
                 status: parse_settlement_sweep_status(&status)?,
                 message,
                 scheduled_at: parse_time(&scheduled_at)?,
@@ -504,7 +502,6 @@ struct FundingAttemptRow {
     transport_error_count: i64,
     submit_error_kind: Option<String>,
     history_error_kind: Option<String>,
-    history_checked_at: Option<String>,
     history_window_start_at: Option<String>,
     history_window_end_at: Option<String>,
     created_at: String,
@@ -532,11 +529,10 @@ impl FundingAttemptRow {
             transport_error_count: row.get(15)?,
             submit_error_kind: row.get(16)?,
             history_error_kind: row.get(17)?,
-            history_checked_at: row.get(18)?,
-            history_window_start_at: row.get(19)?,
-            history_window_end_at: row.get(20)?,
-            created_at: row.get(21)?,
-            updated_at: row.get(22)?,
+            history_window_start_at: row.get(18)?,
+            history_window_end_at: row.get(19)?,
+            created_at: row.get(20)?,
+            updated_at: row.get(21)?,
         })
     }
 
@@ -566,11 +562,6 @@ impl FundingAttemptRow {
             )?,
             submit_error_kind: self.submit_error_kind,
             history_error_kind: self.history_error_kind,
-            history_checked_at: self
-                .history_checked_at
-                .as_deref()
-                .map(parse_time)
-                .transpose()?,
             history_window_start_at: self
                 .history_window_start_at
                 .as_deref()

@@ -22,7 +22,7 @@ const icons = {
 
 <template>
   <article class="metric-card" :class="`tone-${metric.tone}`">
-    <NIcon class="metric-icon" :component="icons[metric.icon as keyof typeof icons] ?? Wallet" />
+    <NIcon class="metric-icon" :component="icons[metric.icon]" />
     <div>
       <p class="metric-title">{{ metric.title }}</p>
       <strong>{{ metric.value }}</strong>

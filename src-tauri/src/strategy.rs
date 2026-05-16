@@ -1,6 +1,6 @@
 //! 策略计算与风控派生逻辑。
 //!
-//! 这个模块只处理纯业务计算：候选过滤、收益估算、风险快照和订单状态归一化。
+//! 这个模块只处理纯业务计算：候选过滤、收益估算、风险提醒和订单状态归一化。
 //! 它不直接访问 Binance、不保存数据，也不读取系统凭据。
 
 mod balances;
@@ -19,6 +19,5 @@ pub use candidates::{
 };
 pub use orders::{annualized_from_order_terms, order_from_adopted_position, order_from_request};
 pub use risk::{
-    DEFAULT_MARGIN_USAGE_TOLERANCE_POINTS, DEFAULT_MAX_MARGIN_USAGE, empty_risk_snapshot,
-    risk_snapshot_from_account,
+    DEFAULT_MARGIN_USAGE_TOLERANCE_POINTS, DEFAULT_MAX_MARGIN_USAGE, risk_alerts_from_account,
 };

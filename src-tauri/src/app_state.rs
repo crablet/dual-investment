@@ -57,10 +57,10 @@ use crate::domain::{
     FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView, LogLevel,
     LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
     OrderAttemptStatus, OrderAttemptView, OrderProgressStage, OrderProgressStatus,
-    ResolveFundingAttemptRequest, RuntimeHealth, RuntimeHealthStatus, SettlementSweep,
-    SettlementSweepStatus, SimpleEarnRedemptionRecord, SimpleEarnSnapshot,
-    SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate, StrategyDirection,
-    StrategyOrder, StrategyRequest, StrategyStatus, UniversalTransferRecord,
+    ResolveFundingAttemptRequest, SettlementSweep, SettlementSweepStatus,
+    SimpleEarnRedemptionRecord, SimpleEarnSnapshot, SimpleEarnSubscriptionRecord,
+    SpotAccountSnapshot, StrategyCandidate, StrategyOrder, StrategyRequest, StrategyStatus,
+    UniversalTransferRecord,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -139,12 +139,6 @@ impl SettlementSweepPlan {
     fn has_deferred_work(&self) -> bool {
         !self.deferred_reasons.is_empty()
     }
-}
-
-#[derive(Clone, Debug, Default)]
-struct RuntimeHealthState {
-    consecutive_failures: u32,
-    skipped_ticks: u32,
 }
 
 const FUNDING_HISTORY_LOOKBACK_MINUTES: i64 = 5;
@@ -411,8 +405,6 @@ pub struct RuntimeConfig {
     pub api_secret: Option<String>,
     /// 系统 keyring 是否存在完整凭据。
     pub saved_credentials: bool,
-    /// 手动下单体验开关，不绕过后端真实下单门禁。
-    pub quick_execution: bool,
 }
 
 impl Default for RuntimeConfig {
@@ -422,7 +414,6 @@ impl Default for RuntimeConfig {
             api_key: None,
             api_secret: None,
             saved_credentials: secrets::has_binance_credentials(),
-            quick_execution: true,
         }
     }
 }
@@ -433,7 +424,6 @@ impl RuntimeConfig {
         AppSettings {
             connected: self.connected,
             saved_credentials: self.saved_credentials,
-            quick_execution: self.quick_execution,
         }
     }
 }
@@ -451,7 +441,6 @@ pub struct AppState {
     persistence: Arc<Mutex<Persistence>>,
     logs: Arc<LogStore>,
     worker_started: Arc<AtomicBool>,
-    health: Arc<RwLock<RuntimeHealthState>>,
     maintenance_lock: Arc<AsyncMutex<()>>,
     trade_lock: Arc<AsyncMutex<()>>,
 }
@@ -483,7 +472,6 @@ impl AppState {
             persistence: Arc::new(Mutex::new(persistence)),
             logs: Arc::new(logs),
             worker_started: Arc::new(AtomicBool::new(false)),
-            health: Arc::new(RwLock::new(RuntimeHealthState::default())),
             maintenance_lock: Arc::new(AsyncMutex::new(())),
             trade_lock: Arc::new(AsyncMutex::new(())),
         };
@@ -499,7 +487,7 @@ impl AppState {
         let candidates = self.candidates.read().await.clone();
         let orders = self.orders.read().await.clone();
         let accounts = self.live_accounts_if_connected().await?;
-        let (order_attempts, funding_attempts, pending_recovery_count) = {
+        let (order_attempts, funding_attempts) = {
             let persistence = self
                 .persistence
                 .lock()
@@ -514,13 +502,8 @@ impl AppState {
                 .into_iter()
                 .map(FundingAttemptView::from)
                 .collect::<Vec<_>>();
-            let pending_recovery_count = persistence.count_pending_order_attempts()?
-                + persistence.count_pending_funding_attempts()?;
-            (attempts, funding_attempts, pending_recovery_count)
+            (attempts, funding_attempts)
         };
-        let health = self
-            .health_snapshot(settings.connected, pending_recovery_count)
-            .await;
         let option_account = accounts.as_ref().map(|accounts| &accounts.option);
         let balances = accounts.as_ref().map_or_else(Vec::new, |accounts| {
             combined_balances(
@@ -538,12 +521,10 @@ impl AppState {
         Ok(AppSnapshot {
             balances,
             candidates,
-            health,
             pnl: strategy::pnl_report_from_orders_with_spot(&orders, spot_price),
-            risk: option_account.map_or_else(
-                strategy::empty_risk_snapshot,
-                strategy::risk_snapshot_from_account,
-            ),
+            risk_alerts: option_account
+                .map(strategy::risk_alerts_from_account)
+                .unwrap_or_default(),
             settings,
             orders,
             order_attempts,
@@ -554,6 +535,7 @@ impl AppState {
     /// 使用用户输入凭据连接 Binance，并保存到系统 keyring。
     ///
     /// 连接阶段同时验证期权和现货账户权限，因为到期 ITM 后需要真实现货补齐能力。
+    /// 连接成功会启动后台维护；维护可能推进已有恢复、结算和资金收尾，但不会创建新策略。
     pub async fn connect_binance(&self, request: ConnectBinanceRequest) -> AppResult<AppSettings> {
         let result = self.connect_binance_inner(request).await;
         if let Err(error) = &result {
@@ -594,6 +576,8 @@ impl AppState {
     }
 
     /// 使用系统 keyring 中的凭据连接 Binance。
+    ///
+    /// 当前成功后仍会启动后台维护，因此不是纯只读重连；这是必须显式保留可见性的安全缺口。
     pub async fn connect_saved_binance(&self) -> AppResult<AppSettings> {
         let result = self.connect_saved_binance_inner().await;
         if let Err(error) = &result {
@@ -713,7 +697,7 @@ impl AppState {
                 OrderProgressStage::Validate,
                 OrderProgressStatus::Error,
                 "手动下单需要显式确认",
-                request.option_symbol.as_deref(),
+                Some(request.option_symbol.as_str()),
                 None,
             );
             return Err(AppError::RiskRejected("手动下单需要显式确认".to_string()));
@@ -723,7 +707,7 @@ impl AppState {
                 OrderProgressStage::Validate,
                 OrderProgressStatus::Error,
                 "存在待确认恢复记录，已暂停新的真实下单",
-                request.option_symbol.as_deref(),
+                Some(request.option_symbol.as_str()),
                 None,
             );
             return Err(AppError::RiskRejected(
@@ -909,7 +893,9 @@ impl AppState {
         Ok(adopted)
     }
 
-    /// 同步订单、执行到期结算，然后返回完整快照。
+    /// 恢复到期资金记录、同步订单并执行到期结算，然后返回完整快照。
+    ///
+    /// 该调用可能执行划转、Simple Earn 或现货补齐，不是只读刷新。
     pub async fn sync_live_state(&self) -> AppResult<AppSnapshot> {
         let _maintenance_guard = self.maintenance_lock.lock().await;
         self.recover_due_funding_attempts().await?;
@@ -963,55 +949,6 @@ impl AppState {
         self.logs.snapshot()
     }
 
-    async fn health_snapshot(
-        &self,
-        connected: bool,
-        pending_recovery_count: usize,
-    ) -> RuntimeHealth {
-        let health = self.health.read().await.clone();
-        // health 是运行观测信号：恢复记录和连续失败会提升状态，但不改变交易事实。
-        let status = if !connected {
-            RuntimeHealthStatus::Idle
-        } else if pending_recovery_count > 0 || health.consecutive_failures >= 3 {
-            RuntimeHealthStatus::Attention
-        } else if health.consecutive_failures > 0 || health.skipped_ticks > 0 {
-            RuntimeHealthStatus::Degraded
-        } else {
-            RuntimeHealthStatus::Healthy
-        };
-        RuntimeHealth {
-            status,
-            consecutive_failures: health.consecutive_failures,
-            skipped_ticks: health.skipped_ticks,
-            pending_recovery_count,
-        }
-    }
-
-    async fn record_background_tick_success(&self) {
-        // 成功完成一整轮维护后清空失败/跳过计数，避免旧错误持续污染健康状态。
-        let mut health = self.health.write().await;
-        health.consecutive_failures = 0;
-        health.skipped_ticks = 0;
-    }
-
-    async fn record_background_tick_failure(&self) {
-        // 下次 tick 仍会继续尝试，除非恢复记录阻断自动动作。
-        let mut health = self.health.write().await;
-        health.consecutive_failures = health.consecutive_failures.saturating_add(1);
-    }
-
-    async fn record_background_tick_skipped(&self) -> AppResult<()> {
-        let skipped_ticks = {
-            let mut health = self.health.write().await;
-            health.skipped_ticks = health.skipped_ticks.saturating_add(1);
-            health.skipped_ticks
-        };
-        self.record_warning(
-            "background.tick_skipped",
-            &format!("上一轮后台同步仍在运行，本轮跳过，连续跳过 {skipped_ticks} 次"),
-        )
-    }
-
     async fn load_order_live_inputs(client: &BinanceClient) -> AppResult<OrderLiveInputs> {
         let account_task = spawn_binance_request({
             let client = client.clone();
@@ -1050,7 +987,7 @@ impl AppState {
             OrderProgressStage::Validate,
             OrderProgressStatus::Running,
             "正在校验下单参数",
-            request.option_symbol.as_deref(),
+            Some(request.option_symbol.as_str()),
             None,
         );
         if let Err(error) = validate_request(&request) {
@@ -1058,7 +995,7 @@ impl AppState {
                 OrderProgressStage::Validate,
                 OrderProgressStatus::Error,
                 error.to_string(),
-                request.option_symbol.as_deref(),
+                Some(request.option_symbol.as_str()),
                 None,
             );
             return Err(error);
@@ -1070,7 +1007,7 @@ impl AppState {
                     OrderProgressStage::Validate,
                     OrderProgressStatus::Error,
                     error.to_string(),
-                    request.option_symbol.as_deref(),
+                    Some(request.option_symbol.as_str()),
                     None,
                 );
                 return Err(error);
@@ -1080,7 +1017,7 @@ impl AppState {
             OrderProgressStage::Validate,
             OrderProgressStatus::Running,
             "正在读取 Binance 账户、合约和行情",
-            request.option_symbol.as_deref(),
+            Some(request.option_symbol.as_str()),
             None,
         );
         let OrderLiveInputs {
@@ -1094,7 +1031,7 @@ impl AppState {
                     OrderProgressStage::Validate,
                     OrderProgressStatus::Error,
                     error.to_string(),
-                    request.option_symbol.as_deref(),
+                    Some(request.option_symbol.as_str()),
                     None,
                 );
                 return Err(error);
@@ -1107,14 +1044,12 @@ impl AppState {
                     OrderProgressStage::Validate,
                     OrderProgressStatus::Error,
                     error.to_string(),
-                    request.option_symbol.as_deref(),
+                    Some(request.option_symbol.as_str()),
                     None,
                 );
                 return Err(error);
             }
         };
-        request.option_symbol = Some(contract.symbol.clone());
-        request.expiry_at = contract.expiry_at;
         progress.emit(
             OrderProgressStage::Validate,
             OrderProgressStatus::Running,
@@ -1742,7 +1677,6 @@ impl AppState {
             id: Uuid::new_v4().to_string(),
             chain_id: Uuid::new_v4().to_string(),
             purpose: "期权到期结算后归集".to_string(),
-            settled_symbols: plan.settled_symbols.clone(),
             status: SettlementSweepStatus::Pending,
             message: "到期结算已完成，等待期权账户余额稳定后归集闲置 USDT".to_string(),
             scheduled_at: now + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES),
@@ -1755,7 +1689,7 @@ impl AppState {
             &format!(
                 "本轮到期结算已完成，已计划 {} 分钟后归集期权账户闲置 USDT，涉及 {}",
                 SETTLEMENT_SWEEP_DELAY_MINUTES,
-                sweep.settled_symbols.join("、")
+                plan.settled_symbols.join("、")
             ),
         )?;
         Ok(())
@@ -1905,8 +1839,7 @@ impl AppState {
             self.sync_spot_rebalance(client, &mut order).await?;
             self.save_order(&order).await?;
             if order.status == StrategyStatus::Settled {
-                self.sweep_spot_rebalance_assets_best_effort(client, order.direction)
-                    .await;
+                self.sweep_spot_rebalance_assets_best_effort(client).await;
             }
             return Ok(order);
         }
@@ -2033,8 +1966,7 @@ impl AppState {
             &format!("{} {}", order.option_symbol, order.rebalance_message),
         )?;
         if order.status == StrategyStatus::Settled {
-            self.sweep_spot_rebalance_assets_best_effort(client, order.direction)
-                .await;
+            self.sweep_spot_rebalance_assets_best_effort(client).await;
         }
         Ok(order)
     }
@@ -2088,19 +2020,18 @@ impl AppState {
             loop {
                 interval.tick().await;
                 let Ok(_maintenance_guard) = state.maintenance_lock.try_lock() else {
-                    // 后台维护不排队堆积；上一轮未结束时直接跳过并记录健康状态。
-                    if let Err(error) = state.record_background_tick_skipped().await {
+                    // 后台维护不排队堆积；上一轮未结束时直接跳过并记录脱敏日志。
+                    if let Err(error) = state.record_warning(
+                        "background.tick_skipped",
+                        "上一轮后台同步仍在运行，本轮跳过",
+                    ) {
                         let _ = state
                             .record_error("background.tick_skip_log_failed", &error.to_string());
                     }
                     continue;
                 };
-                match state.background_tick().await {
-                    Ok(()) => state.record_background_tick_success().await,
-                    Err(error) => {
-                        state.record_background_tick_failure().await;
-                        let _ = state.record_error("background.tick_failed", &error.to_string());
-                    }
+                if let Err(error) = state.background_tick().await {
+                    let _ = state.record_error("background.tick_failed", &error.to_string());
                 }
             }
         });
@@ -2330,7 +2261,6 @@ impl AppState {
             transport_error_count: 0,
             submit_error_kind: None,
             history_error_kind: None,
-            history_checked_at: None,
             history_window_start_at: None,
             history_window_end_at: None,
             created_at: now,
@@ -2436,7 +2366,6 @@ impl AppState {
         let now = Utc::now();
         let (window_start, window_end) = funding_history_window(&attempt, now);
         attempt.query_count = attempt.query_count.saturating_add(1);
-        attempt.history_checked_at = Some(now);
         attempt.history_window_start_at = Some(window_start);
         attempt.history_window_end_at = Some(window_end);
         attempt.updated_at = now;
@@ -2975,13 +2904,9 @@ impl AppState {
         Ok(false)
     }
 
-    async fn sweep_spot_rebalance_assets_best_effort(
-        &self,
-        client: &BinanceClient,
-        direction: StrategyDirection,
-    ) {
+    async fn sweep_spot_rebalance_assets_best_effort(&self, client: &BinanceClient) {
         // 现货补齐后的归集失败不应把已完成补齐改成失败，只提示后续人工处理。
-        if let Err(error) = self.sweep_spot_rebalance_assets(client, direction).await {
+        if let Err(error) = self.sweep_spot_rebalance_assets(client).await {
             let _ = self.record_warning(
                 "funding.sweep.failed",
                 &format!("现货补齐后归集失败：{error}"),
@@ -2990,15 +2915,9 @@ impl AppState {
     }
 
     /// 现货补齐完成后，把本流程会用到的 BTC/USDT 空闲余额重新放入活期赚币。
-    async fn sweep_spot_rebalance_assets(
-        &self,
-        client: &BinanceClient,
-        direction: StrategyDirection,
-    ) -> AppResult<()> {
+    async fn sweep_spot_rebalance_assets(&self, client: &BinanceClient) -> AppResult<()> {
         let spot_account = client.spot_account().await?;
-        let assets = match direction {
-            StrategyDirection::SellPut | StrategyDirection::SellCall => ["USDT", "BTC"],
-        };
+        let assets = ["USDT", "BTC"];
         let chain_id = Uuid::new_v4().to_string();
         for asset in assets {
             // 这里只归集本策略会触碰的 BTC/USDT，避免误移动用户其他现货资产。

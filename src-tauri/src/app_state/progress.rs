@@ -11,7 +11,7 @@ const ORDER_PROGRESS_EVENT: &str = "order-progress";
 
 pub(super) struct OrderProgressEmitter {
     app: AppHandle,
-    flow_id: Option<String>,
+    flow_id: String,
 }
 
 impl OrderProgressEmitter {
@@ -32,11 +32,8 @@ impl OrderProgressEmitter {
         option_symbol: Option<&str>,
         exchange_order_id: Option<&str>,
     ) {
-        let Some(flow_id) = &self.flow_id else {
-            return;
-        };
         let event = OrderProgressEvent {
-            flow_id: flow_id.clone(),
+            flow_id: self.flow_id.clone(),
             stage,
             status,
             message: message.into(),

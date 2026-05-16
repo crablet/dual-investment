@@ -24,7 +24,6 @@ export type CalendarEventType
     | 'rebalance'
     | 'risk'
     | 'recovery'
-    | 'system'
 
 /** 日历角标颜色语义，保持和全局交易终端配色一致。 */
 export type CalendarEventTone = 'gold' | 'green' | 'purple' | 'red' | 'gray'
@@ -56,13 +55,12 @@ interface UseCalendarEventsOptions {
 /** 日历顶部筛选项；顺序即 UI 展示顺序。 */
 export const calendarEventTypes: CalendarEventTypeMeta[] = [
   { id: 'all', label: '全部', tone: 'gold' },
-  { id: 'order', label: '买入', tone: 'gold' },
+  { id: 'order', label: '下单', tone: 'gold' },
   { id: 'expiry', label: '到期', tone: 'purple' },
   { id: 'settlement', label: '结算', tone: 'green' },
   { id: 'rebalance', label: '补齐', tone: 'green' },
   { id: 'risk', label: '风险', tone: 'red' },
   { id: 'recovery', label: '恢复', tone: 'gray' },
-  { id: 'system', label: '系统', tone: 'gray' },
 ]
 
 /**
@@ -83,7 +81,7 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
       rows.push(...eventsFromOrder(order))
     }
 
-    for (const alert of store.risk?.alerts ?? []) {
+    for (const alert of store.riskAlerts) {
       rows.push(eventFromRiskAlert(alert))
     }
 
@@ -179,7 +177,7 @@ function eventFromRiskAlert(alert: RiskAlert): CalendarEvent {
     timeLabel: localTimeLabel(alert.createdAt),
     title: alert.title,
     detail: alert.message,
-    tone: alert.severity === 'high' || alert.severity === 'medium' ? 'red' : 'gold',
+    tone: 'red',
     targetView: 'portfolio',
     priority: alert.severity === 'high' ? 95 : 80,
   }

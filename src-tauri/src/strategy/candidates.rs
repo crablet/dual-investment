@@ -111,10 +111,6 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
             let exercise_probability = (delta_abs * dec!(100)).round_dp(2);
             let strike_distance_percent =
                 calculate_strike_distance_percent(contract.strike_price, spot_price);
-            let breakeven = match direction {
-                StrategyDirection::SellPut => contract.strike_price - limit_price,
-                StrategyDirection::SellCall => contract.strike_price + limit_price,
-            };
             Some(StrategyCandidate {
                 id: format!("{}-{}", contract.symbol, Utc::now().timestamp()),
                 symbol: contract.underlying.clone(),
@@ -125,10 +121,8 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
                 strike: contract.strike_price,
                 quantity,
                 limit_price,
-                premium,
                 annualized,
                 exercise_probability,
-                breakeven,
                 spot_price,
                 strike_distance_percent,
             })

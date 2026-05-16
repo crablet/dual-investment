@@ -16,13 +16,11 @@ import {
 
 const props = withDefaults(defineProps<{
   items: PnlBreakdownItem[]
-  center?: string
   centerValue?: string
   centerLabel?: string
   unit?: string
   emptyText?: string
 }>(), {
-  center: undefined,
   centerValue: undefined,
   centerLabel: '合计',
   unit: 'USDT',
@@ -47,7 +45,7 @@ const activeSegment = computed(() =>
 const activeKey = computed(() => activeSegment.value?.key)
 
 const centerValue = computed(() =>
-  resolveCenterValue(sortedItems.value, props.center, props.centerValue),
+  resolveCenterValue(sortedItems.value, props.centerValue),
 )
 
 const centerDisplay = computed(() => {

@@ -44,7 +44,7 @@ async function clearLogs() {
         <template #icon><NIcon :component="FolderOpen" /></template>
         打开日志文件夹
       </NButton>
-      <NButton secondary type="error" :loading="logs.pendingAction.value === 'clear'" :disabled="logs.files.value.length === 0" @click="clearLogs">
+      <NButton secondary type="error" :loading="logs.pendingAction.value === 'clear'" :disabled="!logs.hasFiles.value" @click="clearLogs">
         <template #icon><NIcon :component="Trash2" /></template>
         删除日志
       </NButton>

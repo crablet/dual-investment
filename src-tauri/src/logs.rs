@@ -11,10 +11,10 @@ use std::{
     sync::Mutex,
 };
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{Local, Utc};
 use uuid::Uuid;
 
-use crate::domain::{AppError, AppResult, LogEntry, LogFileInfo, LogLevel, LogSnapshot};
+use crate::domain::{AppError, AppResult, LogEntry, LogLevel, LogSnapshot};
 
 const RECENT_ENTRY_LIMIT: usize = 120;
 
@@ -68,15 +68,9 @@ impl LogStore {
     pub fn snapshot(&self) -> AppResult<LogSnapshot> {
         fs::create_dir_all(&self.directory).map_err(storage_error)?;
         let paths = self.log_file_paths()?;
-        let files = paths
-            .iter()
-            .map(|path| Self::file_info(path))
-            .collect::<AppResult<Vec<_>>>()?;
         let recent_entries = Self::recent_entries(&paths, RECENT_ENTRY_LIMIT)?;
         Ok(LogSnapshot {
-            directory: self.directory.display().to_string(),
-            current_file: self.current_file_path().display().to_string(),
-            files,
+            has_files: !paths.is_empty(),
             recent_entries,
         })
     }
@@ -133,23 +127,6 @@ impl LogStore {
         Ok(paths)
     }
 
-    fn file_info(path: &Path) -> AppResult<LogFileInfo> {
-        let metadata = fs::metadata(path).map_err(storage_error)?;
-        let modified_at = metadata.modified().ok().map(DateTime::<Utc>::from);
-        let date = path
-            .file_stem()
-            .and_then(OsStr::to_str)
-            .unwrap_or_default()
-            .to_string();
-        Ok(LogFileInfo {
-            path: path.display().to_string(),
-            date,
-            size_bytes: metadata.len(),
-            entry_count: count_lines(path)?,
-            modified_at,
-        })
-    }
-
     fn recent_entries(paths: &[PathBuf], limit: usize) -> AppResult<Vec<LogEntry>> {
         // 文件名倒序读取，再把单文件内容反转，得到最新日志优先的设置页列表。
         let mut entries = Vec::new();
@@ -182,12 +159,6 @@ fn read_entries(path: &Path) -> AppResult<Vec<LogEntry>> {
         }
     }
     Ok(entries)
-}
-
-fn count_lines(path: &Path) -> AppResult<usize> {
-    let file = File::open(path).map_err(storage_error)?;
-    let reader = BufReader::new(file);
-    Ok(reader.lines().map_while(Result::ok).count())
 }
 
 #[allow(clippy::needless_pass_by_value)]

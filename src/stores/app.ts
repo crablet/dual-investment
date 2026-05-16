@@ -62,6 +62,7 @@ interface ConnectSavedOptions extends RunOptions {
 }
 
 type AutoReconnectState = 'idle' | 'waiting' | 'connecting' | 'paused'
+type PlaceStrategyRequest = Omit<StrategyRequest, 'clientFlowId'>
 
 /** 应用内视图 ID；导航切换统一走 `openView`，以触发对应页面刷新。 */
 export type AppViewId
@@ -91,7 +92,6 @@ export const useAppStore = defineStore('app', () => {
   const snapshot = shallowRef<AppSnapshot>()
   const pending = shallowRef(emptyPending())
   const foregroundPending = shallowRef(0)
-  const backgroundPending = shallowRef(0)
   const error = shallowRef<string>()
   const backgroundError = shallowRef<string>()
   const activeView = shallowRef<AppViewId>('overview')
@@ -105,14 +105,12 @@ export const useAppStore = defineStore('app', () => {
   const lastAutoReconnectError = shallowRef<string>()
 
   const loading = computed(() => foregroundPending.value > 0)
-  const backgroundLoading = computed(() => backgroundPending.value > 0)
-  const busy = computed(() => Object.values(pending.value).some(count => count > 0))
   const settings = computed(() => snapshot.value?.settings)
   const balances = computed(() => snapshot.value?.balances ?? [])
   const candidates = computed(() => snapshot.value?.candidates ?? [])
   const orders = computed(() => snapshot.value?.orders ?? [])
   const pnl = computed(() => snapshot.value?.pnl)
-  const risk = computed(() => snapshot.value?.risk)
+  const riskAlerts = computed(() => snapshot.value?.riskAlerts ?? [])
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
   const fundingAttempts = computed(() => snapshot.value?.fundingAttempts ?? [])
   const runningOrders = computed(() =>
@@ -156,10 +154,7 @@ export const useAppStore = defineStore('app', () => {
     // 前台错误和后台错误分开保存：静默刷新/重连失败不应覆盖用户正在处理的表单或交易错误。
     const silent = options.silent ?? false
     setPending(key, 1)
-    if (silent) {
-      backgroundPending.value += 1
-    }
-    else {
+    if (!silent) {
       foregroundPending.value += 1
       error.value = undefined
     }
@@ -182,10 +177,7 @@ export const useAppStore = defineStore('app', () => {
     }
     finally {
       setPending(key, -1)
-      if (silent) {
-        backgroundPending.value = Math.max(0, backgroundPending.value - 1)
-      }
-      else {
+      if (!silent) {
         foregroundPending.value = Math.max(0, foregroundPending.value - 1)
       }
     }
@@ -201,10 +193,6 @@ export const useAppStore = defineStore('app', () => {
 
   function isLoading(key: RequestKey) {
     return pending.value[key] > 0
-  }
-
-  function isBusy() {
-    return busy.value
   }
 
   async function bindOrderProgressEvents() {
@@ -523,9 +511,9 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function placeStrategy(request: StrategyRequest) {
-    const flowId = request.clientFlowId ?? makeOrderFlowId()
-    const orderRequest = { ...request, clientFlowId: flowId }
+  async function placeStrategy(request: PlaceStrategyRequest) {
+    const flowId = makeOrderFlowId()
+    const orderRequest: StrategyRequest = { ...request, clientFlowId: flowId }
     startOrderProgress(flowId, orderRequest)
     const order = await run('order', () => api.placeManualStrategy(orderRequest))
     if (order && snapshot.value) {
@@ -561,13 +549,9 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     snapshot,
-    pending,
     loading,
-    backgroundLoading,
     error,
     backgroundError,
-    autoReconnectState,
-    autoReconnectAttempts,
     autoReconnectDelayMs,
     autoReconnectPaused,
     autoReconnectMessage,
@@ -582,12 +566,11 @@ export const useAppStore = defineStore('app', () => {
     candidates,
     orders,
     pnl,
-    risk,
+    riskAlerts,
     orderAttempts,
     fundingAttempts,
     runningOrders,
     isLoading,
-    isBusy,
     bindOrderProgressEvents,
     disposeOrderProgressEvents,
     clearOrderProgress,

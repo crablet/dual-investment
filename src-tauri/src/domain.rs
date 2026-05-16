@@ -28,18 +28,6 @@ pub enum AppError {
 /// Rust 内部统一结果类型。
 pub type AppResult<T> = Result<T, AppError>;
 
-/// 后台运行健康状态。
-///
-/// 这个状态只用于前端观测长期运行质量，不作为订单、结算或资金事实来源。
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RuntimeHealthStatus {
-    Idle,
-    Healthy,
-    Degraded,
-    Attention,
-}
-
 /// 双币赢策略方向。
 ///
 /// 当前 v1 只做卖出期权：卖 Put 用 USDT 承接低买 BTC，卖 Call 用 BTC 承接高卖。
@@ -109,7 +97,6 @@ pub enum RiskSeverity {
 pub struct AppSettings {
     pub connected: bool,
     pub saved_credentials: bool,
-    pub quick_execution: bool,
 }
 
 /// 应用日志等级。
@@ -126,7 +113,7 @@ pub enum LogLevel {
 /// 日志记录用于本机排障和设置页展示，内容必须保持脱敏，不能包含 Secret、签名 query
 /// 或 Binance 原始响应。
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LogEntry {
     pub id: String,
     pub timestamp: DateTime<Utc>,
@@ -135,28 +122,13 @@ pub struct LogEntry {
     pub message: String,
 }
 
-/// 一个本地日志文件的元数据。
-///
-/// 前端当前只用这些元数据判断是否允许清理日志；文件内容仍只能通过脱敏日志记录展示。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LogFileInfo {
-    pub path: String,
-    pub date: String,
-    pub size_bytes: u64,
-    pub entry_count: usize,
-    pub modified_at: Option<DateTime<Utc>>,
-}
-
 /// 设置页日志面板需要的日志快照。
 ///
-/// 快照包含最近脱敏日志和本地文件元数据，不包含日志原始文件内容。
+/// 快照包含最近脱敏日志，以及是否存在可清理日志文件的最小状态。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogSnapshot {
-    pub directory: String,
-    pub current_file: String,
-    pub files: Vec<LogFileInfo>,
+    pub has_files: bool,
     pub recent_entries: Vec<LogEntry>,
 }
 
@@ -180,7 +152,7 @@ pub struct BalanceRow {
 
 /// 一条可浏览、可下单的策略候选。
 ///
-/// 候选来自 Binance 实盘合约、买一价与 mark greeks，再结合当前自动规则计算推荐等级。
+/// 候选来自 Binance 实盘合约、买一价与 mark greeks，再结合当前浏览规则过滤。
 /// 浏览范围和可见性在策略层决定，前端筛选只影响展示。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -198,13 +170,9 @@ pub struct StrategyCandidate {
     #[serde(with = "rust_decimal::serde::str")]
     pub limit_price: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
-    pub premium: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
     pub annualized: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub exercise_probability: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub breakeven: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub spot_price: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
@@ -222,7 +190,7 @@ pub struct CandidateScanResult {
 ///
 /// 订单必须来自 Binance 接单结果或恢复查询结果，不能由前端或本地推断凭空创建。
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StrategyOrder {
     pub id: String,
     pub source: StrategyOrderSource,
@@ -278,21 +246,6 @@ pub struct RiskAlert {
     pub created_at: DateTime<Utc>,
 }
 
-/// 当前风险快照。
-///
-/// 由账户保证金、义务仓和风控规则计算得出，用于 UI 展示和下单前风控判断。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RiskSnapshot {
-    pub score: u32,
-    pub level: String,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub margin_usage: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub exercise_risk: Decimal,
-    pub alerts: Vec<RiskAlert>,
-}
-
 /// 收益汇总。
 ///
 /// 这里保留真实订单和现货补齐派生出的收益字段；展示用构成比例由前端从这些字段再派生。
@@ -309,21 +262,12 @@ pub struct PnlReport {
     pub floating_spot: Decimal,
 }
 
-/// 后台调度器和恢复记录的运行健康快照。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeHealth {
-    pub status: RuntimeHealthStatus,
-    pub consecutive_failures: u32,
-    pub skipped_ticks: u32,
-    pub pending_recovery_count: usize,
-}
-
 /// 下单恢复记录的状态机。
 ///
 /// 当交易所已经接单但本地订单保存失败时，`PersistFailed`/`SpotPersistFailed`
 /// 会留下可恢复记录。恢复时必须重新查询 Binance 真实订单。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OrderAttemptStatus {
     Attempted,
     ExchangeAck,
@@ -378,11 +322,9 @@ pub struct OrderAttemptView {
     pub client_order_id: String,
     pub symbol: String,
     pub option_symbol: String,
-    pub direction: StrategyDirection,
-    pub status: String,
+    pub status: OrderAttemptStatus,
     pub exchange_order_id: Option<String>,
     pub message: String,
-    pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -393,11 +335,9 @@ impl From<OrderAttempt> for OrderAttemptView {
             client_order_id: attempt.client_order_id,
             symbol: attempt.symbol,
             option_symbol: attempt.option_symbol,
-            direction: attempt.direction,
-            status: attempt.status.as_str().to_string(),
+            status: attempt.status,
             exchange_order_id: attempt.exchange_order_id,
             message: attempt.message,
-            created_at: attempt.created_at,
             updated_at: attempt.updated_at,
         }
     }
@@ -432,7 +372,8 @@ impl FundingAttemptKind {
 }
 
 /// 真实资金动作恢复状态。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FundingAttemptStatus {
     Attempted,
     ExchangeAck,
@@ -504,7 +445,6 @@ pub struct FundingAttempt {
     pub transport_error_count: u32,
     pub submit_error_kind: Option<String>,
     pub history_error_kind: Option<String>,
-    pub history_checked_at: Option<DateTime<Utc>>,
     pub history_window_start_at: Option<DateTime<Utc>>,
     pub history_window_end_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -540,7 +480,6 @@ pub struct SettlementSweep {
     pub id: String,
     pub chain_id: String,
     pub purpose: String,
-    pub settled_symbols: Vec<String>,
     pub status: SettlementSweepStatus,
     pub message: String,
     pub scheduled_at: DateTime<Utc>,
@@ -550,7 +489,7 @@ pub struct SettlementSweep {
 
 /// 人工解除资金恢复阻断的请求。
 #[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResolveFundingAttemptRequest {
     pub attempt_id: String,
     pub resolution: FundingAttemptManualResolution,
@@ -569,7 +508,7 @@ pub struct FundingAttemptView {
     pub transfer_type: Option<String>,
     pub product_id: Option<String>,
     pub exchange_ref: Option<String>,
-    pub status: String,
+    pub status: FundingAttemptStatus,
     pub message: String,
     pub fact_source: String,
     pub next_action: String,
@@ -579,10 +518,8 @@ pub struct FundingAttemptView {
     pub transport_error_count: u32,
     pub submit_error_kind: Option<String>,
     pub history_error_kind: Option<String>,
-    pub history_checked_at: Option<DateTime<Utc>>,
     pub history_window_start_at: Option<DateTime<Utc>>,
     pub history_window_end_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -626,7 +563,7 @@ impl From<FundingAttempt> for FundingAttemptView {
             transfer_type: attempt.transfer_type,
             product_id: attempt.product_id,
             exchange_ref: attempt.exchange_ref,
-            status: attempt.status.as_str().to_string(),
+            status: attempt.status,
             message: attempt.message,
             fact_source,
             next_action,
@@ -636,10 +573,8 @@ impl From<FundingAttempt> for FundingAttemptView {
             transport_error_count: attempt.transport_error_count,
             submit_error_kind: attempt.submit_error_kind,
             history_error_kind: attempt.history_error_kind,
-            history_checked_at: attempt.history_checked_at,
             history_window_start_at: attempt.history_window_start_at,
             history_window_end_at: attempt.history_window_end_at,
-            created_at: attempt.created_at,
             updated_at: attempt.updated_at,
         }
     }
@@ -786,7 +721,6 @@ pub struct OptionAssetBalance {
     pub equity: Decimal,
     pub available: Decimal,
     pub initial_margin: Decimal,
-    pub maint_margin: Decimal,
     pub adjusted_equity: Decimal,
 }
 
@@ -923,12 +857,11 @@ pub struct ExerciseRecord {
 #[serde(rename_all = "camelCase")]
 pub struct AppSnapshot {
     pub settings: AppSettings,
-    pub health: RuntimeHealth,
     pub balances: Vec<BalanceRow>,
     pub candidates: Vec<StrategyCandidate>,
     pub orders: Vec<StrategyOrder>,
     pub pnl: PnlReport,
-    pub risk: RiskSnapshot,
+    pub risk_alerts: Vec<RiskAlert>,
     pub order_attempts: Vec<OrderAttemptView>,
     pub funding_attempts: Vec<FundingAttemptView>,
 }
@@ -937,7 +870,7 @@ pub struct AppSnapshot {
 ///
 /// Secret 只会在 Rust 端写入系统 keyring，不会进入 SQLite、审计日志或前端状态。
 #[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConnectBinanceRequest {
     pub api_key: String,
     pub api_secret: String,
@@ -946,13 +879,14 @@ pub struct ConnectBinanceRequest {
 /// 手动下单或订单恢复使用的请求。
 ///
 /// `confirm_live` 是真实下单门禁；手动下单必须由前端显式确认后才传 true。
-/// 请求携带用户确认的合约与数量等输入，不携带候选 ID 或预览年化；订单年化必须由 Binance 回报生成。
+/// 手动请求携带冻结的 option symbol、精确到期时间和数量等输入，不能缺失后再模糊匹配。
+/// 请求不携带候选 ID 或预览年化；订单年化必须由 Binance 回报生成。
 #[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StrategyRequest {
-    pub client_flow_id: Option<String>,
+    pub client_flow_id: String,
     pub symbol: String,
-    pub option_symbol: Option<String>,
+    pub option_symbol: String,
     pub direction: StrategyDirection,
     pub expiry: NaiveDate,
     pub expiry_at: DateTime<Utc>,
@@ -969,7 +903,7 @@ pub struct StrategyRequest {
 ///
 /// 接管不会立即下单，但后续到期 ITM 时可能触发现货补齐，因此仍要求显式确认。
 #[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdoptOptionPositionsRequest {
     pub symbols: Vec<String>,
     pub confirm_live: bool,

@@ -146,11 +146,8 @@ impl BinanceClient {
         request: &StrategyRequest,
         client_order_id: &str,
     ) -> AppResult<ExchangeOrderAck> {
-        let option_symbol = request.option_symbol.clone().ok_or_else(|| {
-            AppError::Config("真实期权下单必须提供 Binance option symbol".to_string())
-        })?;
         let params = vec![
-            ("symbol".to_string(), option_symbol),
+            ("symbol".to_string(), request.option_symbol.clone()),
             ("side".to_string(), "SELL".to_string()),
             ("type".to_string(), "LIMIT".to_string()),
             ("timeInForce".to_string(), "IOC".to_string()),

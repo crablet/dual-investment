@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use chrono::{NaiveDate, Utc};
+use chrono::Utc;
 use rust_decimal::Decimal;
 
 use crate::domain::{
@@ -21,7 +21,15 @@ pub(super) fn request_from_option_attempt(
     ack: &ExchangeOrderAck,
     contract: &OptionContract,
 ) -> AppResult<StrategyRequest> {
-    let (_, strike, direction) = parse_option_symbol(&attempt.option_symbol)?;
+    let direction = match contract.side.as_str() {
+        "PUT" => StrategyDirection::SellPut,
+        "CALL" => StrategyDirection::SellCall,
+        side => {
+            return Err(AppError::Storage(format!(
+                "恢复记录对应的 Binance 合约方向无效：{side}"
+            )));
+        }
+    };
     let quantity = if ack.quantity > Decimal::ZERO {
         ack.quantity
     } else {
@@ -33,40 +41,17 @@ pub(super) fn request_from_option_attempt(
         ack.avg_price
     };
     Ok(StrategyRequest {
-        client_flow_id: None,
+        client_flow_id: String::new(),
         symbol: attempt.symbol.clone(),
-        option_symbol: Some(attempt.option_symbol.clone()),
+        option_symbol: attempt.option_symbol.clone(),
         direction,
         expiry: contract.expiry,
         expiry_at: contract.expiry_at,
-        strike,
+        strike: contract.strike_price,
         quantity,
         limit_price,
         confirm_live: true,
     })
-}
-
-/// 解析 Binance 期权合约代码中的到期日、执行价和方向。
-pub(super) fn parse_option_symbol(
-    value: &str,
-) -> AppResult<(NaiveDate, Decimal, StrategyDirection)> {
-    let parts = value.split('-').collect::<Vec<_>>();
-    if parts.len() != 4 {
-        return Err(AppError::Storage(format!("无法解析期权合约代码：{value}")));
-    }
-    let expiry = NaiveDate::parse_from_str(parts[1], "%y%m%d")
-        .map_err(|error| AppError::Storage(format!("期权合约到期日无法解析：{error}")))?;
-    let strike = parts[2]
-        .parse::<Decimal>()
-        .map_err(|error| AppError::Storage(format!("期权合约执行价无法解析：{error}")))?;
-    let direction = match parts[3] {
-        "P" | "PUT" => StrategyDirection::SellPut,
-        "C" | "CALL" => StrategyDirection::SellCall,
-        side => {
-            return Err(AppError::Storage(format!("期权合约方向无法解析：{side}")));
-        }
-    };
-    Ok((expiry, strike, direction))
 }
 
 /// 把期权订单回报应用到本地订单。
