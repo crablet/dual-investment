@@ -4,7 +4,6 @@
 //! 精度、保证金和本地风控。前端传入的字段只能作为请求意图，最终以这里和 Binance
 //! 返回的事实为准。
 
-use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -246,14 +245,17 @@ pub(super) fn validate_spot_rebalance(
 
 /// 判断下单/现货补齐请求是否处于结果不确定状态，需要先查交易所事实再恢复。
 pub(super) fn is_uncertain_submit_error(error: &AppError) -> bool {
-    matches!(
-        error,
-        AppError::Binance(message)
-            if message.contains("请求超时")
-                || message.contains("连接失败")
-                || message.contains("响应体读取失败")
-                || message.contains("网络请求失败")
-    )
+    match error {
+        AppError::Binance(message) => {
+            // 只有明确的请求拒绝才能判定未下单。服务端失败、超时和回报解析失败都需查原单。
+            !message.contains("HTTP 4")
+                || message.contains("HTTP 408")
+                || message.contains("HTTP 429")
+                || message.contains("code -1006")
+                || message.contains("code -1007")
+        }
+        _ => false,
+    }
 }
 
 /// 判断本地订单是否有可用于查询 Binance 的订单引用。
@@ -273,6 +275,8 @@ pub(super) fn is_trackable_order(order: &StrategyOrder) -> bool {
 /// 判断期权订单是否仍需要向交易所同步。
 pub(super) fn should_sync_option_order(order: &StrategyOrder) -> bool {
     is_trackable_order(order)
+        && order.settlement_price <= Decimal::ZERO
+        && order.spot_client_order_id.is_empty()
         && !matches!(
             order.status,
             StrategyStatus::Settled
@@ -280,15 +284,6 @@ pub(super) fn should_sync_option_order(order: &StrategyOrder) -> bool {
                 | StrategyStatus::Expired
                 | StrategyStatus::Cancelled
                 | StrategyStatus::RebalanceFailed
-        )
-}
-
-/// 判断订单是否已经过期并需要结算处理。
-pub(super) fn should_settle_order(order: &StrategyOrder) -> bool {
-    Utc::now() >= order.expiry_at
-        && matches!(
-            order.status,
-            StrategyStatus::Running | StrategyStatus::PartiallyFilled | StrategyStatus::Pending
         )
 }
 

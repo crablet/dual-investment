@@ -95,12 +95,13 @@ pub async fn recover_funding_attempt(
 
 /// 人工核对 Binance 事实后解除已阻断的资金恢复记录。
 #[tauri::command]
-pub fn resolve_funding_attempt(
+pub async fn resolve_funding_attempt(
     state: State<'_, AppState>,
     request: ResolveFundingAttemptRequest,
 ) -> Result<FundingAttemptView, String> {
     state
         .resolve_funding_attempt(&request)
+        .await
         .map_err(to_command_error)
 }
 

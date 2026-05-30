@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use crate::domain::{
     AppError, AppResult, FundingAttempt, FundingAttemptKind, FundingAttemptStatus, OrderAttempt,
-    OrderAttemptStatus, SettlementSweep, SettlementSweepStatus, StrategyDirection, StrategyOrder,
+    OrderAttemptStatus, SettlementBatch, StrategyDirection, StrategyOrder,
 };
 
 pub struct Persistence {
@@ -90,14 +90,9 @@ impl Persistence {
                     updated_at TEXT NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS settlement_sweeps (
+                CREATE TABLE IF NOT EXISTS settlement_batches (
                     id TEXT PRIMARY KEY,
-                    chain_id TEXT NOT NULL,
-                    purpose TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    scheduled_at TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
+                    payload TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
 
@@ -111,8 +106,7 @@ impl Persistence {
                     ON funding_attempts (status, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_funding_attempts_chain_created
                     ON funding_attempts (chain_id, created_at);
-                CREATE INDEX IF NOT EXISTS idx_settlement_sweeps_due
-                    ON settlement_sweeps (status, scheduled_at);
+
                 ",
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
@@ -229,33 +223,51 @@ impl Persistence {
         Ok(())
     }
 
-    /// 保存到期结算后的批次级期权 USDT 归集任务。
-    pub fn save_settlement_sweep(&self, sweep: &SettlementSweep) -> AppResult<()> {
-        self.connection
-            .execute(
-                "INSERT OR REPLACE INTO settlement_sweeps (
-                    id,
-                    chain_id,
-                    purpose,
-                    status,
-                    message,
-                    scheduled_at,
-                    created_at,
-                    updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    sweep.id,
-                    sweep.chain_id,
-                    sweep.purpose,
-                    sweep.status.as_str(),
-                    sweep.message,
-                    sweep.scheduled_at.to_rfc3339(),
-                    sweep.created_at.to_rfc3339(),
-                    sweep.updated_at.to_rfc3339(),
-                ],
-            )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+    pub fn save_settlement_batch(&self, batch: &SettlementBatch) -> AppResult<()> {
+        let payload =
+            serde_json::to_string(batch).map_err(|error| AppError::Storage(error.to_string()))?;
+        self.connection.execute(
+            "INSERT INTO settlement_batches (id, payload, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
+            params![batch.id, payload, batch.updated_at.to_rfc3339()],
+        ).map_err(|error| AppError::Storage(error.to_string()))?;
         Ok(())
+    }
+
+    /// 下单意图和策略关联必须一起落库，覆盖请求发送后进程退出的窗口。
+    pub fn save_order_and_attempt(
+        &self,
+        order: &StrategyOrder,
+        attempt: &OrderAttempt,
+    ) -> AppResult<()> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        self.save_order(order)?;
+        self.save_order_attempt(attempt)?;
+        transaction
+            .commit()
+            .map_err(|error| AppError::Storage(error.to_string()))
+    }
+
+    /// 最后一笔状态和收尾计划一起保存；已有批次记录也可从成交事实重建该步骤。
+    pub fn save_batch_and_orders(
+        &self,
+        batch: &SettlementBatch,
+        orders: &[StrategyOrder],
+    ) -> AppResult<()> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        for order in orders {
+            self.save_order(order)?;
+        }
+        self.save_settlement_batch(batch)?;
+        transaction
+            .commit()
+            .map_err(|error| AppError::Storage(error.to_string()))
     }
 
     /// 删除本地策略订单快照。
@@ -401,55 +413,19 @@ impl Persistence {
         Ok(attempts)
     }
 
-    /// 读取已经到执行时间的待归集任务。
-    pub fn list_due_settlement_sweeps(
-        &self,
-        now: DateTime<Utc>,
-        limit: usize,
-    ) -> AppResult<Vec<SettlementSweep>> {
-        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    pub fn list_settlement_batches(&self) -> AppResult<Vec<SettlementBatch>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT id, chain_id, purpose, status, message,
-                        scheduled_at, created_at, updated_at
-                 FROM settlement_sweeps
-                 WHERE status = 'pending' AND scheduled_at <= ?1
-                 ORDER BY scheduled_at ASC
-                 LIMIT ?2",
-            )
+            .prepare("SELECT payload FROM settlement_batches ORDER BY updated_at DESC")
             .map_err(|error| AppError::Storage(error.to_string()))?;
-        let mapped = statement
-            .query_map(params![now.to_rfc3339(), limit], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                ))
-            })
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
             .map_err(|error| AppError::Storage(error.to_string()))?;
-
-        let mut sweeps = Vec::new();
-        for row in mapped {
-            let (id, chain_id, purpose, status, message, scheduled_at, created_at, updated_at) =
-                row.map_err(|error| AppError::Storage(error.to_string()))?;
-            sweeps.push(SettlementSweep {
-                id,
-                chain_id,
-                purpose,
-                status: parse_settlement_sweep_status(&status)?,
-                message,
-                scheduled_at: parse_time(&scheduled_at)?,
-                created_at: parse_time(&created_at)?,
-                updated_at: parse_time(&updated_at)?,
-            });
-        }
-        Ok(sweeps)
+        rows.map(|row| {
+            let payload = row.map_err(|error| AppError::Storage(error.to_string()))?;
+            serde_json::from_str(&payload).map_err(|error| AppError::Storage(error.to_string()))
+        })
+        .collect()
     }
 
     /// 统计仍需要人工确认或恢复的下单记录。
@@ -642,16 +618,5 @@ fn parse_funding_status(value: &str) -> AppResult<FundingAttemptStatus> {
         "failed" => Ok(FundingAttemptStatus::Failed),
         "blocked" => Ok(FundingAttemptStatus::Blocked),
         _ => Err(AppError::Storage(format!("未知资金恢复状态：{value}"))),
-    }
-}
-
-/// 解析 `SQLite` 中持久化的结算归集任务状态。
-fn parse_settlement_sweep_status(value: &str) -> AppResult<SettlementSweepStatus> {
-    match value {
-        "pending" => Ok(SettlementSweepStatus::Pending),
-        "completed" => Ok(SettlementSweepStatus::Completed),
-        "skipped" => Ok(SettlementSweepStatus::Skipped),
-        "failed" => Ok(SettlementSweepStatus::Failed),
-        _ => Err(AppError::Storage(format!("未知结算归集任务状态：{value}"))),
     }
 }

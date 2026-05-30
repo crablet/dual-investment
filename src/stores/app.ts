@@ -327,7 +327,7 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  /** 应用启动：先读取快照，再尝试用 keyring 凭据自动连接。连接后的实盘同步可能推进既有结算或资金动作。 */
+  /** 应用启动：先读取快照，再用 keyring 凭据连接；既有订单由 Rust 后台按到期时间自动处理。 */
   async function bootstrap() {
     await refresh()
     if (snapshot.value?.settings.savedCredentials && !snapshot.value.settings.connected) {
@@ -352,7 +352,7 @@ export const useAppStore = defineStore('app', () => {
     const next = await run('connect', () => api.connectSavedBinance(), options)
     patchSettings(next)
     if (next?.connected) {
-      // 自动重连成功后会执行完整实盘同步；它不创建新的期权策略订单，但可能推进既有结算、补齐和资金收尾。
+      // 重连入口只同步事实；后台继续处理此前已确认的既有订单。
       resetAutoReconnect()
       await syncLiveState(options)
       return true
@@ -410,7 +410,7 @@ export const useAppStore = defineStore('app', () => {
     await refreshViewData(view)
   }
 
-  /** 根据视图刷新所需数据；实盘同步不创建新的期权策略订单，但可能推进既有恢复、结算和资金动作。 */
+  /** 根据视图刷新所需数据；实盘同步只刷新订单和结算计划。 */
   async function refreshViewData(view: AppViewId = activeView.value, options: RunOptions = {}) {
     if (view === 'dual') {
       if (settings.value?.connected) {

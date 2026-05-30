@@ -451,38 +451,58 @@ pub struct FundingAttempt {
     pub updated_at: DateTime<Utc>,
 }
 
-/// 到期结算后的批次级期权 USDT 归集任务状态。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SettlementSweepStatus {
-    Pending,
+/// 批次阶段只描述编排进度；成交与资金成功仍由 Binance 记录确认。
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SettlementStage {
+    WaitingExercise,
+    WaitingFunds,
+    ConfirmingFunds,
+    Executing,
+    ConfirmingOrders,
+    PendingSweep,
+    Blocked,
     Completed,
-    Skipped,
-    Failed,
 }
 
-impl SettlementSweepStatus {
-    /// 返回持久化到 `SQLite` 的稳定状态字符串。
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Completed => "completed",
-            Self::Skipped => "skipped",
-            Self::Failed => "failed",
-        }
-    }
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettlementAssets {
+    #[serde(with = "rust_decimal::serde::str")]
+    pub usdt: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub btc: Decimal,
 }
 
-/// 到期结算后延迟执行的资金收尾任务。
-///
-/// 该记录只描述本机批次归集计划；真实资金动作仍必须通过 `FundingAttempt` 落库后发送。
-#[derive(Clone, Debug)]
-pub struct SettlementSweep {
-    pub id: String,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettlementRedemption {
     pub chain_id: String,
-    pub purpose: String,
-    pub status: SettlementSweepStatus,
+    pub asset: String,
+    pub product_id: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub amount: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub expected_spot: Decimal,
+}
+
+/// 同一精确到期时间的持久化结算任务。成员按本地订单 ID 关联。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettlementBatch {
+    pub id: String,
+    pub symbol: String,
+    pub expiry_at: DateTime<Utc>,
+    pub order_ids: Vec<String>,
+    pub stage: SettlementStage,
     pub message: String,
-    pub scheduled_at: DateTime<Utc>,
+    pub required: SettlementAssets,
+    pub shortfall: SettlementAssets,
+    pub redemption: Option<SettlementRedemption>,
+    pub sweep_after_at: Option<DateTime<Utc>>,
+    pub option_sweep: Option<SettlementAssets>,
+    pub spot_before_transfer: SettlementAssets,
+    pub spot_sweep: Option<SettlementAssets>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

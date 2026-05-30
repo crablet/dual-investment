@@ -80,10 +80,6 @@ pub(super) fn make_client_order_id(direction: StrategyDirection) -> String {
 }
 
 /// 生成现货补齐订单客户端订单号。
-pub(super) fn make_spot_client_order_id(direction: StrategyDirection) -> String {
-    format!(
-        "di-spot-{}-{}",
-        direction.option_type().to_lowercase(),
-        Utc::now().timestamp_millis()
-    )
+pub(super) fn make_spot_client_order_id(_direction: StrategyDirection) -> String {
+    format!("ds-{}", uuid::Uuid::new_v4().simple())
 }

@@ -1,7 +1,7 @@
 // 应用后台同步调度器。
 //
 // 前端只负责定时调用快照、实盘同步和已保存凭据重连，不创建新的期权策略订单。
-// Rust 的实盘同步会推进既有恢复、结算、现货补齐和资金收尾，真实动作仍由后端门禁决定。
+// 实盘同步只读取交易所事实。Rust 维护任务自动处理此前已确认订单的到期结算。
 
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'

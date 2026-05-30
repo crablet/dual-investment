@@ -56,6 +56,7 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let app_state =
                 AppState::new_in(data_dir).expect("failed to initialize application state");
+            app_state.ensure_background_worker();
             app.manage(app_state);
             Ok(())
         })

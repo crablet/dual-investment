@@ -105,3 +105,33 @@ pub(super) fn round_down_funding_amount(value: Decimal) -> Decimal {
         RoundingStrategy::ToNegativeInfinity,
     )
 }
+
+/// 汇总尚未完成的补齐资金。预留在本应用内生效，发送前仍须查询实盘余额。
+pub(super) fn settlement_required_assets(
+    orders: &[StrategyOrder],
+) -> crate::domain::SettlementAssets {
+    let mut assets = crate::domain::SettlementAssets::default();
+    for order in orders
+        .iter()
+        .filter(|order| order.status != crate::domain::StrategyStatus::Settled)
+    {
+        let (asset, amount) = spot_rebalance_required_asset(order);
+        match asset {
+            "USDT" => assets.usdt += amount,
+            "BTC" => assets.btc += amount,
+            _ => {}
+        }
+    }
+    assets
+}
+
+pub(super) fn settlement_funding_amount(asset: &str, value: Decimal) -> Decimal {
+    positive_decimal(value).round_dp_with_strategy(
+        if asset == "USDT" {
+            2
+        } else {
+            BINANCE_FUNDING_AMOUNT_SCALE
+        },
+        RoundingStrategy::ToPositiveInfinity,
+    )
+}

@@ -9,6 +9,7 @@ mod funding;
 mod orders;
 mod progress;
 mod runtime;
+mod settlement;
 mod validation;
 
 use std::{
@@ -34,11 +35,12 @@ use self::adoption::{
 };
 use self::funding::{
     option_funding_shortfall, option_idle_usdt_sweep_amount, round_down_funding_amount,
-    round_up_funding_amount, spot_asset_free, spot_rebalance_required_asset,
+    round_up_funding_amount, spot_asset_free,
 };
 use self::orders::{
-    apply_option_ack, apply_option_position, apply_spot_ack, combined_balances, is_spot_attempt,
-    is_unfilled_terminal_option_ack, request_from_option_attempt,
+    apply_option_ack, apply_option_position, apply_settlement_progress, apply_spot_ack,
+    combined_balances, is_spot_attempt, is_unfilled_terminal_option_ack,
+    request_from_option_attempt,
 };
 use self::progress::OrderProgressEmitter;
 use self::runtime::{
@@ -47,8 +49,8 @@ use self::runtime::{
 };
 use self::validation::{
     enforce_risk_rules, has_exchange_order_ref, is_in_the_money, is_trackable_order,
-    is_uncertain_submit_error, resolve_contract, should_settle_order, should_sync_option_order,
-    validate_contract_order, validate_contract_terms, validate_request, validate_spot_rebalance,
+    is_uncertain_submit_error, resolve_contract, should_sync_option_order, validate_contract_order,
+    validate_contract_terms, validate_request, validate_spot_rebalance,
 };
 use crate::binance::BinanceClient;
 use crate::domain::{
@@ -57,10 +59,9 @@ use crate::domain::{
     FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView, LogLevel,
     LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
     OrderAttemptStatus, OrderAttemptView, OrderProgressStage, OrderProgressStatus,
-    ResolveFundingAttemptRequest, SettlementSweep, SettlementSweepStatus,
-    SimpleEarnRedemptionRecord, SimpleEarnSnapshot, SimpleEarnSubscriptionRecord,
-    SpotAccountSnapshot, StrategyCandidate, StrategyOrder, StrategyRequest, StrategyStatus,
-    UniversalTransferRecord,
+    ResolveFundingAttemptRequest, SettlementBatch, SettlementStage, SimpleEarnRedemptionRecord,
+    SimpleEarnSnapshot, SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate,
+    StrategyOrder, StrategyRequest, StrategyStatus, UniversalTransferRecord,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -116,29 +117,6 @@ enum SweepExecutionOutcome {
     Completed(String),
     Skipped(String),
     Waiting(String),
-}
-
-#[derive(Debug, Default)]
-struct SettlementSweepPlan {
-    option_idle_usdt_needed: bool,
-    settled_symbols: Vec<String>,
-    deferred_reasons: Vec<String>,
-}
-
-impl SettlementSweepPlan {
-    fn request_option_idle_usdt(&mut self, option_symbol: &str) {
-        self.option_idle_usdt_needed = true;
-        self.settled_symbols.push(option_symbol.to_string());
-    }
-
-    fn defer(&mut self, option_symbol: &str, reason: impl Into<String>) {
-        self.deferred_reasons
-            .push(format!("{option_symbol}：{}", reason.into()));
-    }
-
-    fn has_deferred_work(&self) -> bool {
-        !self.deferred_reasons.is_empty()
-    }
 }
 
 const FUNDING_HISTORY_LOOKBACK_MINUTES: i64 = 5;
@@ -485,7 +463,8 @@ impl AppState {
     pub async fn snapshot(&self) -> AppResult<AppSnapshot> {
         let settings = self.runtime.read().await.settings();
         let candidates = self.candidates.read().await.clone();
-        let orders = self.orders.read().await.clone();
+        let mut orders = self.orders.read().await.clone();
+        apply_settlement_progress(&mut orders, &self.settlement_batches()?);
         let accounts = self.live_accounts_if_connected().await?;
         let (order_attempts, funding_attempts) = {
             let persistence = self
@@ -535,7 +514,7 @@ impl AppState {
     /// 使用用户输入凭据连接 Binance，并保存到系统 keyring。
     ///
     /// 连接阶段同时验证期权和现货账户权限，因为到期 ITM 后需要真实现货补齐能力。
-    /// 连接成功会启动后台维护；维护可能推进已有恢复、结算和资金收尾，但不会创建新策略。
+    /// 连接只验证账户并缓存客户端；独立的后台维护按既有订单事实推进到期处理。
     pub async fn connect_binance(&self, request: ConnectBinanceRequest) -> AppResult<AppSettings> {
         let result = self.connect_binance_inner(request).await;
         if let Err(error) = &result {
@@ -548,6 +527,8 @@ impl AppState {
         &self,
         request: ConnectBinanceRequest,
     ) -> AppResult<AppSettings> {
+        let _maintenance_guard = self.maintenance_lock.lock().await;
+        let _trade_guard = self.trade_lock.lock().await;
         if request.api_key.trim().is_empty() || request.api_secret.trim().is_empty() {
             return Err(AppError::Config("API Key 和 Secret 不能为空".to_string()));
         }
@@ -570,14 +551,13 @@ impl AppState {
             *cached_client = Some(client);
         }
 
-        self.ensure_background_worker();
         self.record_log("account.connected", "已连接 Binance 账户")?;
         Ok(settings)
     }
 
     /// 使用系统 keyring 中的凭据连接 Binance。
     ///
-    /// 当前成功后仍会启动后台维护，因此不是纯只读重连；这是必须显式保留可见性的安全缺口。
+    /// 凭据只恢复连接；此前已确认订单的结算由应用后台定时推进，无需再次授权。
     pub async fn connect_saved_binance(&self) -> AppResult<AppSettings> {
         let result = self.connect_saved_binance_inner().await;
         if let Err(error) = &result {
@@ -587,6 +567,8 @@ impl AppState {
     }
 
     async fn connect_saved_binance_inner(&self) -> AppResult<AppSettings> {
+        let _maintenance_guard = self.maintenance_lock.lock().await;
+        let _trade_guard = self.trade_lock.lock().await;
         let Some((api_key, api_secret)) = secrets::load_binance_credentials()? else {
             return Err(AppError::Config(
                 "系统 keyring 中没有已保存的 Binance API 凭据".to_string(),
@@ -607,7 +589,6 @@ impl AppState {
             *cached_client = Some(client);
         }
 
-        self.ensure_background_worker();
         self.record_log(
             "account.connected.saved",
             "已使用系统 keyring 凭据连接 Binance 账户",
@@ -617,6 +598,8 @@ impl AppState {
 
     /// 删除系统 keyring 凭据并清空运行期连接状态。
     pub async fn forget_binance_credentials(&self) -> AppResult<AppSettings> {
+        let _maintenance_guard = self.maintenance_lock.lock().await;
+        let _trade_guard = self.trade_lock.lock().await;
         secrets::delete_binance_credentials()?;
         let mut runtime = self.runtime.write().await;
         runtime.connected = false;
@@ -714,6 +697,11 @@ impl AppState {
                 "存在待确认恢复记录，已暂停新的真实下单".to_string(),
             ));
         }
+        if self.settlement_reserves_assets().await? {
+            return Err(AppError::RiskRejected(
+                "存在未完成的到期结算，资金已预留，暂不能创建新策略".to_string(),
+            ));
+        }
         self.place_live_strategy(request, &progress).await
     }
 
@@ -726,12 +714,18 @@ impl AppState {
             .persistence
             .lock()
             .map_err(|error| AppError::Storage(error.to_string()))?
-            .list_order_attempts(500)?
+            .list_order_attempts(usize::MAX)?
             .into_iter()
             .find(|attempt| attempt.id == attempt_id)
             .ok_or_else(|| AppError::Storage("未找到指定恢复记录".to_string()))?;
 
-        if is_spot_attempt(attempt.status) {
+        let linked_spot = self
+            .orders
+            .read()
+            .await
+            .iter()
+            .any(|order| order.spot_client_order_id == attempt.client_order_id);
+        if is_spot_attempt(attempt.status) || linked_spot {
             self.recover_spot_attempt(attempt).await
         } else {
             self.recover_option_attempt(attempt).await
@@ -743,26 +737,27 @@ impl AppState {
         &self,
         attempt_id: String,
     ) -> AppResult<FundingAttemptView> {
+        let _trade_guard = self.trade_lock.lock().await;
         let client = self.live_client().await?;
         let attempt = self
             .persistence
             .lock()
             .map_err(|error| AppError::Storage(error.to_string()))?
-            .list_funding_attempts(500)?
+            .list_funding_attempts(usize::MAX)?
             .into_iter()
             .find(|attempt| attempt.id == attempt_id)
             .ok_or_else(|| AppError::Storage("未找到指定资金恢复记录".to_string()))?;
 
-        let _trade_guard = self.trade_lock.lock().await;
         let recovered = self.recover_funding_attempt_inner(&client, attempt).await?;
         Ok(FundingAttemptView::from(recovered))
     }
 
     /// 人工核对 Binance 事实后解除已阻断的资金恢复记录。
-    pub fn resolve_funding_attempt(
+    pub async fn resolve_funding_attempt(
         &self,
         request: &ResolveFundingAttemptRequest,
     ) -> AppResult<FundingAttemptView> {
+        let _trade_guard = self.trade_lock.lock().await;
         if !request.confirm_manual {
             return Err(AppError::RiskRejected(
                 "人工解除资金阻断需要显式确认".to_string(),
@@ -778,7 +773,7 @@ impl AppState {
             .persistence
             .lock()
             .map_err(|error| AppError::Storage(error.to_string()))?
-            .list_funding_attempts(500)?
+            .list_funding_attempts(usize::MAX)?
             .into_iter()
             .find(|attempt| attempt.id == request.attempt_id)
             .ok_or_else(|| AppError::Storage("未找到指定资金恢复记录".to_string()))?;
@@ -893,39 +888,21 @@ impl AppState {
         Ok(adopted)
     }
 
-    /// 恢复到期资金记录、同步订单并执行到期结算，然后返回完整快照。
-    ///
-    /// 该调用可能执行划转、Simple Earn 或现货补齐，不是只读刷新。
+    /// 刷新订单和结算计划。页面刷新与重连不会发送资金动作。
     pub async fn sync_live_state(&self) -> AppResult<AppSnapshot> {
         let _maintenance_guard = self.maintenance_lock.lock().await;
-        self.recover_due_funding_attempts().await?;
+        let _trade_guard = self.trade_lock.lock().await;
         self.sync_live_orders().await?;
-        if self.pending_recovery_count()? == 0 {
-            self.run_due_settlement_sweeps().await?;
-            if self.pending_recovery_count()? == 0 {
-                self.settle_due_orders().await?;
-            }
-        }
+        self.discover_settlement_batches().await?;
         self.snapshot().await
     }
 
-    /// 手动触发到期结算扫描。
+    /// 手动扫描与后台维护共用同一套既有订单结算流程。
     pub async fn run_settlement_scan(&self) -> AppResult<Vec<StrategyOrder>> {
         let _maintenance_guard = self.maintenance_lock.lock().await;
-        self.recover_due_funding_attempts().await?;
-        if self.pending_recovery_count()? > 0 {
-            return Err(AppError::RiskRejected(
-                "存在待确认资金恢复记录，已暂停结算资金动作".to_string(),
-            ));
-        }
-        self.run_due_settlement_sweeps().await?;
-        if self.pending_recovery_count()? > 0 {
-            return Err(AppError::RiskRejected(
-                "存在待确认资金恢复记录，已暂停结算资金动作".to_string(),
-            ));
-        }
-        self.sync_live_orders().await?;
-        self.settle_due_orders().await
+        self.live_client().await?;
+        self.background_tick().await?;
+        Ok(self.orders.read().await.clone())
     }
 
     /// 返回设置页日志快照。
@@ -1464,10 +1441,7 @@ impl AppState {
             let orders = self.orders.read().await;
             orders
                 .iter()
-                .find(|order| {
-                    order.spot_client_order_id == attempt.client_order_id
-                        || order.option_symbol == attempt.option_symbol
-                })
+                .find(|order| order.spot_client_order_id == attempt.client_order_id)
                 .cloned()
         }
         .ok_or_else(|| {
@@ -1477,12 +1451,11 @@ impl AppState {
         order.spot_order_id = Some(ack.order_id.clone());
         order.spot_client_order_id = attempt.client_order_id.clone();
         apply_spot_ack(&mut order, &ack);
-        self.save_order(&order).await?;
         attempt.status = OrderAttemptStatus::SpotPersisted;
         attempt.exchange_order_id = Some(ack.order_id.clone());
         attempt.message = "已从 Binance 查询现货订单并恢复补齐状态".to_string();
         attempt.updated_at = Utc::now();
-        self.save_order_attempt(&attempt)?;
+        self.save_settlement_order(&order, &attempt).await?;
         self.record_log(
             "strategy.rebalance.recovered",
             &format!("{} 已从恢复记录重建现货补齐状态", attempt.option_symbol),
@@ -1572,421 +1545,6 @@ impl AppState {
         Ok(())
     }
 
-    /// 扫描已经到期的订单并执行结算/补齐。
-    ///
-    /// 未成交订单会直接过期；OTM 订单结算完成；ITM 订单进入现货补齐流程。
-    async fn settle_due_orders(&self) -> AppResult<Vec<StrategyOrder>> {
-        let client = self.live_client().await?;
-        let orders = self.orders.read().await.clone();
-        let mut updated = Vec::new();
-        let mut sweep_plan = SettlementSweepPlan::default();
-
-        for mut order in orders.into_iter().filter(should_settle_order) {
-            if order.filled_quantity <= Decimal::ZERO {
-                self.delete_order(&order.id).await?;
-                self.record_log(
-                    "strategy.settlement.unfilled_removed",
-                    &format!("{} 未成交，到期扫描已从本地订单移除", order.option_symbol),
-                )?;
-                continue;
-            }
-
-            let settlement_price = match self.settlement_price(&client, &order).await {
-                Ok(Some(price)) => price,
-                Ok(None) => {
-                    sweep_plan.defer(&order.option_symbol, "Binance 行权记录暂未给出结算价");
-                    continue;
-                }
-                Err(error) => {
-                    self.record_warning(
-                        "strategy.settlement.price_failed",
-                        &format!("{} 结算价读取失败：{}", order.option_symbol, error),
-                    )?;
-                    sweep_plan.defer(&order.option_symbol, "结算价读取失败，等待下一轮重试");
-                    continue;
-                }
-            };
-            order.settlement_price = settlement_price;
-            if !is_in_the_money(&order, settlement_price) {
-                order.status = StrategyStatus::Settled;
-                order.settled_at = Some(Utc::now());
-                order.updated_at = Utc::now();
-                order.rebalance_message = format!(
-                    "到期未触发换币，结算参考价 {}",
-                    settlement_price.round_dp(2)
-                );
-                self.save_order(&order).await?;
-                self.record_log(
-                    "strategy.settlement.otm",
-                    &format!("{} 到期 OTM，无需现货补齐", order.option_symbol),
-                )?;
-                sweep_plan.request_option_idle_usdt(&order.option_symbol);
-                updated.push(order);
-                continue;
-            }
-
-            let option_symbol = order.option_symbol.clone();
-            match self.rebalance_spot_if_needed(&client, order).await {
-                Ok(order) => {
-                    if order.status == StrategyStatus::Settled {
-                        sweep_plan.request_option_idle_usdt(&order.option_symbol);
-                    } else {
-                        sweep_plan.defer(&order.option_symbol, "现货补齐未完成，暂不归集期权资金");
-                    }
-                    updated.push(order);
-                }
-                Err(error) => {
-                    self.record_warning(
-                        "strategy.rebalance.scan_failed",
-                        &format!("到期补齐流程失败：{error}"),
-                    )?;
-                    sweep_plan.defer(&option_symbol, "现货补齐流程失败，等待人工或下一轮恢复");
-                }
-            }
-        }
-        self.schedule_settlement_option_idle_usdt_sweep(&sweep_plan)?;
-        Ok(updated)
-    }
-
-    fn schedule_settlement_option_idle_usdt_sweep(
-        &self,
-        plan: &SettlementSweepPlan,
-    ) -> AppResult<()> {
-        if !plan.option_idle_usdt_needed {
-            return Ok(());
-        }
-        if plan.has_deferred_work() {
-            self.record_warning(
-                "funding.settlement_sweep.deferred",
-                &format!(
-                    "本轮到期结算仍有未完成项，暂不归集期权账户 USDT：{}",
-                    plan.deferred_reasons.join("；")
-                ),
-            )?;
-            return Ok(());
-        }
-        if self.pending_recovery_count()? > 0 {
-            self.record_warning(
-                "funding.settlement_sweep.deferred",
-                "存在待确认恢复记录，暂不创建本轮结算后的期权 USDT 归集任务",
-            )?;
-            return Ok(());
-        }
-        let now = Utc::now();
-        let sweep = SettlementSweep {
-            id: Uuid::new_v4().to_string(),
-            chain_id: Uuid::new_v4().to_string(),
-            purpose: "期权到期结算后归集".to_string(),
-            status: SettlementSweepStatus::Pending,
-            message: "到期结算已完成，等待期权账户余额稳定后归集闲置 USDT".to_string(),
-            scheduled_at: now + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES),
-            created_at: now,
-            updated_at: now,
-        };
-        self.save_settlement_sweep(&sweep)?;
-        self.record_log(
-            "funding.settlement_sweep.scheduled",
-            &format!(
-                "本轮到期结算已完成，已计划 {} 分钟后归集期权账户闲置 USDT，涉及 {}",
-                SETTLEMENT_SWEEP_DELAY_MINUTES,
-                plan.settled_symbols.join("、")
-            ),
-        )?;
-        Ok(())
-    }
-
-    async fn run_due_settlement_sweeps(&self) -> AppResult<()> {
-        if !self.runtime.read().await.connected {
-            return Ok(());
-        }
-        if self.pending_recovery_count()? > 0 {
-            return Ok(());
-        }
-        let sweeps = {
-            let persistence = self
-                .persistence
-                .lock()
-                .map_err(|error| AppError::Storage(error.to_string()))?;
-            persistence.list_due_settlement_sweeps(Utc::now(), 20)?
-        };
-        if sweeps.is_empty() {
-            return Ok(());
-        }
-        let client = self.live_client().await?;
-        for mut sweep in sweeps {
-            let _trade_guard = self.trade_lock.lock().await;
-            if self.pending_recovery_count()? > 0 {
-                sweep.message = "存在待确认恢复记录，继续延后结算归集任务".to_string();
-                sweep.scheduled_at = Utc::now() + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES);
-                sweep.updated_at = Utc::now();
-                self.save_settlement_sweep(&sweep)?;
-                self.record_warning(
-                    "funding.settlement_sweep.deferred",
-                    "执行结算归集前发现待确认恢复记录，已延后任务",
-                )?;
-                return Ok(());
-            }
-            match self
-                .execute_settlement_sweep(&client, &sweep.purpose, &sweep.chain_id)
-                .await
-            {
-                Ok(SweepExecutionOutcome::Completed(message)) => {
-                    sweep.status = SettlementSweepStatus::Completed;
-                    sweep.message = message;
-                    sweep.updated_at = Utc::now();
-                    self.save_settlement_sweep(&sweep)?;
-                }
-                Ok(SweepExecutionOutcome::Skipped(message)) => {
-                    sweep.status = SettlementSweepStatus::Skipped;
-                    sweep.message = message;
-                    sweep.updated_at = Utc::now();
-                    self.save_settlement_sweep(&sweep)?;
-                }
-                Ok(SweepExecutionOutcome::Waiting(message)) => {
-                    sweep.status = SettlementSweepStatus::Pending;
-                    sweep.message = message;
-                    sweep.scheduled_at =
-                        Utc::now() + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES);
-                    sweep.updated_at = Utc::now();
-                    self.save_settlement_sweep(&sweep)?;
-                }
-                Err(error) if self.pending_recovery_count()? > 0 => {
-                    sweep.status = SettlementSweepStatus::Pending;
-                    sweep.message = format!(
-                        "结算归集已产生待确认资金恢复记录，等待恢复后继续：{}",
-                        classify_funding_error(&error)
-                    );
-                    sweep.scheduled_at =
-                        Utc::now() + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES);
-                    sweep.updated_at = Utc::now();
-                    self.save_settlement_sweep(&sweep)?;
-                    self.record_warning(
-                        "funding.settlement_sweep.waiting_recovery",
-                        "结算归集等待资金恢复记录确认后继续",
-                    )?;
-                    return Ok(());
-                }
-                Err(error) if is_transient_binance_error(&error) => {
-                    sweep.status = SettlementSweepStatus::Pending;
-                    sweep.message = format!(
-                        "结算归集查询暂时失败，稍后重试：{}",
-                        classify_funding_error(&error)
-                    );
-                    sweep.scheduled_at =
-                        Utc::now() + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES);
-                    sweep.updated_at = Utc::now();
-                    self.save_settlement_sweep(&sweep)?;
-                    self.record_warning("funding.settlement_sweep.retry_later", &sweep.message)?;
-                }
-                Err(error) => {
-                    sweep.status = SettlementSweepStatus::Failed;
-                    sweep.message = format!(
-                        "结算归集无法自动继续，已停止该批次任务：{}",
-                        classify_funding_error(&error)
-                    );
-                    sweep.updated_at = Utc::now();
-                    self.save_settlement_sweep(&sweep)?;
-                    self.record_warning(
-                        "funding.settlement_sweep.failed",
-                        &format!("结算归集任务失败：{error}"),
-                    )?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn execute_settlement_sweep(
-        &self,
-        client: &BinanceClient,
-        purpose: &str,
-        chain_id: &str,
-    ) -> AppResult<SweepExecutionOutcome> {
-        self.sweep_option_idle_usdt(client, purpose, chain_id).await
-    }
-
-    async fn settlement_price(
-        &self,
-        client: &BinanceClient,
-        order: &StrategyOrder,
-    ) -> AppResult<Option<Decimal>> {
-        // 到期结算价只来自 Binance 行权记录。现货价不能替代，否则会污染现金结算事实。
-        let expiry_at = order.expiry_at;
-        let start = (expiry_at - Duration::hours(1)).timestamp_millis();
-        let end = (expiry_at + Duration::days(2)).timestamp_millis();
-        let records = client
-            .exercise_records(&order.option_symbol, start, end)
-            .await?;
-        Ok(records
-            .into_iter()
-            .find(|record| {
-                record.symbol == order.option_symbol && record.settlement_price > Decimal::ZERO
-            })
-            .map(|record| record.settlement_price))
-    }
-
-    /// 对 ITM 到期订单执行现货补齐。
-    ///
-    /// 补齐失败会把订单置为失败状态，阻止后续自动动作继续假设该订单已完成。
-    #[allow(clippy::too_many_lines)]
-    async fn rebalance_spot_if_needed(
-        &self,
-        client: &BinanceClient,
-        mut order: StrategyOrder,
-    ) -> AppResult<StrategyOrder> {
-        let _trade_guard = self.trade_lock.lock().await;
-        if order.spot_order_id.is_some() {
-            self.sync_spot_rebalance(client, &mut order).await?;
-            self.save_order(&order).await?;
-            if order.status == StrategyStatus::Settled {
-                self.sweep_spot_rebalance_assets_best_effort(client).await;
-            }
-            return Ok(order);
-        }
-
-        if let Err(error) = self.prepare_spot_rebalance_funding(client, &order).await {
-            order.status = StrategyStatus::RebalanceFailed;
-            order.updated_at = Utc::now();
-            order.rebalance_message = format!("现货补齐资金准备失败：{error}");
-            self.save_order(&order).await?;
-            self.record_warning(
-                "strategy.rebalance.failed",
-                &format!("{} {}", order.option_symbol, order.rebalance_message),
-            )?;
-            return Ok(order);
-        }
-
-        let spot_account = client.spot_account().await?;
-        if let Err(error) = validate_spot_rebalance(&order, &spot_account) {
-            order.status = StrategyStatus::RebalanceFailed;
-            order.updated_at = Utc::now();
-            order.rebalance_message = format!("现货补齐风控失败：{error}");
-            self.save_order(&order).await?;
-            self.record_warning(
-                "strategy.rebalance.failed",
-                &format!("{} {}", order.option_symbol, order.rebalance_message),
-            )?;
-            return Ok(order);
-        }
-        let side = crate::binance::spot_rebalance_side(order.direction);
-        let client_order_id = make_spot_client_order_id(order.direction);
-        let now = Utc::now();
-        // 现货补齐也是实盘订单，同样先保存恢复记录再发送交易所请求。
-        let mut attempt = OrderAttempt {
-            id: Uuid::new_v4().to_string(),
-            client_order_id: client_order_id.clone(),
-            symbol: "BTCUSDT".to_string(),
-            option_symbol: order.option_symbol.clone(),
-            direction: order.direction,
-            status: OrderAttemptStatus::SpotAttempted,
-            exchange_order_id: None,
-            message: format!("到期 ITM，准备发送现货 {side} 补齐订单"),
-            created_at: now,
-            updated_at: now,
-        };
-        self.save_order_attempt(&attempt)?;
-        let ack = match client
-            .place_spot_market_order("BTCUSDT", side, order.filled_quantity, &client_order_id)
-            .await
-        {
-            Ok(ack) => ack,
-            Err(error) => {
-                if is_uncertain_submit_error(&error) {
-                    self.record_warning(
-                        "strategy.rebalance.submit_uncertain",
-                        &format!(
-                            "{} 现货补齐请求结果不确定，正在按客户端订单号查询 Binance",
-                            order.option_symbol
-                        ),
-                    )?;
-                    match client
-                        .query_spot_order("BTCUSDT", None, Some(&client_order_id))
-                        .await
-                    {
-                        Ok(ack) => ack,
-                        Err(query_error) => {
-                            attempt.message = format!(
-                                "Binance 现货补齐结果不确定，按客户端订单号查询失败：{query_error}"
-                            );
-                            attempt.updated_at = Utc::now();
-                            self.save_order_attempt(&attempt)?;
-                            order.status = StrategyStatus::RebalanceFailed;
-                            order.updated_at = Utc::now();
-                            order.rebalance_message = format!(
-                                "现货补齐结果不确定，请按恢复记录重新查询 Binance：{query_error}"
-                            );
-                            self.save_order(&order).await?;
-                            self.record_warning(
-                                "strategy.rebalance.failed",
-                                &format!("{} {}", order.option_symbol, order.rebalance_message),
-                            )?;
-                            return Ok(order);
-                        }
-                    }
-                } else {
-                    order.status = StrategyStatus::RebalanceFailed;
-                    order.updated_at = Utc::now();
-                    order.rebalance_message = format!("现货补齐下单失败：{error}");
-                    self.save_order(&order).await?;
-                    self.record_warning(
-                        "strategy.rebalance.failed",
-                        &format!("{} {}", order.option_symbol, order.rebalance_message),
-                    )?;
-                    return Ok(order);
-                }
-            }
-        };
-        attempt.status = OrderAttemptStatus::SpotExchangeAck;
-        attempt.exchange_order_id = Some(ack.order_id.clone());
-        attempt.message = format!("Binance 已返回现货订单号，状态 {}", ack.status);
-        attempt.updated_at = Utc::now();
-        self.save_order_attempt(&attempt)?;
-
-        order.spot_order_id = Some(ack.order_id.clone());
-        order.spot_client_order_id = client_order_id;
-        apply_spot_ack(&mut order, &ack);
-        if let Err(error) = self.save_order(&order).await {
-            attempt.status = OrderAttemptStatus::SpotPersistFailed;
-            attempt.message = "交易所现货订单已创建，但补齐状态保存失败".to_string();
-            attempt.updated_at = Utc::now();
-            self.save_order_attempt(&attempt)?;
-            return Err(AppError::Storage(format!(
-                "交易所现货订单已创建但补齐状态保存失败，spotOrderId={}，clientOrderId={}。请先用 Binance 后台核对后再继续操作。原始错误：{}",
-                order.spot_order_id.as_deref().unwrap_or(""),
-                order.spot_client_order_id,
-                error
-            )));
-        }
-        attempt.status = OrderAttemptStatus::SpotPersisted;
-        attempt.message = "交易所现货订单和补齐状态均已保存".to_string();
-        attempt.updated_at = Utc::now();
-        self.save_order_attempt(&attempt)?;
-        self.record_log(
-            "strategy.rebalance.created",
-            &format!("{} {}", order.option_symbol, order.rebalance_message),
-        )?;
-        if order.status == StrategyStatus::Settled {
-            self.sweep_spot_rebalance_assets_best_effort(client).await;
-        }
-        Ok(order)
-    }
-
-    async fn sync_spot_rebalance(
-        &self,
-        client: &BinanceClient,
-        order: &mut StrategyOrder,
-    ) -> AppResult<()> {
-        let ack = client
-            .query_spot_order(
-                "BTCUSDT",
-                order.spot_order_id.as_deref(),
-                Some(&order.spot_client_order_id),
-            )
-            .await?;
-        apply_spot_ack(order, &ack);
-        Ok(())
-    }
-
     /// 后台轮询任务的一次 tick。
     ///
     /// 只做恢复、订单同步和到期结算，不会创建新的策略订单。
@@ -1995,28 +1553,27 @@ impl AppState {
             return Ok(());
         }
         self.recover_due_funding_attempts().await?;
+        self.recover_pending_settlement_orders().await?;
+        let _trade_guard = self.trade_lock.lock().await;
         self.sync_live_orders().await?;
-        if self.pending_recovery_count()? > 0 {
-            return Ok(());
-        }
-        self.run_due_settlement_sweeps().await?;
-        if self.pending_recovery_count()? > 0 {
-            return Ok(());
-        }
-        self.settle_due_orders().await?;
+        self.discover_settlement_batches().await?;
+        self.advance_settlement_batches().await?;
         Ok(())
     }
 
     /// 启动后台轮询任务。
     ///
     /// `worker_started` 防止多次连接或重复调用时启动多个轮询器。
-    fn ensure_background_worker(&self) {
+    pub(crate) fn ensure_background_worker(&self) {
         if self.worker_started.swap(true, Ordering::SeqCst) {
             return;
         }
         let state = self.clone();
         tauri::async_runtime::spawn(async move {
-            let mut interval = tokio::time::interval(StdDuration::from_mins(1));
+            // 维护属于应用生命周期；连接命令本身不发起结算资金动作。
+            let period = StdDuration::from_mins(1);
+            let mut interval =
+                tokio::time::interval_at(tokio::time::Instant::now() + period, period);
             loop {
                 interval.tick().await;
                 let Ok(_maintenance_guard) = state.maintenance_lock.try_lock() else {
@@ -2111,14 +1668,6 @@ impl AppState {
             .save_funding_attempt(attempt)
     }
 
-    /// 保存结算后的批次级归集任务。
-    fn save_settlement_sweep(&self, sweep: &SettlementSweep) -> AppResult<()> {
-        self.persistence
-            .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
-            .save_settlement_sweep(sweep)
-    }
-
     /// 读取同一资金链路上的恢复记录。
     fn funding_attempts_by_chain(&self, chain_id: &str) -> AppResult<Vec<FundingAttempt>> {
         self.persistence
@@ -2184,6 +1733,8 @@ impl AppState {
 
     /// 恢复到期的资金动作记录；该流程只依据 Binance 历史推进，不信任本地日志事实。
     async fn recover_due_funding_attempts(&self) -> AppResult<()> {
+        // 读取恢复记录也受交易锁保护，避免查询覆盖刚完成的人工处置。
+        let _trade_guard = self.trade_lock.lock().await;
         if !self.runtime.read().await.connected {
             return Ok(());
         }
@@ -2195,7 +1746,7 @@ impl AppState {
                 .lock()
                 .map_err(|error| AppError::Storage(error.to_string()))?;
             persistence
-                .list_funding_attempts(200)?
+                .list_funding_attempts(usize::MAX)?
                 .into_iter()
                 .filter(|attempt| {
                     !attempt.status.is_terminal()
@@ -2208,8 +1759,6 @@ impl AppState {
         };
 
         for attempt in attempts {
-            let _trade_guard = self.trade_lock.lock().await;
-            // 资金恢复和新资金动作共用 trade_lock，防止恢复查询期间并发发送新的资金请求。
             if let Err(error) = self.recover_funding_attempt_inner(&client, attempt).await {
                 self.record_warning(
                     "funding.recovery.failed",
@@ -2225,12 +1774,9 @@ impl AppState {
         client: &BinanceClient,
         attempt: FundingAttempt,
     ) -> AppResult<FundingAttempt> {
-        // 从未发送过的 attempted 记录可以继续发送一次；其他状态只能查询历史推进。
+        // 恢复入口只查询事实，不能因为重新连接或点击恢复而重放请求。
         if attempt.status.is_terminal() {
             return Ok(attempt);
-        }
-        if attempt.status == FundingAttemptStatus::Attempted && attempt.send_count == 0 {
-            return self.send_funding_attempt(client, attempt).await;
         }
         self.query_funding_attempt(client, attempt).await
     }
@@ -2240,6 +1786,39 @@ impl AppState {
         client: &BinanceClient,
         request: FundingRequest,
     ) -> AppResult<FundingAttempt> {
+        if let Some(existing) = self
+            .funding_attempts_by_chain(&request.chain_id)?
+            .into_iter()
+            .find(|attempt| {
+                attempt.kind == request.kind
+                    && attempt.asset == request.asset
+                    && attempt.transfer_type == request.transfer_type
+                    && attempt.product_id == request.product_id
+            })
+        {
+            return if existing.status == FundingAttemptStatus::Confirmed {
+                Ok(existing)
+            } else {
+                Err(AppError::RiskRejected(
+                    "该资金步骤已有恢复记录，只能查询或人工核对，不能重复发送".to_string(),
+                ))
+            };
+        }
+        if self.settlement_reserves_assets().await?
+            && !self
+                .settlement_batches()?
+                .iter()
+                .any(|batch| request.chain_id.starts_with(&format!("{}-", batch.id)))
+        {
+            return Err(AppError::RiskRejected(
+                "资金已预留给到期结算，暂停其它资金动作".to_string(),
+            ));
+        }
+        if self.pending_recovery_count()? > 0 {
+            return Err(AppError::RiskRejected(
+                "存在待确认恢复记录，暂停新的资金动作".to_string(),
+            ));
+        }
         // 先落库再发送真实资金请求，确保请求结果不确定时有可恢复的本地事实。
         let now = Utc::now();
         let attempt = FundingAttempt {
@@ -2266,7 +1845,6 @@ impl AppState {
             created_at: now,
             updated_at: now,
         };
-        self.save_funding_attempt(&attempt)?;
         let attempt = self.send_funding_attempt(client, attempt).await?;
         if attempt.status == FundingAttemptStatus::Confirmed {
             Ok(attempt)
@@ -2685,18 +2263,6 @@ impl AppState {
         Ok(account)
     }
 
-    /// 确保现货账户有足够资产执行到期 ITM 补齐。
-    async fn prepare_spot_rebalance_funding(
-        &self,
-        client: &BinanceClient,
-        order: &StrategyOrder,
-    ) -> AppResult<()> {
-        let (asset, required) = spot_rebalance_required_asset(order);
-        let chain_id = format!("spot-rebalance-{}", order.id);
-        self.ensure_spot_asset_available(client, asset, required, "到期现货补齐", &chain_id)
-            .await
-    }
-
     /// 现货余额不足时，从 Simple Earn 活期赎回缺口。
     async fn ensure_spot_asset_available(
         &self,
@@ -2772,13 +2338,20 @@ impl AppState {
     }
 
     async fn sweep_option_idle_usdt_best_effort(&self, client: &BinanceClient, purpose: &str) {
+        if self.settlement_reserves_assets().await.unwrap_or(true) {
+            return;
+        }
         // 归集是收尾优化，失败时只写脱敏告警，不回滚已经完成的下单或结算事实。
         let chain_id = Uuid::new_v4().to_string();
         match self
             .sweep_option_idle_usdt(client, purpose, &chain_id)
             .await
         {
-            Ok(SweepExecutionOutcome::Completed(_) | SweepExecutionOutcome::Skipped(_)) => {}
+            Ok(
+                SweepExecutionOutcome::Completed(message) | SweepExecutionOutcome::Skipped(message),
+            ) => {
+                let _ = self.record_log("funding.sweep.finished", &message);
+            }
             Ok(SweepExecutionOutcome::Waiting(message)) => {
                 let _ = self.record_warning("funding.sweep.waiting", &message);
             }
@@ -2902,33 +2475,6 @@ impl AppState {
             tokio::time::sleep(StdDuration::from_millis(SPOT_BALANCE_CONFIRM_DELAY_MS)).await;
         }
         Ok(false)
-    }
-
-    async fn sweep_spot_rebalance_assets_best_effort(&self, client: &BinanceClient) {
-        // 现货补齐后的归集失败不应把已完成补齐改成失败，只提示后续人工处理。
-        if let Err(error) = self.sweep_spot_rebalance_assets(client).await {
-            let _ = self.record_warning(
-                "funding.sweep.failed",
-                &format!("现货补齐后归集失败：{error}"),
-            );
-        }
-    }
-
-    /// 现货补齐完成后，把本流程会用到的 BTC/USDT 空闲余额重新放入活期赚币。
-    async fn sweep_spot_rebalance_assets(&self, client: &BinanceClient) -> AppResult<()> {
-        let spot_account = client.spot_account().await?;
-        let assets = ["USDT", "BTC"];
-        let chain_id = Uuid::new_v4().to_string();
-        for asset in assets {
-            // 这里只归集本策略会触碰的 BTC/USDT，避免误移动用户其他现货资产。
-            let amount = spot_asset_free(&spot_account, asset);
-            if amount <= Decimal::ZERO {
-                continue;
-            }
-            self.subscribe_spot_asset_to_earn(client, asset, amount, "现货补齐后归集", &chain_id)
-                .await?;
-        }
-        Ok(())
     }
 
     async fn subscribe_spot_asset_to_earn(
