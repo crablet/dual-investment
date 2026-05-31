@@ -113,6 +113,7 @@ export const useAppStore = defineStore('app', () => {
   const riskAlerts = computed(() => snapshot.value?.riskAlerts ?? [])
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
   const fundingAttempts = computed(() => snapshot.value?.fundingAttempts ?? [])
+  const settlementRecoveries = computed(() => snapshot.value?.settlementRecoveries ?? [])
   const runningOrders = computed(() =>
     orders.value.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
   )
@@ -490,6 +491,22 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function finishSettlementSweep(batchId: string) {
+    const recovery = await run('recover', () => api.finishSettlementSweep({
+      batchId,
+      confirmManual: true,
+    }))
+    if (recovery && snapshot.value) {
+      snapshot.value = {
+        ...snapshot.value,
+        settlementRecoveries: snapshot.value.settlementRecoveries.map(row =>
+          row.id === recovery.id ? recovery : row,
+        ),
+      }
+      await refresh()
+    }
+  }
+
   async function loadAdoptableOptionPositions() {
     const rows = await run('adopt', () => api.listAdoptableOptionPositions())
     if (rows) {
@@ -569,6 +586,7 @@ export const useAppStore = defineStore('app', () => {
     riskAlerts,
     orderAttempts,
     fundingAttempts,
+    settlementRecoveries,
     runningOrders,
     isLoading,
     bindOrderProgressEvents,
@@ -586,6 +604,7 @@ export const useAppStore = defineStore('app', () => {
     recoverAttempt,
     recoverFundingAttempt,
     resolveFundingAttempt,
+    finishSettlementSweep,
     loadAdoptableOptionPositions,
     adoptOptionPositions,
     placeStrategy,

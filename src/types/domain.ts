@@ -213,6 +213,36 @@ export interface FundingAttemptView {
 
 export type FundingAttemptManualResolution = 'confirmed' | 'failed'
 
+export type SettlementStage
+  = | 'waitingExercise'
+    | 'waitingFunds'
+    | 'confirmingFunds'
+    | 'executing'
+    | 'confirmingOrders'
+    | 'pendingSweep'
+    | 'blocked'
+    | 'completed'
+    | 'sweepSkipped'
+
+/** 批次恢复记录，操作资格和原因均来自 Rust。 */
+export interface SettlementRecoveryView {
+  id: string
+  symbol: string
+  expiryAt: string
+  status: SettlementStage
+  statusLabel: string
+  canFinish: boolean
+  factSource: string
+  nextAction: string
+  message: string
+  updatedAt: string
+}
+
+export interface FinishSettlementSweepRequest {
+  batchId: string
+  confirmManual: boolean
+}
+
 /** 人工核对资金恢复记录后的处置请求。 */
 export interface ResolveFundingAttemptRequest {
   attemptId: string
@@ -241,6 +271,7 @@ export interface AppSnapshot {
   riskAlerts: RiskAlert[]
   orderAttempts: OrderAttemptView[]
   fundingAttempts: FundingAttemptView[]
+  settlementRecoveries: SettlementRecoveryView[]
 }
 
 /** 连接 Binance 的表单请求。Secret 只会传给 Rust keyring 写入流程。 */

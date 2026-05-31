@@ -10,6 +10,7 @@ mod orders;
 mod progress;
 mod runtime;
 mod settlement;
+mod settlement_recovery;
 mod validation;
 
 use std::{
@@ -508,6 +509,7 @@ impl AppState {
             orders,
             order_attempts,
             funding_attempts,
+            settlement_recoveries: self.settlement_recoveries()?,
         })
     }
 

@@ -10,18 +10,14 @@ use rust_decimal::Decimal;
 
 use crate::domain::{
     AppError, AppResult, BalanceRow, ExchangeOrderAck, OptionAccountSnapshot, OptionContract,
-    OptionPosition, OrderAttempt, OrderAttemptStatus, SettlementBatch, SettlementStage,
-    SimpleEarnSnapshot, SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyRequest,
-    StrategyStatus,
+    OptionPosition, OrderAttempt, OrderAttemptStatus, SettlementBatch, SimpleEarnSnapshot,
+    SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus,
 };
 use crate::strategy;
 
 /// 批次保留在后端，等待和收尾说明复用订单详情中的补齐结果。
 pub(super) fn apply_settlement_progress(orders: &mut [StrategyOrder], batches: &[SettlementBatch]) {
-    for batch in batches
-        .iter()
-        .filter(|batch| batch.stage != SettlementStage::Completed)
-    {
+    for batch in batches.iter().filter(|batch| !batch.stage.is_terminal()) {
         for order in orders
             .iter_mut()
             .filter(|order| batch.order_ids.contains(&order.id))

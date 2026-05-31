@@ -10,8 +10,9 @@ use tauri_plugin_opener::OpenerExt;
 use crate::app_state::AppState;
 use crate::domain::{
     AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppSettings, AppSnapshot,
-    CandidateScanResult, ConnectBinanceRequest, FundingAttemptView, LogSnapshot,
-    ResolveFundingAttemptRequest, StrategyOrder, StrategyRequest,
+    CandidateScanResult, ConnectBinanceRequest, FinishSettlementSweepRequest, FundingAttemptView,
+    LogSnapshot, ResolveFundingAttemptRequest, SettlementRecoveryView, StrategyOrder,
+    StrategyRequest,
 };
 
 /// 获取应用完整快照。
@@ -101,6 +102,18 @@ pub async fn resolve_funding_attempt(
 ) -> Result<FundingAttemptView, String> {
     state
         .resolve_funding_attempt(&request)
+        .await
+        .map_err(to_command_error)
+}
+
+/// 用户确认结束失败的理财收尾，保留已有资金结果。
+#[tauri::command]
+pub async fn finish_settlement_sweep(
+    state: State<'_, AppState>,
+    request: FinishSettlementSweepRequest,
+) -> Result<SettlementRecoveryView, String> {
+    state
+        .finish_settlement_sweep(&request)
         .await
         .map_err(to_command_error)
 }

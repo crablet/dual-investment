@@ -15,7 +15,6 @@ import { useRecoveryRows } from '@/composables/useRecoveryRows'
 import { useAppStore } from '@/stores/app'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
 import { sumDecimalStrings } from '@/utils/decimal'
-import { recoveryStatusTone } from '@/utils/labels'
 
 const store = useAppStore()
 const { directionText, directionTone, money, statusText, statusTone } = useFormat()
@@ -23,11 +22,13 @@ const selectedId = shallowRef<string>()
 const {
   recoveryRows,
   recoveryStatusLabel,
+  recoveryStatusTone,
   canRecover,
   canManuallyResolve,
   recoverActionLabel,
   recoverRow,
   resolveFundingRow,
+  finishSettlementRow,
 } = useRecoveryRows()
 
 interface OrderDetailRow {
@@ -167,7 +168,7 @@ function recoveryTimeLabel(value: string) {
 
     <Panel title="恢复中心" class="span-12">
       <div class="table-wrap">
-        <table class="data-table">
+        <table class="data-table recovery-table">
           <thead>
             <tr>
               <th>时间</th>
@@ -190,7 +191,7 @@ function recoveryTimeLabel(value: string) {
               <td>{{ row.amount }}</td>
               <td>{{ row.exchangeRef }}</td>
               <td>
-                <NTag :type="recoveryStatusTone(row.status)" size="small">
+                <NTag :type="recoveryStatusTone(row)" size="small">
                   {{ recoveryStatusLabel(row) }}
                 </NTag>
               </td>
@@ -205,6 +206,7 @@ function recoveryTimeLabel(value: string) {
               <td>
                 <div class="button-row compact">
                   <NButton
+                    v-if="row.source !== 'settlement'"
                     size="small"
                     secondary
                     :loading="store.isLoading('recover')"
@@ -213,6 +215,16 @@ function recoveryTimeLabel(value: string) {
                   >
                     <template #icon><NIcon :component="RefreshCw" /></template>
                     {{ recoverActionLabel(row) }}
+                  </NButton>
+                  <NButton
+                    v-if="row.source === 'settlement' && row.canFinish"
+                    size="small"
+                    type="warning"
+                    secondary
+                    :loading="store.isLoading('recover')"
+                    @click="finishSettlementRow(row)"
+                  >
+                    结束理财收尾
                   </NButton>
                   <template v-if="canManuallyResolve(row)">
                     <NButton
@@ -248,6 +260,24 @@ function recoveryTimeLabel(value: string) {
 </template>
 
 <style scoped>
+.recovery-table td:nth-child(n + 7):not(:last-child) {
+  min-width: 160px;
+  max-width: 280px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.recovery-table td:nth-child(9):not(:last-child) {
+  min-width: 280px;
+}
+
+.recovery-table th:last-child,
+.recovery-table td:last-child {
+  position: sticky;
+  right: 0;
+  background: var(--surface);
+}
+
 .recovery-diagnostics {
   margin-top: 4px;
   color: var(--muted);

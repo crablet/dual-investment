@@ -85,7 +85,7 @@ impl AppState {
             || self
                 .settlement_batches()?
                 .iter()
-                .any(|batch| batch.expiry_at <= now && batch.stage != SettlementStage::Completed))
+                .any(|batch| batch.expiry_at <= now && !batch.stage.is_terminal()))
     }
 
     pub(super) async fn discover_settlement_batches(&self) -> AppResult<()> {
@@ -192,9 +192,10 @@ impl AppState {
         let client = self.live_client().await?;
         let mut batches = self.settlement_batches()?;
         batches.sort_by_key(|batch| batch.expiry_at);
-        for mut batch in batches.into_iter().filter(|batch| {
-            batch.expiry_at <= Utc::now() && batch.stage != SettlementStage::Completed
-        }) {
+        for mut batch in batches
+            .into_iter()
+            .filter(|batch| batch.expiry_at <= Utc::now() && !batch.stage.is_terminal())
+        {
             // PendingSweep 必须保留，资金恢复不能使收尾任务退回接货阶段。
             if self.pending_recovery_count()? > 0 {
                 let stage = if matches!(
@@ -224,10 +225,7 @@ impl AppState {
             }
             if self.pending_recovery_count()? > 0
                 || (batch.stage == SettlementStage::PendingSweep && sweep_started(&batch))
-                || !matches!(
-                    batch.stage,
-                    SettlementStage::PendingSweep | SettlementStage::Completed
-                )
+                || (batch.stage != SettlementStage::PendingSweep && !batch.stage.is_terminal())
             {
                 break;
             }
@@ -675,6 +673,7 @@ impl AppState {
         batch: &mut SettlementBatch,
     ) -> AppResult<()> {
         if batch.stage == SettlementStage::Blocked
+            || batch.stage.is_terminal()
             || batch.sweep_after_at.is_none_or(|at| at > Utc::now())
         {
             return Ok(());

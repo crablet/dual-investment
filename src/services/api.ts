@@ -10,10 +10,12 @@ import type {
   AppSnapshot,
   CandidateScanResult,
   ConnectBinanceRequest,
+  FinishSettlementSweepRequest,
   FundingAttemptView,
   LogSnapshot,
   OrderProgressEvent,
   ResolveFundingAttemptRequest,
+  SettlementRecoveryView,
   StrategyOrder,
   StrategyRequest,
 } from '@/types/domain'
@@ -51,6 +53,8 @@ export const api = {
     call<FundingAttemptView>('recover_funding_attempt', { attemptId }),
   resolveFundingAttempt: (request: ResolveFundingAttemptRequest) =>
     call<FundingAttemptView>('resolve_funding_attempt', { request }),
+  finishSettlementSweep: (request: FinishSettlementSweepRequest) =>
+    call<SettlementRecoveryView>('finish_settlement_sweep', { request }),
   listAdoptableOptionPositions: () =>
     call<AdoptableOptionPositionView[]>('list_adoptable_option_positions'),
   adoptOptionPositions: (request: AdoptOptionPositionsRequest) =>

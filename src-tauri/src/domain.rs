@@ -463,6 +463,13 @@ pub enum SettlementStage {
     PendingSweep,
     Blocked,
     Completed,
+    SweepSkipped,
+}
+
+impl SettlementStage {
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::SweepSkipped)
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -505,6 +512,30 @@ pub struct SettlementBatch {
     pub spot_sweep: Option<SettlementAssets>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// 恢复中心中的批次记录，操作资格由后端判断。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettlementRecoveryView {
+    pub id: String,
+    pub symbol: String,
+    pub expiry_at: DateTime<Utc>,
+    pub status: SettlementStage,
+    pub status_label: String,
+    pub can_finish: bool,
+    pub fact_source: String,
+    pub next_action: String,
+    pub message: String,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 用户选择结束理财收尾，保留原有资金结果。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FinishSettlementSweepRequest {
+    pub batch_id: String,
+    pub confirm_manual: bool,
 }
 
 /// 人工解除资金恢复阻断的请求。
@@ -884,6 +915,7 @@ pub struct AppSnapshot {
     pub risk_alerts: Vec<RiskAlert>,
     pub order_attempts: Vec<OrderAttemptView>,
     pub funding_attempts: Vec<FundingAttemptView>,
+    pub settlement_recoveries: Vec<SettlementRecoveryView>,
 }
 
 /// 连接 Binance 的请求。
