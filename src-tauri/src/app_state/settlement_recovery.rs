@@ -40,6 +40,7 @@ fn finish_blocker(
     if batch.sweep_after_at.is_none()
         || batch.spot_sweep.is_none()
         || batch.redemption.is_some()
+        || batch.option_funding.is_some()
         || batch.required.usdt != Decimal::ZERO
         || batch.required.btc != Decimal::ZERO
         || batch.shortfall.usdt != Decimal::ZERO

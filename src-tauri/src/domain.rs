@@ -493,6 +493,17 @@ pub struct SettlementRedemption {
     pub expected_spot: Decimal,
 }
 
+/// 接货前划回期权余款的固定计划，与接货后的归集计划分别确认。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettlementOptionFunding {
+    pub chain_id: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub amount: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub expected_spot: Decimal,
+}
+
 /// 同一精确到期时间的持久化结算任务。成员按本地订单 ID 关联。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -506,6 +517,7 @@ pub struct SettlementBatch {
     pub required: SettlementAssets,
     pub shortfall: SettlementAssets,
     pub redemption: Option<SettlementRedemption>,
+    pub option_funding: Option<SettlementOptionFunding>,
     pub sweep_after_at: Option<DateTime<Utc>>,
     pub option_sweep: Option<SettlementAssets>,
     pub spot_before_transfer: SettlementAssets,

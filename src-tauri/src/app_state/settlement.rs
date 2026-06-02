@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use super::funding::{settlement_funding_amount, settlement_required_assets};
+use super::funding::{settlement_required_assets, spot_has_settlement_assets};
 use super::{
     AppError, AppResult, AppState, BinanceClient, Decimal, Duration,
     OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT, OrderAttempt, OrderAttemptStatus,
@@ -13,7 +13,7 @@ use super::{
     option_idle_usdt_sweep_amount, round_down_funding_amount, spot_asset_free,
     validate_spot_rebalance,
 };
-use crate::domain::{SettlementAssets, SettlementRedemption, SimpleEarnSnapshot};
+use crate::domain::SettlementAssets;
 
 fn needs_settlement(order: &StrategyOrder) -> bool {
     order.filled_quantity > Decimal::ZERO
@@ -33,10 +33,6 @@ fn spot_assets(spot: &SpotAccountSnapshot) -> SettlementAssets {
     }
 }
 
-fn has_assets(spot: &SpotAccountSnapshot, required: &SettlementAssets) -> bool {
-    spot_asset_free(spot, "USDT") >= required.usdt && spot_asset_free(spot, "BTC") >= required.btc
-}
-
 fn sweep_started(batch: &SettlementBatch) -> bool {
     batch.option_sweep.is_some() || batch.spot_sweep.is_some()
 }
@@ -49,7 +45,7 @@ impl AppState {
             .list_settlement_batches()
     }
 
-    fn save_batch(&self, batch: &mut SettlementBatch) -> AppResult<()> {
+    pub(super) fn save_batch(&self, batch: &mut SettlementBatch) -> AppResult<()> {
         batch.updated_at = Utc::now();
         self.persistence
             .lock()
@@ -57,7 +53,7 @@ impl AppState {
             .save_settlement_batch(batch)
     }
 
-    fn update_batch(
+    pub(super) fn update_batch(
         &self,
         batch: &mut SettlementBatch,
         stage: SettlementStage,
@@ -136,6 +132,7 @@ impl AppState {
                 required: SettlementAssets::default(),
                 shortfall: SettlementAssets::default(),
                 redemption: None,
+                option_funding: None,
                 sweep_after_at: None,
                 option_sweep: None,
                 spot_before_transfer: SettlementAssets::default(),
@@ -301,7 +298,7 @@ impl AppState {
             }
             let account = client.spot_account().await?;
             let remaining = settlement_required_assets(&self.batch_orders(batch).await?);
-            if !has_assets(&account, &remaining) {
+            if !spot_has_settlement_assets(&account, &remaining) {
                 return self.update_batch(
                     batch,
                     SettlementStage::WaitingFunds,
@@ -373,156 +370,6 @@ impl AppState {
             .lock()
             .map_err(|error| AppError::Storage(error.to_string()))?
             .save_batch_and_orders(batch, orders)
-    }
-
-    async fn prepare_batch_funding(
-        &self,
-        client: &BinanceClient,
-        batch: &mut SettlementBatch,
-    ) -> AppResult<bool> {
-        // 一次只推进一个已经持久化的赎回计划，等待结束后才计算下一步。
-        if let Some(plan) = batch.redemption.clone() {
-            self.update_batch(
-                batch,
-                SettlementStage::ConfirmingFunds,
-                "确认已登记的赎回及现货到账",
-            )?;
-            self.execute_simple_earn_redeem(
-                client,
-                &plan.chain_id,
-                "整批到期现货补齐",
-                &plan.product_id,
-                &plan.asset,
-                plan.amount,
-            )
-            .await?;
-            if !self
-                .wait_for_spot_asset_available(client, &plan.asset, plan.expected_spot)
-                .await?
-            {
-                return Ok(false);
-            }
-            batch.redemption = None;
-            self.save_batch(batch)?;
-        }
-        let spot = client.spot_account().await?;
-        if !spot.can_trade {
-            return Err(AppError::RiskRejected(
-                "现货账户不可交易，停止批次结算".to_string(),
-            ));
-        }
-        if has_assets(&spot, &batch.required) {
-            batch.shortfall = SettlementAssets::default();
-            self.save_batch(batch)?;
-            return Ok(true);
-        }
-        let earn = client.simple_earn_snapshot().await?;
-        let plans = self.plan_batch_redemptions(batch, &spot, &earn)?;
-        if batch.shortfall.usdt > Decimal::ZERO || batch.shortfall.btc > Decimal::ZERO {
-            self.update_batch(
-                batch,
-                SettlementStage::WaitingFunds,
-                &format!(
-                    "整批接货资金不足，仍需补入 {} USDT / {} BTC；到账后继续",
-                    batch.shortfall.usdt, batch.shortfall.btc
-                ),
-            )?;
-            return Ok(false);
-        }
-        let Some(plan) = plans.into_iter().next() else {
-            batch.shortfall = SettlementAssets {
-                usdt: settlement_funding_amount(
-                    "USDT",
-                    batch.required.usdt - spot_asset_free(&spot, "USDT"),
-                ),
-                btc: settlement_funding_amount(
-                    "BTC",
-                    batch.required.btc - spot_asset_free(&spot, "BTC"),
-                ),
-            };
-            self.update_batch(
-                batch,
-                SettlementStage::WaitingFunds,
-                &format!(
-                    "已登记的赎回不能重复发送，现货仍需补入 {} USDT / {} BTC",
-                    batch.shortfall.usdt, batch.shortfall.btc
-                ),
-            )?;
-            return Ok(false);
-        };
-        batch.redemption = Some(plan.clone());
-        self.update_batch(
-            batch,
-            SettlementStage::ConfirmingFunds,
-            "已登记整批赎回计划，等待资金确认及现货到账",
-        )?;
-        self.execute_simple_earn_redeem(
-            client,
-            &plan.chain_id,
-            "整批到期现货补齐",
-            &plan.product_id,
-            &plan.asset,
-            plan.amount,
-        )
-        .await?;
-        if self
-            .wait_for_spot_asset_available(client, &plan.asset, plan.expected_spot)
-            .await?
-        {
-            batch.redemption = None;
-            self.save_batch(batch)?;
-            let spot = client.spot_account().await?;
-            return Ok(has_assets(&spot, &batch.required));
-        }
-        Ok(false)
-    }
-
-    fn plan_batch_redemptions(
-        &self,
-        batch: &mut SettlementBatch,
-        spot: &SpotAccountSnapshot,
-        earn: &SimpleEarnSnapshot,
-    ) -> AppResult<Vec<SettlementRedemption>> {
-        let needs = [("USDT", batch.required.usdt), ("BTC", batch.required.btc)];
-        let mut plans = Vec::new();
-        batch.shortfall = SettlementAssets::default();
-        for (asset, required) in needs {
-            let free = spot_asset_free(spot, asset);
-            let deficit = settlement_funding_amount(asset, required - free);
-            let eligible = earn.balances.iter().filter(|row| {
-                row.asset == asset && row.flexible && row.can_redeem && !row.product_id.is_empty()
-            });
-            let total = eligible.clone().map(|row| row.amount).sum::<Decimal>();
-            let shortfall = crate::decimal_utils::positive_decimal(deficit - total);
-            if asset == "USDT" {
-                batch.shortfall.usdt = shortfall;
-            } else {
-                batch.shortfall.btc = shortfall;
-            }
-            if deficit <= Decimal::ZERO {
-                continue;
-            }
-            let mut positions = eligible.collect::<Vec<_>>();
-            positions.sort_by_key(|position| std::cmp::Reverse(position.amount));
-            for position in positions {
-                let chain_id = format!("{}-redeem-{asset}-{}", batch.id, position.product_id);
-                if !self.funding_attempts_by_chain(&chain_id)?.is_empty() {
-                    continue;
-                }
-                let amount = round_down_funding_amount(position.amount.min(deficit));
-                if amount > Decimal::ZERO {
-                    plans.push(SettlementRedemption {
-                        chain_id,
-                        asset: asset.to_string(),
-                        product_id: position.product_id.clone(),
-                        amount,
-                        expected_spot: free + amount,
-                    });
-                    break;
-                }
-            }
-        }
-        Ok(plans)
     }
 
     async fn settlement_price(

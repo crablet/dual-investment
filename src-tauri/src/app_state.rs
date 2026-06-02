@@ -10,6 +10,7 @@ mod orders;
 mod progress;
 mod runtime;
 mod settlement;
+mod settlement_funding;
 mod settlement_recovery;
 mod validation;
 
