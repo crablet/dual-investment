@@ -13,7 +13,7 @@ use crate::domain::{
 };
 use crate::strategy;
 
-const SELL_PUT_REBALANCE_USDT_BUFFER: Decimal = dec!(1.10);
+const SELL_PUT_REBALANCE_USDT_BUFFER: Decimal = dec!(1.02);
 const BINANCE_FUNDING_AMOUNT_SCALE: u32 = 8;
 
 /// 计算下单前需要补入期权保证金账户的 USDT 缺口。
