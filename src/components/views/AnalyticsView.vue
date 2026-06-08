@@ -10,6 +10,7 @@ import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { relativeBarWidth } from '@/utils/bars'
+import { localDateKey } from '@/utils/date'
 import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 const store = useAppStore()
@@ -43,10 +44,10 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
 
 <template>
   <div class="view-grid">
-    <Panel title="月度复盘" class="span-6">
-      <div v-if="store.pnl" class="summary-cards monthly-summary-cards">
-        <article><span>本月收益</span><strong>{{ money(store.pnl.cumulative) }}</strong></article>
-        <article><span>本月权利金</span><strong>{{ money(store.pnl.optionPremium) }}</strong></article>
+    <Panel title="收益汇总" class="span-6">
+      <div v-if="store.pnl" class="summary-cards pnl-summary-cards">
+        <article><span>累计收益</span><strong>{{ money(store.pnl.cumulative) }}</strong></article>
+        <article><span>累计权利金</span><strong>{{ money(store.pnl.optionPremium) }}</strong></article>
         <article><span>补齐 BTC 浮动盈亏</span><strong>{{ money(store.pnl.floatingSpot) }}</strong></article>
       </div>
     </Panel>
@@ -69,7 +70,7 @@ function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
           </thead>
           <tbody>
             <tr v-for="order in store.orders" :key="order.id">
-              <td>{{ order.createdAt.slice(0, 10) }}</td>
+              <td>{{ localDateKey(order.createdAt) }}</td>
               <td>{{ directionText(order.direction) }}</td>
               <td class="positive">{{ money(order.premium) }}</td>
               <td>{{ percent(order.annualized) }}</td>

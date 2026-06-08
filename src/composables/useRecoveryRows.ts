@@ -188,7 +188,7 @@ function fundingAttemptDiagnostics(attempt: FundingAttemptView) {
     `临时错误 ${attempt.transportErrorCount} 次`,
   ]
   if (attempt.queryAfterAt) {
-    parts.push(`下次 ${formatRecoveryDateTime(attempt.queryAfterAt)}`)
+    parts.push(`下次 ${localDateTimeLabel(attempt.queryAfterAt)}`)
   }
   if (attempt.submitErrorKind) {
     parts.push(`发送错误 ${attempt.submitErrorKind}`)
@@ -198,16 +198,8 @@ function fundingAttemptDiagnostics(attempt: FundingAttemptView) {
   }
   if (attempt.historyWindowStartAt && attempt.historyWindowEndAt) {
     parts.push(
-      `窗口 ${formatRecoveryDateTime(attempt.historyWindowStartAt)} - ${formatRecoveryDateTime(attempt.historyWindowEndAt)}`,
+      `窗口 ${localDateTimeLabel(attempt.historyWindowStartAt)} - ${localDateTimeLabel(attempt.historyWindowEndAt)}`,
     )
   }
   return parts.join('；')
-}
-
-function formatRecoveryDateTime(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return date.toLocaleString()
 }

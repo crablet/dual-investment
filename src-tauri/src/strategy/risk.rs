@@ -11,7 +11,7 @@ use super::math::percent_of;
 use crate::domain::{OptionAccountSnapshot, RiskAlert, RiskSeverity};
 
 /// 默认保证金占用率风控上限。
-pub const DEFAULT_MAX_MARGIN_USAGE: Decimal = dec!(80);
+pub const DEFAULT_MAX_MARGIN_USAGE: Decimal = dec!(90);
 
 /// 最终下单风控允许账户快照相对配置上限上浮的百分点。
 pub const DEFAULT_MARGIN_USAGE_TOLERANCE_POINTS: Decimal = dec!(5);
@@ -25,7 +25,7 @@ pub fn risk_alerts_from_account(account: &OptionAccountSnapshot) -> Vec<RiskAler
     if margin_usage >= DEFAULT_MAX_MARGIN_USAGE {
         vec![RiskAlert {
             id: "margin-usage".to_string(),
-            severity: if margin_usage >= dec!(80) {
+            severity: if margin_usage >= DEFAULT_MAX_MARGIN_USAGE {
                 RiskSeverity::High
             } else {
                 RiskSeverity::Medium

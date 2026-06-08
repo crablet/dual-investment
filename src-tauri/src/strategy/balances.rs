@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use chrono::Utc;
+use chrono::Local;
 use rust_decimal::Decimal;
 
 use super::math::max_decimal;
@@ -213,13 +213,12 @@ pub fn pnl_report_from_orders_with_spot(
     }
 }
 
-/// 统计当天订单权利金。
+/// 按系统本地日期统计当天订单权利金，与前端日历的日期口径一致。
 fn today_option_premium(orders: &[StrategyOrder]) -> Decimal {
-    // 收益报告的“今日”使用后端 UTC 日期，与订单创建时间字段保持同一时间基准。
-    let today = Utc::now().date_naive();
+    let today = Local::now().date_naive();
     orders
         .iter()
-        .filter(|order| order.created_at.date_naive() == today)
+        .filter(|order| order.created_at.with_timezone(&Local).date_naive() == today)
         .map(|order| order.premium)
         .sum::<Decimal>()
 }

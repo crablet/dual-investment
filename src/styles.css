@@ -1185,12 +1185,12 @@ input {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.monthly-summary-cards {
+.pnl-summary-cards {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .order-summary-cards article,
-.monthly-summary-cards article {
+.pnl-summary-cards article {
   display: flex;
   min-height: 104px;
   flex-direction: column;
@@ -1198,7 +1198,7 @@ input {
   gap: 8px;
 }
 
-.monthly-summary-cards article {
+.pnl-summary-cards article {
   min-width: 0;
 }
 
@@ -1208,18 +1208,18 @@ input {
   font-size: 24px;
 }
 
-.monthly-summary-cards span,
+.pnl-summary-cards span,
 .order-summary-cards span {
   line-height: 1.2;
 }
 
-.monthly-summary-cards strong,
+.pnl-summary-cards strong,
 .order-summary-cards strong {
   margin: 0;
   line-height: 1;
 }
 
-.monthly-summary-cards strong {
+.pnl-summary-cards strong {
   overflow-wrap: anywhere;
 }
 
@@ -1269,7 +1269,7 @@ input {
     grid-column: span 6;
   }
 
-  .summary-cards:not(.monthly-summary-cards) {
+  .summary-cards:not(.pnl-summary-cards) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

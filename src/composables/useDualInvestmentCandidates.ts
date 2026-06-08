@@ -17,7 +17,7 @@ interface CandidateFilterForm {
 export type CandidateSortKey = 'strike' | 'annualized' | 'expiry' | 'limitPrice' | 'exerciseProbability'
 export type CandidateSortDirection = 'asc' | 'desc'
 
-// 到期筛选按自然天展示；实际期权到期和下单请求仍使用 Rust 返回的精确 expiryAt。
+// 剩余时长按 24 小时向上取整为天；实际到期和下单请求仍使用 Rust 返回的精确 expiryAt。
 const dayMs = 86_400_000
 
 export const expiryFilters = [

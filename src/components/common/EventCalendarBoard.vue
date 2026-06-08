@@ -12,11 +12,12 @@ import {
   Clock3,
 } from '@lucide/vue'
 import { NButton, NIcon } from 'naive-ui'
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import {
   calendarEventTypes,
   useCalendarEvents,
 } from '@/composables/useCalendarEvents'
+import { useLocalToday } from '@/composables/useLocalToday'
 import { useAppStore } from '@/stores/app'
 import {
   addDays,
@@ -38,13 +39,20 @@ interface CalendarDay {
 
 const store = useAppStore()
 const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-const today = new Date()
-const todayKey = formatDateKey(today)
+const { today, todayKey } = useLocalToday()
 
 // 月历状态只控制可见窗口和选中日期，不会创建或修改任何真实待办。
-const currentMonth = shallowRef(startOfMonth(today))
-const selectedDate = shallowRef(todayKey)
+const currentMonth = shallowRef(startOfMonth(today.value))
+const selectedDate = shallowRef(todayKey.value)
 const activeType = shallowRef<CalendarEventType | 'all'>('all')
+
+watch(todayKey, (nextDay, previousDay) => {
+  // 正在查看今天时跟随换日；用户选中的其他日期保持原位。
+  if (selectedDate.value === previousDay) {
+    currentMonth.value = startOfMonth(today.value)
+    selectedDate.value = nextDay
+  }
+})
 
 const visibleStart = computed(() => startOfWeek(currentMonth.value))
 const visibleEnd = computed(() => addDays(visibleStart.value, 41))
@@ -82,7 +90,7 @@ const calendarDays = computed<CalendarDay[]>(() => {
       date,
       label: day.getDate(),
       inCurrentMonth: day.getMonth() === currentMonth.value.getMonth(),
-      isToday: date === todayKey,
+      isToday: date === todayKey.value,
       events: eventsByDate.value.get(date) ?? [],
     }
   })
@@ -118,15 +126,15 @@ function nextMonth() {
 }
 
 function selectToday() {
-  currentMonth.value = startOfMonth(today)
-  selectedDate.value = todayKey
+  currentMonth.value = startOfMonth(today.value)
+  selectedDate.value = todayKey.value
 }
 
 function setCurrentMonth(date: Date) {
   // 切到本月时回到今天；切到其他月份时选中月初，避免保留一个不可见的旧日期。
   currentMonth.value = startOfMonth(date)
-  selectedDate.value = isSameMonth(today, currentMonth.value)
-    ? todayKey
+  selectedDate.value = isSameMonth(today.value, currentMonth.value)
+    ? todayKey.value
     : formatDateKey(currentMonth.value)
 }
 

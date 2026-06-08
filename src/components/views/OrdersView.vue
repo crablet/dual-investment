@@ -11,12 +11,14 @@ import { computed, shallowRef, watchEffect } from 'vue'
 import Panel from '@/components/common/Panel.vue'
 import AdoptOptionPositionsPanel from '@/components/orders/AdoptOptionPositionsPanel.vue'
 import { useFormat } from '@/composables/useFormat'
+import { useLocalToday } from '@/composables/useLocalToday'
 import { useRecoveryRows } from '@/composables/useRecoveryRows'
 import { useAppStore } from '@/stores/app'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
 import { sumDecimalStrings } from '@/utils/decimal'
 
 const store = useAppStore()
+const { todayKey } = useLocalToday()
 const { directionText, directionTone, money, statusText, statusTone } = useFormat()
 const selectedId = shallowRef<string>()
 const {
@@ -50,8 +52,7 @@ const totalPremium = computed(() => {
 })
 const todayExpiryCount = computed(() => {
   // “今日到期”按本地日期展示，真实结算触发仍以后端 expiryAt 毫秒时间戳为准。
-  const today = localDateKey(new Date().toISOString())
-  return store.orders.filter(order => localDateKey(order.expiryAt) === today).length
+  return store.orders.filter(order => localDateKey(order.expiryAt) === todayKey.value).length
 })
 const detailRows = computed(() => {
   if (!selected.value) {
@@ -81,10 +82,6 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
     { label: '到期补齐', value: order.settlementAction },
     { label: '补齐结果', value: order.rebalanceMessage || '--' },
   ]
-}
-
-function recoveryTimeLabel(value: string) {
-  return value.slice(0, 19).replace('T', ' ')
 }
 </script>
 
@@ -185,7 +182,7 @@ function recoveryTimeLabel(value: string) {
           </thead>
           <tbody>
             <tr v-for="row in recoveryRows" :key="`${row.source}-${row.id}`">
-              <td>{{ recoveryTimeLabel(row.updatedAt) }}</td>
+              <td>{{ localDateTimeLabel(row.updatedAt) }}</td>
               <td>{{ row.type }}</td>
               <td>{{ row.target }}</td>
               <td>{{ row.amount }}</td>
