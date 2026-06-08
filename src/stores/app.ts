@@ -110,7 +110,6 @@ export const useAppStore = defineStore('app', () => {
   const candidates = computed(() => snapshot.value?.candidates ?? [])
   const orders = computed(() => snapshot.value?.orders ?? [])
   const pnl = computed(() => snapshot.value?.pnl)
-  const riskAlerts = computed(() => snapshot.value?.riskAlerts ?? [])
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
   const fundingAttempts = computed(() => snapshot.value?.fundingAttempts ?? [])
   const settlementRecoveries = computed(() => snapshot.value?.settlementRecoveries ?? [])
@@ -583,7 +582,6 @@ export const useAppStore = defineStore('app', () => {
     candidates,
     orders,
     pnl,
-    riskAlerts,
     orderAttempts,
     fundingAttempts,
     settlementRecoveries,

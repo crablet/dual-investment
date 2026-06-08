@@ -1,10 +1,10 @@
 // 事件日历派生逻辑。
 //
-// 日历只从当前应用快照派生订单、到期、结算、补齐、风险和恢复事件。
+// 日历只从当前应用快照派生订单、到期、结算、补齐和恢复事件。
 
 import type { MaybeRefOrGetter } from 'vue'
 import type { AppViewId } from '@/stores/app'
-import type { FundingAttemptView, OrderAttemptView, RiskAlert, StrategyOrder } from '@/types/domain'
+import type { FundingAttemptView, OrderAttemptView, StrategyOrder } from '@/types/domain'
 import { computed, toValue } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
@@ -22,7 +22,6 @@ export type CalendarEventType
     | 'expiry'
     | 'settlement'
     | 'rebalance'
-    | 'risk'
     | 'recovery'
 
 /** 日历角标颜色语义，保持和全局交易终端配色一致。 */
@@ -59,7 +58,6 @@ export const calendarEventTypes: CalendarEventTypeMeta[] = [
   { id: 'expiry', label: '到期', tone: 'purple' },
   { id: 'settlement', label: '结算', tone: 'green' },
   { id: 'rebalance', label: '补齐', tone: 'green' },
-  { id: 'risk', label: '风险', tone: 'red' },
   { id: 'recovery', label: '恢复', tone: 'gray' },
 ]
 
@@ -79,10 +77,6 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
     // 日历事件是快照的展示索引，不持久化；刷新后会重新从订单/恢复记录生成。
     for (const order of store.orders) {
       rows.push(...eventsFromOrder(order))
-    }
-
-    for (const alert of store.riskAlerts) {
-      rows.push(eventFromRiskAlert(alert))
     }
 
     for (const attempt of store.orderAttempts) {
@@ -166,21 +160,6 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
   }
 
   return rows
-}
-
-/** 从风控提醒派生日历事件。 */
-function eventFromRiskAlert(alert: RiskAlert): CalendarEvent {
-  return {
-    id: `risk-${alert.id}`,
-    type: 'risk',
-    date: localDateKey(alert.createdAt),
-    timeLabel: localTimeLabel(alert.createdAt),
-    title: alert.title,
-    detail: alert.message,
-    tone: 'red',
-    targetView: 'portfolio',
-    priority: alert.severity === 'high' ? 95 : 80,
-  }
 }
 
 /** 从恢复记录派生日历事件；已持久化成功的记录不再提示待办。 */

@@ -19,8 +19,6 @@ export type StrategyStatus
     | 'expired'
     | 'partiallyFilled'
     | 'rebalanceFailed'
-/** 风险提醒严重程度；具体风险规则由 Rust Decimal 规则计算。 */
-export type RiskSeverity = 'medium' | 'high'
 /** 文件日志等级；日志内容必须是后端脱敏摘要。 */
 export type LogLevel = 'info' | 'warn' | 'error'
 /** 手动下单进度阶段，和 Rust 发出的脱敏进度事件保持一致。 */
@@ -143,15 +141,6 @@ export interface AdoptOptionPositionsRequest {
   confirmLive: boolean
 }
 
-/** 可展示的风险提醒；后端负责保证内容脱敏。 */
-export interface RiskAlert {
-  id: string
-  severity: RiskSeverity
-  title: string
-  message: string
-  createdAt: string
-}
-
 /** 收益报告，图表构成由前端再派生。 */
 export interface PnlReport {
   cumulative: DecimalString
@@ -268,7 +257,6 @@ export interface AppSnapshot {
   candidates: StrategyCandidate[]
   orders: StrategyOrder[]
   pnl: PnlReport
-  riskAlerts: RiskAlert[]
   orderAttempts: OrderAttemptView[]
   fundingAttempts: FundingAttemptView[]
   settlementRecoveries: SettlementRecoveryView[]

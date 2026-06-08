@@ -461,7 +461,7 @@ impl AppState {
 
     /// 聚合前端所需完整快照。
     ///
-    /// 已连接时会实时读取 Binance 账户和现货价格；未连接时返回本地缓存和明确的空风险/收益状态。
+    /// 已连接时读取 Binance 账户和现货价格；未连接时仅根据本地记录生成快照。
     pub async fn snapshot(&self) -> AppResult<AppSnapshot> {
         let settings = self.runtime.read().await.settings();
         let candidates = self.candidates.read().await.clone();
@@ -485,7 +485,6 @@ impl AppState {
                 .collect::<Vec<_>>();
             (attempts, funding_attempts)
         };
-        let option_account = accounts.as_ref().map(|accounts| &accounts.option);
         let balances = accounts.as_ref().map_or_else(Vec::new, |accounts| {
             combined_balances(
                 &accounts.option,
@@ -503,9 +502,6 @@ impl AppState {
             balances,
             candidates,
             pnl: strategy::pnl_report_from_orders_with_spot(&orders, spot_price),
-            risk_alerts: option_account
-                .map(strategy::risk_alerts_from_account)
-                .unwrap_or_default(),
             settings,
             orders,
             order_attempts,

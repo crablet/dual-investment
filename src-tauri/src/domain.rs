@@ -83,14 +83,6 @@ pub enum StrategyOrderSource {
     AdoptedPosition,
 }
 
-/// 风险提醒严重程度。
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RiskSeverity {
-    Medium,
-    High,
-}
-
 /// 前端设置页和导航状态需要展示的运行配置，不包含 API Key 或 Secret。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -231,19 +223,6 @@ pub struct StrategyOrder {
     pub spot_filled_quantity: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub spot_avg_price: Decimal,
-}
-
-/// 风控提醒。
-///
-/// `message` 应该是可安全展示的中文摘要，不应包含签名请求、Secret 或订单响应原文。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RiskAlert {
-    pub id: String,
-    pub severity: RiskSeverity,
-    pub title: String,
-    pub message: String,
-    pub created_at: DateTime<Utc>,
 }
 
 /// 收益汇总。
@@ -924,7 +903,6 @@ pub struct AppSnapshot {
     pub candidates: Vec<StrategyCandidate>,
     pub orders: Vec<StrategyOrder>,
     pub pnl: PnlReport,
-    pub risk_alerts: Vec<RiskAlert>,
     pub order_attempts: Vec<OrderAttemptView>,
     pub funding_attempts: Vec<FundingAttemptView>,
     pub settlement_recoveries: Vec<SettlementRecoveryView>,
