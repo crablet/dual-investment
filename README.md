@@ -33,6 +33,8 @@ API Key 关闭提现权限，仅授予读取、现货与期权交易、Simple Ea
 
 `pnpm dev` 仅用于浏览器布局检查，不提供业务能力。
 
+TypeScript 暂保留在 6.0.x，以满足 [typescript-eslint 的版本要求](https://typescript-eslint.io/users/dependency-versions/)；升级到 7 前须确认 lint 与 Vue 类型检查工具链兼容。
+
 按改动范围验证：
 
 - 前端：`pnpm lint`、`pnpm typecheck`；依赖、构建或工具配置变更加跑 `pnpm build`。
