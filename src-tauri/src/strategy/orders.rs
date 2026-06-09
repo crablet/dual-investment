@@ -49,7 +49,6 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         option_symbol: ack.symbol.clone(),
         direction: request.direction,
         status,
-        expiry: request.expiry,
         expiry_at: request.expiry_at,
         strike: request.strike,
         quantity: request.quantity,
@@ -103,7 +102,6 @@ pub fn order_from_adopted_position(
         option_symbol: position.symbol.clone(),
         direction,
         status: StrategyStatus::Running,
-        expiry: contract.expiry,
         expiry_at: contract.expiry_at,
         strike: contract.strike_price,
         quantity: position.quantity,
@@ -144,7 +142,7 @@ pub fn annualized_from_order_terms(
     opened_at: DateTime<Utc>,
     expiry_at: DateTime<Utc>,
 ) -> Decimal {
-    let expiry_days = days_between(opened_at, expiry_at).max(1);
+    let expiry_days = days_between(opened_at, expiry_at);
     estimate_annualized(premium, strike, quantity, expiry_days)
 }
 

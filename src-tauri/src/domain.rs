@@ -5,7 +5,7 @@
 //! [`Decimal`]，序列化给前端时统一走字符串，避免 JavaScript `number`
 //! 在金融数据上产生隐式精度损失。
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -149,11 +149,9 @@ pub struct BalanceRow {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyCandidate {
-    pub id: String,
     pub symbol: String,
     pub option_symbol: String,
     pub direction: StrategyDirection,
-    pub expiry: NaiveDate,
     pub expiry_at: DateTime<Utc>,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike: Decimal,
@@ -171,13 +169,6 @@ pub struct StrategyCandidate {
     pub strike_distance_percent: Decimal,
 }
 
-/// 候选扫描结果。
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CandidateScanResult {
-    pub candidates: Vec<StrategyCandidate>,
-}
-
 /// 本地持久化的真实策略订单。
 ///
 /// 订单必须来自 Binance 接单结果或恢复查询结果，不能由前端或本地推断凭空创建。
@@ -192,7 +183,6 @@ pub struct StrategyOrder {
     pub option_symbol: String,
     pub direction: StrategyDirection,
     pub status: StrategyStatus,
-    pub expiry: NaiveDate,
     pub expiry_at: DateTime<Utc>,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike: Decimal,
@@ -243,8 +233,8 @@ pub struct PnlReport {
 
 /// 下单恢复记录的状态机。
 ///
-/// 当交易所已经接单但本地订单保存失败时，`PersistFailed`/`SpotPersistFailed`
-/// 会留下可恢复记录。恢复时必须重新查询 Binance 真实订单。
+/// 当交易所已经接单但本地订单保存失败时，恢复记录会保留待确认状态。
+/// 恢复时必须重新查询 Binance 真实订单。
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OrderAttemptStatus {
@@ -254,9 +244,7 @@ pub enum OrderAttemptStatus {
     Failed,
     PersistFailed,
     SpotAttempted,
-    SpotExchangeAck,
     SpotPersisted,
-    SpotPersistFailed,
 }
 
 impl OrderAttemptStatus {
@@ -269,9 +257,7 @@ impl OrderAttemptStatus {
             Self::Failed => "failed",
             Self::PersistFailed => "persist_failed",
             Self::SpotAttempted => "spot_attempted",
-            Self::SpotExchangeAck => "spot_exchange_ack",
             Self::SpotPersisted => "spot_persisted",
-            Self::SpotPersistFailed => "spot_persist_failed",
         }
     }
 }
@@ -285,11 +271,9 @@ pub struct OrderAttempt {
     pub client_order_id: String,
     pub symbol: String,
     pub option_symbol: String,
-    pub direction: StrategyDirection,
     pub status: OrderAttemptStatus,
     pub exchange_order_id: Option<String>,
     pub message: String,
-    pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -418,7 +402,6 @@ pub struct FundingAttempt {
     pub status: FundingAttemptStatus,
     pub message: String,
     pub query_after_at: Option<DateTime<Utc>>,
-    pub send_count: u32,
     pub query_count: u32,
     pub effective_query_count: u32,
     pub transport_error_count: u32,
@@ -498,10 +481,11 @@ pub struct SettlementBatch {
     pub redemption: Option<SettlementRedemption>,
     pub option_funding: Option<SettlementOptionFunding>,
     pub sweep_after_at: Option<DateTime<Utc>>,
-    pub option_sweep: Option<SettlementAssets>,
-    pub spot_before_transfer: SettlementAssets,
+    #[serde(with = "rust_decimal::serde::str_option")]
+    pub option_sweep_usdt: Option<Decimal>,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub spot_usdt_before_transfer: Decimal,
     pub spot_sweep: Option<SettlementAssets>,
-    pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -578,17 +562,11 @@ impl From<FundingAttempt> for FundingAttemptView {
                 format!("Binance 已返回引用 {exchange_ref}")
             }
             (Some(exchange_ref), _) => format!("Binance 引用 {exchange_ref}"),
-            (None, FundingAttemptStatus::Attempted) if attempt.send_count == 0 => {
-                "本地预写记录，尚未开始发送".to_string()
-            }
             (None, FundingAttemptStatus::Confirmed) => "人工核对 Binance 事实已确认".to_string(),
             (None, FundingAttemptStatus::Failed) => "Binance 明确拒绝或人工核对失败".to_string(),
             (None, _) => "按 Binance 历史与账户事实待确认".to_string(),
         };
         let next_action = match attempt.status {
-            FundingAttemptStatus::Attempted if attempt.send_count == 0 => {
-                "自动发送首次请求".to_string()
-            }
             FundingAttemptStatus::Attempted
             | FundingAttemptStatus::ExchangeAck
             | FundingAttemptStatus::Uncertain
@@ -654,7 +632,6 @@ pub struct OrderProgressEvent {
     pub stage: OrderProgressStage,
     pub status: OrderProgressStatus,
     pub message: String,
-    pub timestamp: DateTime<Utc>,
     pub option_symbol: Option<String>,
     pub exchange_order_id: Option<String>,
 }
@@ -790,7 +767,6 @@ pub struct OptionContract {
     pub quantity_scale: u32,
     pub quote_asset: String,
     pub status: String,
-    pub expiry: NaiveDate,
     pub expiry_at: DateTime<Utc>,
 }
 
@@ -865,10 +841,8 @@ pub struct OptionPosition {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdoptableOptionPositionView {
-    pub id: String,
     pub symbol: String,
     pub direction: StrategyDirection,
-    pub expiry: NaiveDate,
     pub expiry_at: DateTime<Utc>,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike: Decimal,
@@ -930,7 +904,6 @@ pub struct StrategyRequest {
     pub symbol: String,
     pub option_symbol: String,
     pub direction: StrategyDirection,
-    pub expiry: NaiveDate,
     pub expiry_at: DateTime<Utc>,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike: Decimal,

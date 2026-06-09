@@ -6,26 +6,19 @@
 <script setup lang="ts">
 import type { PnlBreakdownItem } from '@/types/view'
 import { computed, shallowRef } from 'vue'
+import { sumDecimalStrings } from '@/utils/decimal'
 import {
   absoluteDonutTotal,
   buildDonutSegments,
   centerDisplayForSegment,
   normalizeDonutItems,
-  resolveCenterValue,
 } from '@/utils/donut'
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   items: PnlBreakdownItem[]
-  centerValue?: string
-  centerLabel?: string
-  unit?: string
-  emptyText?: string
-}>(), {
-  centerValue: undefined,
-  centerLabel: '合计',
-  unit: 'USDT',
-  emptyText: '暂无构成数据',
-})
+  centerLabel: string
+  emptyText: string
+}>()
 
 const hoverKey = shallowRef<string>()
 const sortedItems = computed(() => normalizeDonutItems(props.items))
@@ -36,7 +29,7 @@ const absoluteTotal = computed(() => {
 
 const hasItems = computed(() => absoluteTotal.value > 0)
 
-const segments = computed(() => buildDonutSegments(sortedItems.value, props.unit))
+const segments = computed(() => buildDonutSegments(sortedItems.value))
 
 const activeSegment = computed(() =>
   segments.value.find(item => item.key === hoverKey.value),
@@ -45,11 +38,11 @@ const activeSegment = computed(() =>
 const activeKey = computed(() => activeSegment.value?.key)
 
 const centerValue = computed(() =>
-  resolveCenterValue(sortedItems.value, props.centerValue),
+  sumDecimalStrings(sortedItems.value.map(item => item.value)),
 )
 
 const centerDisplay = computed(() => {
-  return centerDisplayForSegment(activeSegment.value, props.centerLabel, centerValue.value, props.unit)
+  return centerDisplayForSegment(activeSegment.value, props.centerLabel, centerValue.value)
 })
 
 function setHover(key: string) {

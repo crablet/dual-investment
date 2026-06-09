@@ -10,8 +10,8 @@ use tauri_plugin_opener::OpenerExt;
 use crate::app_state::AppState;
 use crate::domain::{
     AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppSettings, AppSnapshot,
-    CandidateScanResult, ConnectBinanceRequest, FinishSettlementSweepRequest, FundingAttemptView,
-    LogSnapshot, ResolveFundingAttemptRequest, SettlementRecoveryView, StrategyOrder,
+    ConnectBinanceRequest, FinishSettlementSweepRequest, FundingAttemptView, LogSnapshot,
+    ResolveFundingAttemptRequest, SettlementRecoveryView, StrategyCandidate, StrategyOrder,
     StrategyRequest,
 };
 
@@ -53,7 +53,7 @@ pub async fn forget_binance_credentials(state: State<'_, AppState>) -> Result<Ap
 
 /// 扫描实盘候选机会。
 #[tauri::command]
-pub async fn scan_candidates(state: State<'_, AppState>) -> Result<CandidateScanResult, String> {
+pub async fn scan_candidates(state: State<'_, AppState>) -> Result<Vec<StrategyCandidate>, String> {
     state.scan_candidates().await.map_err(to_command_error)
 }
 

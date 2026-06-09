@@ -104,7 +104,7 @@ function adoptSelected() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in rows" :key="row.id">
+          <tr v-for="row in rows" :key="row.symbol">
             <td>
               <NCheckbox
                 :checked="rowChecked(row)"

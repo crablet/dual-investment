@@ -13,8 +13,6 @@
   text-rendering: optimizeLegibility;
   --bg: #071017;
   --surface: #0f1821;
-  --surface-2: #121f2a;
-  --surface-3: #172532;
   --line: rgba(255, 255, 255, 0.09);
   --text: #f4f7fb;
   --muted: #8f9baa;
@@ -160,12 +158,6 @@ input {
   margin: 0;
   font-size: 16px;
   line-height: 1.25;
-}
-
-.panel-header p {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 13px;
 }
 
 .metric-card {
@@ -818,13 +810,8 @@ input {
   background: rgba(255, 255, 255, 0.025);
 }
 
-.summary-cards span,
-.summary-cards em {
+.summary-cards span {
   display: block;
-}
-
-.summary-cards span,
-.summary-cards em {
   color: var(--muted);
   font-style: normal;
 }
@@ -852,7 +839,6 @@ input {
   box-shadow: 0 16px 34px rgba(0, 0, 0, 0.22);
 }
 
-.candidate-board h3,
 .order-card h3 {
   margin: 0;
   font-size: 18px;

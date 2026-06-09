@@ -1,12 +1,11 @@
 <!--
 通用面板容器。
 
-只负责标题、可选说明和右上角操作插槽，具体业务内容由调用方组合。
+只负责标题和右上角操作插槽，具体业务内容由调用方组合。
 -->
 <script setup lang="ts">
 defineProps<{
   title: string
-  subtitle?: string
 }>()
 </script>
 
@@ -15,7 +14,6 @@ defineProps<{
     <header class="panel-header">
       <div>
         <h2>{{ title }}</h2>
-        <p v-if="subtitle">{{ subtitle }}</p>
       </div>
       <slot name="action" />
     </header>

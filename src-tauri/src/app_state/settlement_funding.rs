@@ -8,7 +8,6 @@ use super::{
     AppError, AppResult, AppState, BinanceClient, Decimal, FundingAttemptKind, SettlementBatch,
     SettlementStage, SpotAccountSnapshot, Uuid, round_down_funding_amount, spot_asset_free,
 };
-use crate::decimal_utils::positive_decimal;
 use crate::domain::{
     SettlementAssets, SettlementOptionFunding, SettlementRedemption, SimpleEarnSnapshot,
 };
@@ -260,7 +259,7 @@ impl AppState {
                 row.asset == asset && row.flexible && row.can_redeem && !row.product_id.is_empty()
             });
             let total = eligible.clone().map(|row| row.amount).sum::<Decimal>();
-            let shortfall = positive_decimal(deficit - total);
+            let shortfall = (deficit - total).max(Decimal::ZERO);
             if asset == "USDT" {
                 batch.shortfall.usdt = shortfall;
             } else {

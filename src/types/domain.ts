@@ -35,9 +35,7 @@ export type OrderAttemptStatus
     | 'failed'
     | 'persist_failed'
     | 'spot_attempted'
-    | 'spot_exchange_ack'
     | 'spot_persisted'
-    | 'spot_persist_failed'
 /** 真实资金动作恢复记录的持久化状态。 */
 export type FundingAttemptStatus
   = | 'attempted'
@@ -66,11 +64,9 @@ export interface BalanceRow {
 
 /** Binance 实盘合约、买一价和 mark greeks 派生出的候选机会。 */
 export interface StrategyCandidate {
-  id: string
   symbol: string
   optionSymbol: string
   direction: StrategyDirection
-  expiry: string
   expiryAt: string
   strike: DecimalString
   quantity: DecimalString
@@ -79,10 +75,6 @@ export interface StrategyCandidate {
   exerciseProbability: DecimalString
   spotPrice: DecimalString
   strikeDistancePercent: DecimalString
-}
-
-export interface CandidateScanResult {
-  candidates: StrategyCandidate[]
 }
 
 /** 本地保存的真实策略订单。 */
@@ -95,7 +87,6 @@ export interface StrategyOrder {
   optionSymbol: string
   direction: StrategyDirection
   status: StrategyStatus
-  expiry: string
   expiryAt: string
   strike: DecimalString
   quantity: DecimalString
@@ -120,10 +111,8 @@ export interface StrategyOrder {
 
 /** 可由本机接管监控的 Binance 当前期权持仓。 */
 export interface AdoptableOptionPositionView {
-  id: string
   symbol: string
   direction: StrategyDirection
-  expiry: string
   expiryAt: string
   strike: DecimalString
   quantity: DecimalString
@@ -245,7 +234,6 @@ export interface OrderProgressEvent {
   stage: OrderProgressStage
   status: OrderProgressStatus
   message: string
-  timestamp: string
   optionSymbol: string | null
   exchangeOrderId: string | null
 }
@@ -274,7 +262,6 @@ export interface StrategyRequest {
   symbol: string
   optionSymbol: string
   direction: StrategyDirection
-  expiry: string
   expiryAt: string
   strike: DecimalString
   quantity: DecimalString

@@ -51,9 +51,7 @@ export const attemptStatusTextMap: Record<OrderAttemptStatus, string> = {
   failed: '下单失败',
   persist_failed: '订单保存失败',
   spot_attempted: '准备发送现货补齐',
-  spot_exchange_ack: '现货交易所已接单',
   spot_persisted: '现货补齐已保存',
-  spot_persist_failed: '现货补齐保存失败',
 }
 
 export const recoveryStatusToneMap: Record<RecoveryStatus, 'error' | 'info' | 'success' | 'warning'> = {
@@ -63,9 +61,7 @@ export const recoveryStatusToneMap: Record<RecoveryStatus, 'error' | 'info' | 's
   failed: 'error',
   persist_failed: 'error',
   spot_attempted: 'warning',
-  spot_exchange_ack: 'info',
   spot_persisted: 'success',
-  spot_persist_failed: 'error',
   uncertain: 'warning',
   pending: 'info',
   confirmed: 'success',

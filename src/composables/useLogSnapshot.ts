@@ -13,7 +13,6 @@ export function useLogSnapshot() {
   const pendingAction = shallowRef<LogAction>()
   const error = shallowRef<string>()
 
-  const loading = computed(() => pendingAction.value !== undefined)
   const hasFiles = computed(() => snapshot.value?.hasFiles ?? false)
   const recentEntries = computed(() => snapshot.value?.recentEntries ?? [])
 
@@ -64,10 +63,8 @@ export function useLogSnapshot() {
   onMounted(refresh)
 
   return {
-    snapshot,
     hasFiles,
     recentEntries,
-    loading,
     pendingAction,
     error,
     refresh,

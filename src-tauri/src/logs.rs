@@ -26,12 +26,7 @@ pub struct LogStore {
 impl LogStore {
     /// 打开应用数据目录中的日志目录。
     pub fn open_app_data(data_dir: impl AsRef<Path>) -> AppResult<Self> {
-        Self::open(data_dir.as_ref().join("logs"))
-    }
-
-    /// 打开指定日志目录。
-    pub fn open(directory: impl Into<PathBuf>) -> AppResult<Self> {
-        let directory = directory.into();
+        let directory = data_dir.as_ref().join("logs");
         fs::create_dir_all(&directory).map_err(storage_error)?;
         Ok(Self {
             directory,

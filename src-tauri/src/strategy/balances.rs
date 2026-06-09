@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet};
 use chrono::Local;
 use rust_decimal::Decimal;
 
-use super::math::max_decimal;
 use crate::domain::{
     BalanceRow, OptionAccountSnapshot, PnlReport, SimpleEarnSnapshot, SpotAccountSnapshot,
     StrategyDirection, StrategyOrder,
@@ -50,7 +49,7 @@ pub fn build_balances(
                 asset: asset.asset.clone(),
                 source: "期权保证金".to_string(),
                 free: asset.available,
-                locked: max_decimal(asset.margin_balance - asset.available, Decimal::ZERO),
+                locked: (asset.margin_balance - asset.available).max(Decimal::ZERO),
                 usdt_value: valuation.usdt_value,
                 usdt_value_known: valuation.known,
             }

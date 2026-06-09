@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use crate::domain::{
     AppError, AppResult, FundingAttempt, FundingAttemptKind, FundingAttemptStatus, OrderAttempt,
-    OrderAttemptStatus, SettlementBatch, StrategyDirection, StrategyOrder,
+    OrderAttemptStatus, SettlementBatch, StrategyOrder,
 };
 
 pub struct Persistence {
@@ -24,13 +24,8 @@ impl Persistence {
     pub fn open_app_data(data_dir: impl AsRef<Path>) -> AppResult<Self> {
         std::fs::create_dir_all(data_dir.as_ref())
             .map_err(|error| AppError::Storage(error.to_string()))?;
-        Self::open(data_dir.as_ref().join("dual-investment.db"))
-    }
-
-    /// 打开指定 `SQLite` 文件并确保表结构存在。
-    pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
-        let connection =
-            Connection::open(path).map_err(|error| AppError::Storage(error.to_string()))?;
+        let connection = Connection::open(data_dir.as_ref().join("dual-investment.db"))
+            .map_err(|error| AppError::Storage(error.to_string()))?;
         let store = Self { connection };
         store.init()?;
         Ok(store)
@@ -57,11 +52,9 @@ impl Persistence {
                     client_order_id TEXT NOT NULL,
                     symbol TEXT NOT NULL,
                     option_symbol TEXT NOT NULL,
-                    direction TEXT NOT NULL,
                     status TEXT NOT NULL,
                     exchange_order_id TEXT,
                     message TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
 
@@ -78,7 +71,6 @@ impl Persistence {
                     status TEXT NOT NULL,
                     message TEXT NOT NULL,
                     query_after_at TEXT,
-                    send_count INTEGER NOT NULL,
                     query_count INTEGER NOT NULL,
                     effective_query_count INTEGER NOT NULL,
                     transport_error_count INTEGER NOT NULL,
@@ -103,7 +95,7 @@ impl Persistence {
                 CREATE INDEX IF NOT EXISTS idx_funding_attempts_updated_at
                     ON funding_attempts (updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_funding_attempts_status
-                    ON funding_attempts (status, updated_at DESC);
+                    ON funding_attempts (status);
                 CREATE INDEX IF NOT EXISTS idx_funding_attempts_chain_created
                     ON funding_attempts (chain_id, created_at);
 
@@ -139,26 +131,19 @@ impl Persistence {
                     client_order_id,
                     symbol,
                     option_symbol,
-                    direction,
                     status,
                     exchange_order_id,
                     message,
-                    created_at,
                     updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     attempt.id,
                     attempt.client_order_id,
                     attempt.symbol,
                     attempt.option_symbol,
-                    match attempt.direction {
-                        crate::domain::StrategyDirection::SellPut => "sellPut",
-                        crate::domain::StrategyDirection::SellCall => "sellCall",
-                    },
                     attempt.status.as_str(),
                     attempt.exchange_order_id.as_deref(),
                     attempt.message,
-                    attempt.created_at.to_rfc3339(),
                     attempt.updated_at.to_rfc3339(),
                 ],
             )
@@ -183,7 +168,6 @@ impl Persistence {
                     status,
                     message,
                     query_after_at,
-                    send_count,
                     query_count,
                     effective_query_count,
                     transport_error_count,
@@ -193,7 +177,7 @@ impl Persistence {
                     history_window_end_at,
                     created_at,
                     updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
                 params![
                     attempt.id,
                     attempt.chain_id,
@@ -207,7 +191,6 @@ impl Persistence {
                     attempt.status.as_str(),
                     attempt.message,
                     attempt.query_after_at.as_ref().map(DateTime::to_rfc3339),
-                    i64::from(attempt.send_count),
                     i64::from(attempt.query_count),
                     i64::from(attempt.effective_query_count),
                     i64::from(attempt.transport_error_count),
@@ -306,7 +289,7 @@ impl Persistence {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT id, client_order_id, symbol, option_symbol, direction, status, exchange_order_id, message, created_at, updated_at
+                "SELECT id, client_order_id, symbol, option_symbol, status, exchange_order_id, message, updated_at
                  FROM order_attempts
                  ORDER BY updated_at DESC
                  LIMIT ?1",
@@ -320,11 +303,9 @@ impl Persistence {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, String>(9)?,
                 ))
             })
             .map_err(|error| AppError::Storage(error.to_string()))?;
@@ -336,11 +317,9 @@ impl Persistence {
                 client_order_id,
                 symbol,
                 option_symbol,
-                direction,
                 status,
                 exchange_order_id,
                 message,
-                created_at,
                 updated_at,
             ) = row.map_err(|error| AppError::Storage(error.to_string()))?;
             attempts.push(OrderAttempt {
@@ -348,11 +327,9 @@ impl Persistence {
                 client_order_id,
                 symbol,
                 option_symbol,
-                direction: parse_direction(&direction)?,
                 status: parse_attempt_status(&status)?,
                 exchange_order_id,
                 message,
-                created_at: parse_time(&created_at)?,
                 updated_at: parse_time(&updated_at)?,
             });
         }
@@ -366,7 +343,7 @@ impl Persistence {
             .connection
             .prepare(
                 "SELECT id, chain_id, kind, purpose, asset, amount, transfer_type, product_id,
-                        exchange_ref, status, message, query_after_at, send_count, query_count,
+                        exchange_ref, status, message, query_after_at, query_count,
                         effective_query_count, transport_error_count, submit_error_kind,
                         history_error_kind, history_window_start_at, history_window_end_at,
                         created_at, updated_at
@@ -393,7 +370,7 @@ impl Persistence {
             .connection
             .prepare(
                 "SELECT id, chain_id, kind, purpose, asset, amount, transfer_type, product_id,
-                        exchange_ref, status, message, query_after_at, send_count, query_count,
+                        exchange_ref, status, message, query_after_at, query_count,
                         effective_query_count, transport_error_count, submit_error_kind,
                         history_error_kind, history_window_start_at, history_window_end_at,
                         created_at, updated_at
@@ -472,7 +449,6 @@ struct FundingAttemptRow {
     status: String,
     message: String,
     query_after_at: Option<String>,
-    send_count: i64,
     query_count: i64,
     effective_query_count: i64,
     transport_error_count: i64,
@@ -499,16 +475,15 @@ impl FundingAttemptRow {
             status: row.get(9)?,
             message: row.get(10)?,
             query_after_at: row.get(11)?,
-            send_count: row.get(12)?,
-            query_count: row.get(13)?,
-            effective_query_count: row.get(14)?,
-            transport_error_count: row.get(15)?,
-            submit_error_kind: row.get(16)?,
-            history_error_kind: row.get(17)?,
-            history_window_start_at: row.get(18)?,
-            history_window_end_at: row.get(19)?,
-            created_at: row.get(20)?,
-            updated_at: row.get(21)?,
+            query_count: row.get(12)?,
+            effective_query_count: row.get(13)?,
+            transport_error_count: row.get(14)?,
+            submit_error_kind: row.get(15)?,
+            history_error_kind: row.get(16)?,
+            history_window_start_at: row.get(17)?,
+            history_window_end_at: row.get(18)?,
+            created_at: row.get(19)?,
+            updated_at: row.get(20)?,
         })
     }
 
@@ -526,7 +501,6 @@ impl FundingAttemptRow {
             status: parse_funding_status(&self.status)?,
             message: self.message,
             query_after_at: self.query_after_at.as_deref().map(parse_time).transpose()?,
-            send_count: parse_nonnegative_u32(self.send_count, "send_count")?,
             query_count: parse_nonnegative_u32(self.query_count, "query_count")?,
             effective_query_count: parse_nonnegative_u32(
                 self.effective_query_count,
@@ -560,15 +534,6 @@ fn parse_time(value: &str) -> AppResult<DateTime<Utc>> {
         .map(|time| time.with_timezone(&Utc))
 }
 
-/// 解析 `SQLite` 中持久化的策略方向。
-fn parse_direction(value: &str) -> AppResult<StrategyDirection> {
-    match value {
-        "sellPut" => Ok(StrategyDirection::SellPut),
-        "sellCall" => Ok(StrategyDirection::SellCall),
-        _ => Err(AppError::Storage(format!("未知订单尝试方向：{value}"))),
-    }
-}
-
 /// 解析 `SQLite` 中持久化的恢复状态。
 fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
     match value {
@@ -578,9 +543,7 @@ fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
         "failed" => Ok(OrderAttemptStatus::Failed),
         "persist_failed" => Ok(OrderAttemptStatus::PersistFailed),
         "spot_attempted" => Ok(OrderAttemptStatus::SpotAttempted),
-        "spot_exchange_ack" => Ok(OrderAttemptStatus::SpotExchangeAck),
         "spot_persisted" => Ok(OrderAttemptStatus::SpotPersisted),
-        "spot_persist_failed" => Ok(OrderAttemptStatus::SpotPersistFailed),
         _ => Err(AppError::Storage(format!("未知订单尝试状态：{value}"))),
     }
 }
@@ -592,7 +555,7 @@ fn parse_decimal(value: &str) -> AppResult<Decimal> {
 }
 
 fn parse_nonnegative_u32(value: i64, field: &str) -> AppResult<u32> {
-    // send/query 计数只允许非负值，避免损坏数据绕过恢复重试上限。
+    // 查询计数只允许非负值，避免损坏数据绕过恢复重试上限。
     u32::try_from(value)
         .map_err(|error| AppError::Storage(format!("资金恢复记录 {field} 无法解析：{error}")))
 }

@@ -6,8 +6,6 @@
 import type {
   OrderProgressStage,
   OrderProgressStatus,
-  StrategyOrder,
-  StrategyRequest,
 } from '@/types/domain'
 import type {
   OrderProgressStepStatus,
@@ -35,52 +33,27 @@ export const orderProgressSuccessMessages: Record<OrderProgressStage, string> = 
 /** 创建一次手动下单的初始进度；此时真实订单还没有发送到 Binance。 */
 export function createInitialOrderProgress(
   flowId: string,
-  request: StrategyRequest,
-  now = new Date().toISOString(),
+  optionSymbol: string,
 ): OrderProgressView {
   return {
     flowId,
     status: 'running',
-    optionSymbol: request.optionSymbol,
-    startedAt: now,
-    updatedAt: now,
-    steps: createOrderProgressSteps('validate', 'running', '正在提交下单请求', now),
+    optionSymbol,
+    steps: createOrderProgressSteps('validate', 'running', '正在提交下单请求'),
   }
 }
 
-/**
- * 从已创建订单重建可展示的下单请求。
- *
- * 只用于前端把成功结果关联回进度面板，不会重新发送真实订单。
- */
-export function createOrderProgressFromOrder(flowId: string, order: StrategyOrder): StrategyRequest {
-  return {
-    clientFlowId: flowId,
-    symbol: order.symbol,
-    optionSymbol: order.optionSymbol,
-    direction: order.direction,
-    expiry: order.expiry,
-    expiryAt: order.expiryAt,
-    strike: order.strike,
-    quantity: order.quantity,
-    limitPrice: order.avgPrice,
-    confirmLive: true,
-  }
-}
-
-/** 构造五阶段进度列表，只有当前阶段带状态、消息和时间戳。 */
+/** 构造五阶段进度列表，只有当前阶段带状态和消息。 */
 export function createOrderProgressSteps(
   activeStage?: OrderProgressStage,
   status: OrderProgressStepStatus = 'pending',
   message?: string,
-  timestamp?: string,
 ): OrderProgressStepView[] {
   return orderProgressStages.map(stage => ({
     id: stage.id,
     label: stage.label,
     status: stage.id === activeStage ? status : 'pending',
     message: stage.id === activeStage ? message : undefined,
-    timestamp: stage.id === activeStage ? timestamp : undefined,
   }))
 }
 
@@ -91,9 +64,6 @@ export function progressStatusFromSteps(steps: OrderProgressStepView[]): OrderPr
   }
   if (steps.find(step => step.id === 'persist')?.status === 'success') {
     return 'success'
-  }
-  if (steps.some(step => step.status === 'running' || step.status === 'success')) {
-    return 'running'
   }
   return 'running'
 }
@@ -107,7 +77,6 @@ export function progressStatusFromSteps(steps: OrderProgressStepView[]): OrderPr
 export function markCurrentOrderStepError(
   steps: OrderProgressStepView[],
   message: string,
-  timestamp: string,
 ) {
   const runningIndex = steps.findIndex(step => step.status === 'running')
   const pendingIndex = steps.findIndex(step => step.status === 'pending')
@@ -115,7 +84,7 @@ export function markCurrentOrderStepError(
   const targetIndex = runningIndex >= 0 ? runningIndex : pendingIndex >= 0 ? pendingIndex : fallbackIndex
   return steps.map((step, index) =>
     index === targetIndex
-      ? { ...step, status: 'error' as OrderProgressStepStatus, message, timestamp }
+      ? { ...step, status: 'error' as OrderProgressStepStatus, message }
       : step,
   )
 }

@@ -48,15 +48,15 @@ fn finish_blocker(
     {
         return Some("尚未确认资金准备、划转及现货到账，不能跳过收尾");
     }
-    let Some(option_sweep) = &batch.option_sweep else {
+    let Some(option_sweep_usdt) = batch.option_sweep_usdt else {
         return Some("缺少期权划转计划，请先核对资金记录");
     };
-    if option_sweep.usdt > Decimal::ZERO
+    if option_sweep_usdt > Decimal::ZERO
         && !funding.iter().any(|attempt| {
             attempt.chain_id == format!("{}-option-return", batch.id)
                 && attempt.kind == FundingAttemptKind::UniversalTransfer
                 && attempt.asset == "USDT"
-                && attempt.amount == option_sweep.usdt
+                && attempt.amount == option_sweep_usdt
                 && attempt.transfer_type.as_deref() == Some("OPTION_MAIN")
                 && attempt.status == FundingAttemptStatus::Confirmed
         })

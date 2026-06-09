@@ -46,18 +46,18 @@ use self::orders::{
 };
 use self::progress::OrderProgressEmitter;
 use self::runtime::{
-    client_from_runtime, join_binance_request, make_client_order_id, make_spot_client_order_id,
-    spawn_binance_request, verify_binance_access,
+    join_binance_request, make_client_order_id, make_spot_client_order_id, spawn_binance_request,
+    verify_binance_access,
 };
 use self::validation::{
     enforce_risk_rules, has_exchange_order_ref, is_in_the_money, is_trackable_order,
-    is_uncertain_submit_error, resolve_contract, should_sync_option_order, validate_contract_order,
-    validate_contract_terms, validate_request, validate_spot_rebalance,
+    is_uncertain_submit_error, resolve_contract, should_sync_option_order, validate_contract_terms,
+    validate_option_margin, validate_request, validate_spot_rebalance,
 };
 use crate::binance::BinanceClient;
 use crate::domain::{
     AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppError, AppResult, AppSettings,
-    AppSnapshot, CandidateScanResult, ConnectBinanceRequest, FundingAttempt, FundingAttemptKind,
+    AppSnapshot, ConnectBinanceRequest, FundingAttempt, FundingAttemptKind,
     FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView, LogLevel,
     LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
     OrderAttemptStatus, OrderAttemptView, OrderProgressStage, OrderProgressStatus,
@@ -92,7 +92,6 @@ struct OrderLiveInputs {
 /// 待发送的资金动作请求。
 ///
 /// 真实请求发送前会先转成 `funding_attempts` 记录；字段只保存恢复所需的脱敏事实。
-#[derive(Clone, Debug)]
 struct FundingRequest {
     chain_id: String,
     kind: FundingAttemptKind,
@@ -371,28 +370,17 @@ fn is_uncertain_funding_error(error: &AppError) -> bool {
         )
 }
 
-/// 运行期连接配置。
-///
-/// API Key 和 Secret 只允许留在内存中用于重建 Binance 客户端，不能写入日志、
-/// `SQLite` 或前端快照；前端只能通过 `settings()` 获取脱敏状态。
-#[derive(Clone, Debug)]
-pub struct RuntimeConfig {
-    /// 当前进程是否已经验证过 Binance 连接和交易权限。
-    pub connected: bool,
-    /// 内存中的 API Key，用于本进程内重建客户端；保存凭据仍走系统 keyring。
-    pub api_key: Option<String>,
-    /// 内存中的 API Secret，只用于签名请求，不得进入任何持久化或展示层。
-    pub api_secret: Option<String>,
+/// 已验证的客户端与凭据保存状态共用一把锁，连接状态直接由客户端是否存在决定。
+struct RuntimeConfig {
+    client: Option<BinanceClient>,
     /// 系统 keyring 是否存在完整凭据。
-    pub saved_credentials: bool,
+    saved_credentials: bool,
 }
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            connected: false,
-            api_key: None,
-            api_secret: None,
+            client: None,
             saved_credentials: secrets::has_binance_credentials(),
         }
     }
@@ -400,9 +388,9 @@ impl Default for RuntimeConfig {
 
 impl RuntimeConfig {
     /// 转成前端可见设置，过滤掉明文 API Key 和 Secret。
-    pub fn settings(&self) -> AppSettings {
+    fn settings(&self) -> AppSettings {
         AppSettings {
-            connected: self.connected,
+            connected: self.client.is_some(),
             saved_credentials: self.saved_credentials,
         }
     }
@@ -415,7 +403,6 @@ impl RuntimeConfig {
 #[derive(Clone)]
 pub struct AppState {
     runtime: Arc<RwLock<RuntimeConfig>>,
-    client: Arc<RwLock<Option<BinanceClient>>>,
     candidates: Arc<RwLock<Vec<StrategyCandidate>>>,
     orders: Arc<RwLock<Vec<StrategyOrder>>>,
     persistence: Arc<Mutex<Persistence>>,
@@ -426,19 +413,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// 从 Tauri 应用数据目录创建状态。
+    /// 从 Tauri 应用数据目录创建状态，只加载仍可跟踪的订单。
     pub fn new_in(data_dir: impl AsRef<Path>) -> AppResult<Self> {
         let data_dir = data_dir.as_ref();
-        Self::from_persistence(
-            Persistence::open_app_data(data_dir)?,
-            LogStore::open_app_data(data_dir)?,
-        )
-    }
-
-    /// 从持久化层恢复状态。
-    ///
-    /// 启动时只加载仍可跟踪的订单，包括没有原始订单号的接管订单。
-    fn from_persistence(persistence: Persistence, logs: LogStore) -> AppResult<Self> {
+        let persistence = Persistence::open_app_data(data_dir)?;
+        let logs = LogStore::open_app_data(data_dir)?;
         let orders = persistence
             .list_orders()?
             .into_iter()
@@ -446,7 +425,6 @@ impl AppState {
             .collect();
         let state = Self {
             runtime: Arc::new(RwLock::new(RuntimeConfig::default())),
-            client: Arc::new(RwLock::new(None)),
             candidates: Arc::new(RwLock::new(Vec::new())),
             orders: Arc::new(RwLock::new(orders)),
             persistence: Arc::new(Mutex::new(persistence)),
@@ -539,17 +517,10 @@ impl AppState {
         secrets::save_binance_credentials(&api_key, &api_secret)?;
 
         let mut runtime = self.runtime.write().await;
-        runtime.connected = true;
-        runtime.api_key = Some(api_key);
-        runtime.api_secret = Some(api_secret);
+        runtime.client = Some(client);
         runtime.saved_credentials = true;
         let settings = runtime.settings();
         drop(runtime);
-        {
-            let mut cached_client = self.client.write().await;
-            *cached_client = Some(client);
-        }
-
         self.record_log("account.connected", "已连接 Binance 账户")?;
         Ok(settings)
     }
@@ -573,21 +544,14 @@ impl AppState {
                 "系统 keyring 中没有已保存的 Binance API 凭据".to_string(),
             ));
         };
-        let client = BinanceClient::new(api_key.clone(), api_secret.clone())?;
+        let client = BinanceClient::new(api_key, api_secret)?;
         verify_binance_access(&client).await?;
 
         let mut runtime = self.runtime.write().await;
-        runtime.connected = true;
-        runtime.api_key = Some(api_key);
-        runtime.api_secret = Some(api_secret);
+        runtime.client = Some(client);
         runtime.saved_credentials = true;
         let settings = runtime.settings();
         drop(runtime);
-        {
-            let mut cached_client = self.client.write().await;
-            *cached_client = Some(client);
-        }
-
         self.record_log(
             "account.connected.saved",
             "已使用系统 keyring 凭据连接 Binance 账户",
@@ -601,16 +565,10 @@ impl AppState {
         let _trade_guard = self.trade_lock.lock().await;
         secrets::delete_binance_credentials()?;
         let mut runtime = self.runtime.write().await;
-        runtime.connected = false;
-        runtime.api_key = None;
-        runtime.api_secret = None;
+        runtime.client = None;
         runtime.saved_credentials = false;
         let settings = runtime.settings();
         drop(runtime);
-        {
-            let mut cached_client = self.client.write().await;
-            *cached_client = None;
-        }
         {
             let mut candidates = self.candidates.write().await;
             candidates.clear();
@@ -625,7 +583,7 @@ impl AppState {
     /// 从 Binance 实盘数据扫描候选，并缓存给前端快照使用。
     ///
     /// 合约、mark greeks、期权买一价和现货价格并发读取，减少一次刷新候选的等待时间。
-    pub async fn scan_candidates(&self) -> AppResult<CandidateScanResult> {
+    pub async fn scan_candidates(&self) -> AppResult<Vec<StrategyCandidate>> {
         let client = self.live_client().await?;
         let contracts_task = spawn_binance_request({
             let client = client.clone();
@@ -659,7 +617,7 @@ impl AppState {
         });
         {
             let mut cached_candidates = self.candidates.write().await;
-            cached_candidates.clone_from(&result.candidates);
+            cached_candidates.clone_from(&result);
         }
         Ok(result)
     }
@@ -1115,7 +1073,7 @@ impl AppState {
                 return Err(error);
             }
         };
-        if let Err(error) = validate_contract_order(&request, contract, &account, &marks) {
+        if let Err(error) = validate_option_margin(&request, contract, &account) {
             self.sweep_option_idle_usdt_best_effort(&client, "期权下单校验失败后归集")
                 .await;
             progress.emit(
@@ -1162,11 +1120,9 @@ impl AppState {
             client_order_id: client_order_id.clone(),
             symbol: request.symbol.clone(),
             option_symbol: contract.symbol.clone(),
-            direction: request.direction,
             status: OrderAttemptStatus::Attempted,
             exchange_order_id: None,
             message: "已通过风控校验，准备发送 Binance 订单".to_string(),
-            created_at: now,
             updated_at: now,
         };
         progress.emit(
@@ -1463,25 +1419,20 @@ impl AppState {
     }
 
     /// 同步所有仍可能变化的期权订单状态。
-    async fn sync_live_orders(&self) -> AppResult<Vec<StrategyOrder>> {
+    async fn sync_live_orders(&self) -> AppResult<()> {
         let client = self.live_client().await?;
         let orders = self.orders.read().await.clone();
-        let mut updated = Vec::new();
 
         // 单个订单同步失败不阻断其他订单，避免一个外部异常拖住整批状态刷新。
         for order in orders.into_iter().filter(should_sync_option_order) {
-            match self.sync_single_order(&client, order.clone()).await {
-                Ok(Some(order)) => updated.push(order),
-                Ok(None) => {}
-                Err(error) => {
-                    self.record_warning(
-                        "strategy.order.sync_failed",
-                        &format!("{} 同步失败：{}", order.option_symbol, error),
-                    )?;
-                }
+            if let Err(error) = self.sync_single_order(&client, order.clone()).await {
+                self.record_warning(
+                    "strategy.order.sync_failed",
+                    &format!("{} 同步失败：{}", order.option_symbol, error),
+                )?;
             }
         }
-        Ok(updated)
+        Ok(())
     }
 
     /// 同步单个期权订单并保存结果。
@@ -1489,7 +1440,7 @@ impl AppState {
         &self,
         client: &BinanceClient,
         mut order: StrategyOrder,
-    ) -> AppResult<Option<StrategyOrder>> {
+    ) -> AppResult<()> {
         if has_exchange_order_ref(&order) {
             let ack = client
                 .query_option_order(
@@ -1507,14 +1458,13 @@ impl AppState {
                         order.option_symbol, ack.status
                     ),
                 )?;
-                return Ok(None);
+                return Ok(());
             }
             apply_option_ack(&mut order, &ack);
         } else {
             self.sync_adopted_position_order(client, &mut order).await?;
         }
-        self.save_order(&order).await?;
-        Ok(Some(order))
+        self.save_order(&order).await
     }
 
     /// 同步没有原始订单号的接管记录。
@@ -1548,7 +1498,7 @@ impl AppState {
     ///
     /// 只做恢复、订单同步和到期结算，不会创建新的策略订单。
     async fn background_tick(&self) -> AppResult<()> {
-        if !self.runtime.read().await.connected {
+        if self.runtime.read().await.client.is_none() {
             return Ok(());
         }
         self.recover_due_funding_attempts().await?;
@@ -1562,7 +1512,7 @@ impl AppState {
 
     /// 启动后台轮询任务。
     ///
-    /// `worker_started` 防止多次连接或重复调用时启动多个轮询器。
+    /// `worker_started` 保证重复调用不会启动多个轮询器。
     pub(crate) fn ensure_background_worker(&self) {
         if self.worker_started.swap(true, Ordering::SeqCst) {
             return;
@@ -1675,26 +1625,21 @@ impl AppState {
             .list_funding_attempts_by_chain(chain_id)
     }
 
-    /// 获取可用 Binance 客户端；缓存缺失时从运行期凭据重建。
+    /// 只返回已经通过连接与权限验证的 Binance 客户端。
     async fn live_client(&self) -> AppResult<BinanceClient> {
-        if let Some(client) = self.client.read().await.as_ref().cloned() {
-            return Ok(client);
-        }
-        let runtime = self.runtime.read().await.clone();
-        let client = client_from_runtime(&runtime)?;
-        {
-            let mut cached_client = self.client.write().await;
-            *cached_client = Some(client.clone());
-        }
-        Ok(client)
+        self.runtime
+            .read()
+            .await
+            .client
+            .clone()
+            .ok_or_else(|| AppError::Config("请先连接 Binance API".to_string()))
     }
 
     /// 已连接时读取期权账户、现货账户和现货行情价格。
     ///
     /// 未连接返回 `None`，让快照保持明确的空状态，而不是前端 fallback 数据。
     async fn live_accounts_if_connected(&self) -> AppResult<Option<LiveAccounts>> {
-        let connected = self.runtime.read().await.connected;
-        if !connected {
+        if self.runtime.read().await.client.is_none() {
             return Ok(None);
         }
         let client = self.live_client().await?;
@@ -1734,7 +1679,7 @@ impl AppState {
     async fn recover_due_funding_attempts(&self) -> AppResult<()> {
         // 读取恢复记录也受交易锁保护，避免查询覆盖刚完成的人工处置。
         let _trade_guard = self.trade_lock.lock().await;
-        if !self.runtime.read().await.connected {
+        if self.runtime.read().await.client.is_none() {
             return Ok(());
         }
         let client = self.live_client().await?;
@@ -1820,6 +1765,11 @@ impl AppState {
         }
         // 先落库再发送真实资金请求，确保请求结果不确定时有可恢复的本地事实。
         let now = Utc::now();
+        let message = format!(
+            "正在发送 Binance {} 请求，用于{}",
+            request.kind.display(),
+            request.purpose
+        );
         let attempt = FundingAttempt {
             id: Uuid::new_v4().to_string(),
             chain_id: request.chain_id,
@@ -1831,9 +1781,8 @@ impl AppState {
             product_id: request.product_id,
             exchange_ref: None,
             status: FundingAttemptStatus::Attempted,
-            message: "已写入资金恢复记录，尚未开始发送 Binance 请求".to_string(),
+            message,
             query_after_at: None,
-            send_count: 0,
             query_count: 0,
             effective_query_count: 0,
             transport_error_count: 0,
@@ -1862,14 +1811,6 @@ impl AppState {
         client: &BinanceClient,
         mut attempt: FundingAttempt,
     ) -> AppResult<FundingAttempt> {
-        attempt.send_count = attempt.send_count.saturating_add(1);
-        attempt.status = FundingAttemptStatus::Attempted;
-        attempt.message = format!(
-            "正在发送 Binance {} 请求，用于{}",
-            attempt.kind.display(),
-            attempt.purpose
-        );
-        attempt.updated_at = Utc::now();
         self.save_funding_attempt(&attempt)?;
 
         let result = match attempt.kind {
@@ -2341,11 +2282,7 @@ impl AppState {
             return;
         }
         // 归集是收尾优化，失败时只写脱敏告警，不回滚已经完成的下单或结算事实。
-        let chain_id = Uuid::new_v4().to_string();
-        match self
-            .sweep_option_idle_usdt(client, purpose, &chain_id)
-            .await
-        {
+        match self.sweep_option_idle_usdt(client, purpose).await {
             Ok(
                 SweepExecutionOutcome::Completed(message) | SweepExecutionOutcome::Skipped(message),
             ) => {
@@ -2366,72 +2303,32 @@ impl AppState {
         &self,
         client: &BinanceClient,
         purpose: &str,
-        chain_id: &str,
     ) -> AppResult<SweepExecutionOutcome> {
-        let chain_attempts = self.funding_attempts_by_chain(chain_id)?;
-        if let Some(subscription) = chain_attempts.iter().find(|attempt| {
-            attempt.kind == FundingAttemptKind::SimpleEarnSubscribe && attempt.asset == "USDT"
-        }) {
-            return match subscription.status {
-                FundingAttemptStatus::Confirmed => Ok(SweepExecutionOutcome::Completed(
-                    "该归集链路的 Simple Earn 活期申购已确认完成".to_string(),
-                )),
-                FundingAttemptStatus::Failed => Err(AppError::RiskRejected(
-                    "该归集链路已有失败的 Simple Earn 申购记录，需要人工复核".to_string(),
-                )),
-                _ => Err(AppError::RiskRejected(
-                    "该归集链路已有待确认的 Simple Earn 申购记录".to_string(),
-                )),
-            };
+        let account = client.option_account().await?;
+        let transfer_amount = round_down_funding_amount(option_idle_usdt_sweep_amount(&account));
+        if transfer_amount < OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT {
+            let message = format!(
+                "{purpose}跳过期权 USDT 归集：可归集数量 {transfer_amount} USDT 小于自动归集阈值 {OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT} USDT"
+            );
+            self.record_log("funding.option_idle_sweep.skipped", &message)?;
+            return Ok(SweepExecutionOutcome::Skipped(message));
         }
-
-        let (transfer_amount, minimum_spot_amount) = if let Some(transfer) =
-            chain_attempts.iter().find(|attempt| {
-                attempt.kind == FundingAttemptKind::UniversalTransfer
-                    && attempt.asset == "USDT"
-                    && attempt.transfer_type.as_deref() == Some("OPTION_MAIN")
-            }) {
-            match transfer.status {
-                FundingAttemptStatus::Confirmed => (transfer.amount, transfer.amount),
-                FundingAttemptStatus::Failed => {
-                    return Err(AppError::RiskRejected(
-                        "该归集链路已有失败的 OPTION_MAIN 划转记录，需要人工复核".to_string(),
-                    ));
-                }
-                _ => {
-                    return Err(AppError::RiskRejected(
-                        "该归集链路已有待确认的 OPTION_MAIN 划转记录".to_string(),
-                    ));
-                }
-            }
-        } else {
-            let account = client.option_account().await?;
-            let amount = round_down_funding_amount(option_idle_usdt_sweep_amount(&account));
-            if amount < OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT {
-                let message = format!(
-                    "{purpose}跳过期权 USDT 归集：可归集数量 {amount} USDT 小于自动归集阈值 {OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT} USDT"
-                );
-                self.record_log("funding.option_idle_sweep.skipped", &message)?;
-                return Ok(SweepExecutionOutcome::Skipped(message));
-            }
-
-            let spot_before = client.spot_account().await?;
-            let minimum_spot_amount = spot_asset_free(&spot_before, "USDT") + amount;
-            self.execute_universal_transfer(
-                client,
-                chain_id,
-                purpose,
-                "OPTION_MAIN",
-                "USDT",
-                amount,
-            )
-            .await?;
-            self.record_log(
-                "funding.transfer.option_main",
-                &format!("已从期权保证金账户归集 {amount} USDT 到现货账户，{purpose}"),
-            )?;
-            (amount, minimum_spot_amount)
-        };
+        let chain_id = Uuid::new_v4().to_string();
+        let spot_before = client.spot_account().await?;
+        let minimum_spot_amount = spot_asset_free(&spot_before, "USDT") + transfer_amount;
+        self.execute_universal_transfer(
+            client,
+            &chain_id,
+            purpose,
+            "OPTION_MAIN",
+            "USDT",
+            transfer_amount,
+        )
+        .await?;
+        self.record_log(
+            "funding.transfer.option_main",
+            &format!("已从期权保证金账户归集 {transfer_amount} USDT 到现货账户，{purpose}"),
+        )?;
 
         if !self
             .wait_for_spot_asset_available(client, "USDT", minimum_spot_amount)
@@ -2444,7 +2341,7 @@ impl AppState {
             return Ok(SweepExecutionOutcome::Waiting(message));
         }
 
-        self.subscribe_spot_asset_to_earn(client, "USDT", transfer_amount, purpose, chain_id)
+        self.subscribe_spot_asset_to_earn(client, "USDT", transfer_amount, purpose, &chain_id)
             .await?;
         Ok(SweepExecutionOutcome::Completed(format!(
             "{purpose}已完成期权闲置 USDT 归集链路"

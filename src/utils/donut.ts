@@ -8,7 +8,6 @@ import {
   decimalStringToDisplayNumber,
   isNegativeDecimalString,
   isZeroDecimalString,
-  sumDecimalStrings,
 } from '@/utils/decimal'
 
 /** 环形图内部归一化条目，补齐渲染、排序和颜色需要的稳定键。 */
@@ -44,8 +43,6 @@ export interface DonutCenterDisplay {
 
 // 业务上有稳定含义的标签固定顺序，避免接口返回顺序变化导致扇区位置跳动。
 const stableLabelOrder = new Map<string, number>([
-  ['期权权利金', 10],
-  ['现货补齐浮动盈亏', 20],
   ['USDT', 100],
   ['USDC', 110],
   ['BTC', 120],
@@ -56,8 +53,6 @@ const stableLabelOrder = new Map<string, number>([
 ])
 
 const fixedColors = new Map<string, string>([
-  ['期权权利金', '#d89b2b'],
-  ['现货补齐浮动盈亏', '#5f8ff5'],
   ['USDT', '#f5b625'],
   ['USDC', '#2775ca'],
   ['BTC', '#f7931a'],
@@ -99,7 +94,7 @@ export function normalizeDonutItems(items: PnlBreakdownItem[]): NormalizedDonutI
 
   return items
     .map((item, index): NormalizedDonutItem => {
-      const baseKey = item.key ?? item.label
+      const baseKey = item.key
       const occurrence = keyCounts.get(baseKey) ?? 0
       keyCounts.set(baseKey, occurrence + 1)
       return {
@@ -129,7 +124,7 @@ export function absoluteDonutTotal(items: NormalizedDonutItem[]) {
 }
 
 /** 把归一化条目转换成 SVG circle 需要的 dash 参数和可访问文案。 */
-export function buildDonutSegments(items: NormalizedDonutItem[], unit: string): DonutSegment[] {
+export function buildDonutSegments(items: NormalizedDonutItem[]): DonutSegment[] {
   const total = absoluteDonutTotal(items)
   let offset = 25
   if (total <= 0) {
@@ -148,19 +143,11 @@ export function buildDonutSegments(items: NormalizedDonutItem[], unit: string): 
       dasharray: `${svgNumber(length)} ${svgNumber(100 - length)}`,
       dashoffset: svgNumber(offset),
       negative: isNegativeDecimalString(item.value),
-      ariaLabel: `${item.label}，${formatDonutValue(item.value)} ${unit}，占比 ${percentFormatter.format(percent)}%`,
+      ariaLabel: `${item.label}，${formatDonutValue(item.value)} USDT，占比 ${percentFormatter.format(percent)}%`,
     }
     offset -= length
     return segment
   })
-}
-
-/** 决定中心总值：调用方显式值优先，否则汇总当前可见条目。 */
-export function resolveCenterValue(
-  items: NormalizedDonutItem[],
-  centerValue?: string,
-) {
-  return centerValue ?? sumDecimalStrings(items.map(item => item.value))
 }
 
 /** 根据 hover/focus 状态决定中心区域展示总览还是单个扇区。 */
@@ -168,7 +155,6 @@ export function centerDisplayForSegment(
   active: DonutSegment | undefined,
   centerLabel: string,
   centerValue: string,
-  unit: string,
 ): DonutCenterDisplay {
   if (active) {
     return {
@@ -181,7 +167,7 @@ export function centerDisplayForSegment(
   return {
     label: centerLabel,
     value: formatDonutValue(centerValue),
-    meta: unit,
+    meta: 'USDT',
     negative: isNegativeDecimalString(centerValue),
   }
 }
@@ -203,7 +189,6 @@ function resolveColor(item: NormalizedDonutItem) {
   const normalizedLabel = normalizeLabel(item.label)
   return fixedColors.get(normalizedKey)
     ?? fixedColors.get(normalizedLabel)
-    ?? item.color
     ?? colorFromLabel(normalizedKey || normalizedLabel)
 }
 

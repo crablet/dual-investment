@@ -8,7 +8,6 @@ import type {
   AdoptOptionPositionsRequest,
   AppSettings,
   AppSnapshot,
-  CandidateScanResult,
   ConnectBinanceRequest,
   FinishSettlementSweepRequest,
   FundingAttemptView,
@@ -16,6 +15,7 @@ import type {
   OrderProgressEvent,
   ResolveFundingAttemptRequest,
   SettlementRecoveryView,
+  StrategyCandidate,
   StrategyOrder,
   StrategyRequest,
 } from '@/types/domain'
@@ -44,7 +44,7 @@ export const api = {
     call<AppSettings>('connect_binance', { request }),
   connectSavedBinance: () => call<AppSettings>('connect_saved_binance'),
   forgetBinanceCredentials: () => call<AppSettings>('forget_binance_credentials'),
-  scanCandidates: () => call<CandidateScanResult>('scan_candidates'),
+  scanCandidates: () => call<StrategyCandidate[]>('scan_candidates'),
   placeManualStrategy: (request: StrategyRequest) =>
     call<StrategyOrder>('place_manual_strategy', { request }),
   recoverOrderAttempt: (attemptId: string) =>

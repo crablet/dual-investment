@@ -1,13 +1,12 @@
 //! 运行期辅助函数。
 //!
-//! 这里封装 Binance 客户端重建、异步查询任务和客户端订单号生成。
+//! 这里封装 Binance 权限验证、异步查询任务和客户端订单号生成。
 //! 它只处理内存中的运行状态，不直接读取或写入 keyring。
 
 use std::future::Future;
 
 use chrono::Utc;
 
-use super::RuntimeConfig;
 use crate::binance::BinanceClient;
 use crate::domain::{AppError, AppResult, StrategyDirection};
 
@@ -52,24 +51,6 @@ pub(super) async fn join_binance_request<T>(
         .map_err(|error| AppError::Binance(format!("Binance 异步请求任务失败：{error}")))?
 }
 
-/// 从运行期配置重建 Binance 客户端。
-///
-/// 这里读取的是内存凭据；持久化凭据只允许通过 `secrets.rs` 从 keyring 读取。
-pub(super) fn client_from_runtime(runtime: &RuntimeConfig) -> AppResult<BinanceClient> {
-    if !runtime.connected {
-        return Err(AppError::Config("请先连接 Binance API".to_string()));
-    }
-    let api_key = runtime
-        .api_key
-        .clone()
-        .ok_or_else(|| AppError::Config("缺少 Binance API Key".to_string()))?;
-    let api_secret = runtime
-        .api_secret
-        .clone()
-        .ok_or_else(|| AppError::Config("缺少 Binance API Secret".to_string()))?;
-    BinanceClient::new(api_key, api_secret)
-}
-
 /// 生成期权订单客户端订单号。
 pub(super) fn make_client_order_id(direction: StrategyDirection) -> String {
     format!(
@@ -80,6 +61,6 @@ pub(super) fn make_client_order_id(direction: StrategyDirection) -> String {
 }
 
 /// 生成现货补齐订单客户端订单号。
-pub(super) fn make_spot_client_order_id(_direction: StrategyDirection) -> String {
+pub(super) fn make_spot_client_order_id() -> String {
     format!("ds-{}", uuid::Uuid::new_v4().simple())
 }

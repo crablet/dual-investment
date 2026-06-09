@@ -111,7 +111,6 @@ function confirmOrderReview() {
     symbol: candidate.symbol,
     optionSymbol: candidate.optionSymbol,
     direction: candidate.direction,
-    expiry: candidate.expiry,
     expiryAt: candidate.expiryAt,
     strike: candidate.strike,
     quantity,
@@ -204,7 +203,7 @@ function confirmOrderReview() {
 
         <CandidateTable
           :candidates="sortedCandidates"
-          :selected-candidate-id="selectedCandidate?.id"
+          :selected-option-symbol="selectedCandidate?.optionSymbol"
           :sort-key="candidateSortKey"
           :sort-direction="candidateSortDirection"
           @select="selectCandidate"

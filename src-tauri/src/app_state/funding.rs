@@ -6,7 +6,6 @@
 use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 
-use crate::decimal_utils::{max_decimal, min_decimal, positive_decimal};
 use crate::domain::{
     OptionAccountSnapshot, OptionContract, SettlementAssets, SpotAccountSnapshot,
     StrategyDirection, StrategyOrder, StrategyRequest,
@@ -28,18 +27,15 @@ pub(super) fn option_funding_shortfall(
     let available = account
         .asset("USDT")
         .map_or(Decimal::ZERO, |asset| asset.available);
-    let margin_shortfall = positive_decimal(required - available);
+    let margin_shortfall = (required - available).max(Decimal::ZERO);
 
     let max_margin_usage = strategy::DEFAULT_MAX_MARGIN_USAGE;
     let Some(usdt) = account.asset("USDT") else {
-        return max_decimal(
-            margin_shortfall,
-            risk_equity_target(required, max_margin_usage),
-        );
+        return margin_shortfall.max(risk_equity_target(required, max_margin_usage));
     };
     let equity = option_usdt_equity(usdt);
     let target_equity = risk_equity_target(usdt.initial_margin + required, max_margin_usage);
-    max_decimal(margin_shortfall, positive_decimal(target_equity - equity))
+    margin_shortfall.max((target_equity - equity).max(Decimal::ZERO))
 }
 
 /// 计算期权保证金账户可归集回 Simple Earn 的闲置 USDT。
@@ -50,8 +46,8 @@ pub(super) fn option_idle_usdt_sweep_amount(account: &OptionAccountSnapshot) -> 
     let max_margin_usage = strategy::DEFAULT_MAX_MARGIN_USAGE;
     let equity = option_usdt_equity(usdt);
     let min_equity = risk_equity_target(usdt.initial_margin, max_margin_usage);
-    let excess_equity = positive_decimal(equity - min_equity);
-    min_decimal(usdt.available, excess_equity)
+    let excess_equity = (equity - min_equity).max(Decimal::ZERO);
+    usdt.available.min(excess_equity)
 }
 
 /// 只划回当前接货缺口，且不超过保留其余期权保证金后可用的 USDT。
@@ -60,8 +56,8 @@ pub(super) fn settlement_option_funding_amount(
     spot: &SpotAccountSnapshot,
     required: &SettlementAssets,
 ) -> Decimal {
-    let deficit = positive_decimal(required.usdt - spot_asset_free(spot, "USDT"));
-    round_down_funding_amount(min_decimal(deficit, option_idle_usdt_sweep_amount(account)))
+    let deficit = (required.usdt - spot_asset_free(spot, "USDT")).max(Decimal::ZERO);
+    round_down_funding_amount(deficit.min(option_idle_usdt_sweep_amount(account)))
 }
 
 pub(super) fn spot_has_settlement_assets(
@@ -143,7 +139,7 @@ pub(super) fn settlement_required_assets(
 }
 
 pub(super) fn settlement_funding_amount(asset: &str, value: Decimal) -> Decimal {
-    positive_decimal(value).round_dp_with_strategy(
+    value.max(Decimal::ZERO).round_dp_with_strategy(
         if asset == "USDT" {
             2
         } else {

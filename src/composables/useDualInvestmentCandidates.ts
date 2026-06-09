@@ -50,7 +50,7 @@ type ExpiryFilter = typeof expiryFilters[number]['id']
 /** 组合候选浏览、筛选、排序和右侧下单卡片所需的状态。 */
 export function useDualInvestmentCandidates() {
   const store = useAppStore()
-  const selectedCandidateId = shallowRef<string>()
+  const selectedOptionSymbol = shallowRef<string>()
   const expiryFilter = shallowRef<ExpiryFilter>('all')
   const candidateSortKey = shallowRef<CandidateSortKey>('annualized')
   const candidateSortDirection = shallowRef<CandidateSortDirection>('desc')
@@ -67,7 +67,7 @@ export function useDualInvestmentCandidates() {
   })
 
   const selectedCandidate = computed(() =>
-    store.candidates.find(candidate => candidate.id === selectedCandidateId.value),
+    store.candidates.find(candidate => candidate.optionSymbol === selectedOptionSymbol.value),
   )
 
   const filteredCandidates = computed(() => {
@@ -186,14 +186,14 @@ export function useDualInvestmentCandidates() {
     sortedCandidates,
     (candidates) => {
       // 候选刷新或筛选变化后尽量保留用户选择；原选项消失时再自动选中第一项。
-      if (selectedCandidateId.value && candidates.some(candidate => candidate.id === selectedCandidateId.value)) {
+      if (selectedOptionSymbol.value && candidates.some(candidate => candidate.optionSymbol === selectedOptionSymbol.value)) {
         return
       }
       if (candidates[0]) {
         selectCandidate(candidates[0])
         return
       }
-      selectedCandidateId.value = undefined
+      selectedOptionSymbol.value = undefined
     },
     { immediate: true },
   )
@@ -212,11 +212,11 @@ export function useDualInvestmentCandidates() {
       return
     }
     form.direction = direction
-    selectedCandidateId.value = undefined
+    selectedOptionSymbol.value = undefined
   }
 
   function selectCandidate(candidate: StrategyCandidate) {
-    selectedCandidateId.value = candidate.id
+    selectedOptionSymbol.value = candidate.optionSymbol
     form.direction = candidate.direction
     // 后端候选数量是 Binance 期权“张”口径，前端只承接默认值，真实校验仍在 Rust。
     form.quantity = decimalStringToDisplayNumber(candidate.quantity)
@@ -253,8 +253,8 @@ export function useDualInvestmentCandidates() {
 }
 
 /** 计算展示用剩余天数；真实到期判断以后端 expiryAt 和结算扫描为准。 */
-export function daysUntil(expiry: string) {
-  const target = expiry.includes('T') ? new Date(expiry) : new Date(`${expiry}T00:00:00`)
+export function daysUntil(expiryAt: string) {
+  const target = new Date(expiryAt)
   return Math.max(0, Math.ceil((target.getTime() - Date.now()) / dayMs))
 }
 

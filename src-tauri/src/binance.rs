@@ -43,6 +43,8 @@ use crate::domain::{
 type HmacSha256 = Hmac<Sha256>;
 const QUERY_RETRY_DELAYS: [Duration; 2] = [Duration::from_millis(500), Duration::from_millis(1500)];
 const BINANCE_FUNDING_AMOUNT_SCALE: u32 = 8;
+const EAPI_BASE: &str = "https://eapi.binance.com";
+const SPOT_BASE: &str = "https://api.binance.com";
 
 /// Binance HTTP 客户端。
 ///
@@ -52,8 +54,6 @@ pub struct BinanceClient {
     http: Client,
     api_key: String,
     api_secret: String,
-    eapi_base: String,
-    spot_base: String,
     timestamp_offset_ms: Arc<AtomicI64>,
 }
 
@@ -69,8 +69,6 @@ impl BinanceClient {
             http,
             api_key,
             api_secret,
-            eapi_base: "https://eapi.binance.com".to_string(),
-            spot_base: "https://api.binance.com".to_string(),
             timestamp_offset_ms: Arc::new(AtomicI64::new(0)),
         })
     }
@@ -78,20 +76,20 @@ impl BinanceClient {
     /// 验证期权账户是否可交易。
     ///
     /// 连接阶段会先调用这个方法，避免 UI 显示已连接但后续真实下单被权限拒绝。
-    pub async fn verify_account(&self) -> AppResult<OptionAccountSnapshot> {
+    pub async fn verify_account(&self) -> AppResult<()> {
         let account = self.option_account().await?;
         if !account.can_trade {
             return Err(AppError::Config(
                 "Binance 期权账户当前不可交易，请检查 API 权限和账户状态".to_string(),
             ));
         }
-        Ok(account)
+        Ok(())
     }
 
     /// 查询期权保证金账户。
     pub async fn option_account(&self) -> AppResult<OptionAccountSnapshot> {
         let response = self
-            .signed_get(&self.eapi_base, "/eapi/v1/marginAccount", Vec::new())
+            .signed_get(EAPI_BASE, "/eapi/v1/marginAccount", Vec::new())
             .await?;
         parse_account_snapshot(&response)
     }
@@ -99,28 +97,26 @@ impl BinanceClient {
     /// 查询当前期权持仓，用于接管外部订单和同步已接管记录。
     pub async fn option_positions(&self) -> AppResult<Vec<OptionPosition>> {
         let response = self
-            .signed_get(&self.eapi_base, "/eapi/v1/position", Vec::new())
+            .signed_get(EAPI_BASE, "/eapi/v1/position", Vec::new())
             .await?;
         parse_option_positions(&response)
     }
 
     /// 查询期权合约元数据。
     pub async fn exchange_info(&self) -> AppResult<Vec<OptionContract>> {
-        let response = self
-            .public_get(&self.eapi_base, "/eapi/v1/exchangeInfo")
-            .await?;
+        let response = self.public_get(EAPI_BASE, "/eapi/v1/exchangeInfo").await?;
         parse_exchange_info(&response)
     }
 
     /// 查询期权 mark price，用于候选 greeks 估算与价格上下限校验。
     pub async fn option_mark_prices(&self) -> AppResult<Vec<OptionMarkPrice>> {
-        let response = self.public_get(&self.eapi_base, "/eapi/v1/mark").await?;
+        let response = self.public_get(EAPI_BASE, "/eapi/v1/mark").await?;
         parse_mark_prices(&response)
     }
 
     /// 查询期权 24h ticker，用买一价作为候选可主动卖出的估算价。
     pub async fn option_tickers(&self) -> AppResult<Vec<OptionTicker>> {
-        let response = self.public_get(&self.eapi_base, "/eapi/v1/ticker").await?;
+        let response = self.public_get(EAPI_BASE, "/eapi/v1/ticker").await?;
         parse_option_tickers(&response)
     }
 
@@ -133,7 +129,7 @@ impl BinanceClient {
             ("limit".to_string(), "10".to_string()),
         ]);
         let response = self
-            .public_get(&self.eapi_base, &format!("/eapi/v1/depth?{query}"))
+            .public_get(EAPI_BASE, &format!("/eapi/v1/depth?{query}"))
             .await?;
         parse_option_order_book(&response)
     }
@@ -162,8 +158,7 @@ impl BinanceClient {
             ("clientOrderId".to_string(), client_order_id.to_string()),
             ("newOrderRespType".to_string(), "RESULT".to_string()),
         ];
-        self.signed_post(&self.eapi_base, "/eapi/v1/order", params)
-            .await
+        self.signed_post(EAPI_BASE, "/eapi/v1/order", params).await
     }
 
     /// 按交易所订单号或客户端订单号查询期权订单。
@@ -182,16 +177,14 @@ impl BinanceClient {
         if let Some(client_order_id) = client_order_id.filter(|value| !value.trim().is_empty()) {
             params.push(("clientOrderId".to_string(), client_order_id.to_string()));
         }
-        let response = self
-            .signed_get(&self.eapi_base, "/eapi/v1/order", params)
-            .await?;
+        let response = self.signed_get(EAPI_BASE, "/eapi/v1/order", params).await?;
         parse_order_ack(&response)
     }
 
     /// 查询 Binance 现货账户，用于到期 ITM 后补齐前检查可用资产。
     pub async fn spot_account(&self) -> AppResult<SpotAccountSnapshot> {
         let response = self
-            .signed_get(&self.spot_base, "/api/v3/account", Vec::new())
+            .signed_get(SPOT_BASE, "/api/v3/account", Vec::new())
             .await?;
         parse_spot_account(&response)
     }
@@ -204,7 +197,7 @@ impl BinanceClient {
             .simple_earn_positions(
                 "/sapi/v1/simple-earn/flexible/position",
                 "活期理财",
-                &["totalAmount"],
+                "totalAmount",
                 true,
             )
             .await?;
@@ -212,7 +205,7 @@ impl BinanceClient {
             self.simple_earn_positions(
                 "/sapi/v1/simple-earn/locked/position",
                 "定期理财",
-                &["amount", "principal", "subscriptionAmount", "totalAmount"],
+                "amount",
                 false,
             )
             .await?,
@@ -227,7 +220,7 @@ impl BinanceClient {
     ) -> AppResult<Vec<SimpleEarnFlexibleProduct>> {
         let response = self
             .signed_get(
-                &self.spot_base,
+                SPOT_BASE,
                 "/sapi/v1/simple-earn/flexible/list",
                 vec![
                     ("asset".to_string(), asset.to_string()),
@@ -248,7 +241,7 @@ impl BinanceClient {
         let amount = Self::funding_amount_param("Simple Earn 活期赎回", amount)?;
         let response = self
             .signed_post_value(
-                &self.spot_base,
+                SPOT_BASE,
                 "/sapi/v1/simple-earn/flexible/redeem",
                 vec![
                     ("productId".to_string(), product_id.to_string()),
@@ -271,7 +264,7 @@ impl BinanceClient {
         let amount = Self::funding_amount_param("Simple Earn 活期申购", amount)?;
         let response = self
             .signed_post_value(
-                &self.spot_base,
+                SPOT_BASE,
                 "/sapi/v1/simple-earn/flexible/subscribe",
                 vec![
                     ("productId".to_string(), product_id.to_string()),
@@ -295,7 +288,7 @@ impl BinanceClient {
         let amount = Self::funding_amount_param("Binance 账户划转", amount)?;
         let response = self
             .signed_post_value(
-                &self.spot_base,
+                SPOT_BASE,
                 "/sapi/v1/asset/transfer",
                 vec![
                     ("type".to_string(), transfer_type.to_string()),
@@ -315,7 +308,7 @@ impl BinanceClient {
         end_time_ms: i64,
     ) -> AppResult<Vec<UniversalTransferRecord>> {
         self.signed_get_parsed(
-            &self.spot_base,
+            SPOT_BASE,
             "/sapi/v1/asset/transfer",
             vec![
                 ("type".to_string(), transfer_type.to_string()),
@@ -352,7 +345,7 @@ impl BinanceClient {
             params.push(("purchaseId".to_string(), purchase_id.to_string()));
         }
         self.signed_get_parsed(
-            &self.spot_base,
+            SPOT_BASE,
             "/sapi/v1/simple-earn/flexible/history/subscriptionRecord",
             params,
             parse_simple_earn_subscription_records,
@@ -383,7 +376,7 @@ impl BinanceClient {
             params.push(("redeemId".to_string(), redeem_id.to_string()));
         }
         self.signed_get_parsed(
-            &self.spot_base,
+            SPOT_BASE,
             "/sapi/v1/simple-earn/flexible/history/redemptionRecord",
             params,
             parse_simple_earn_redemption_records,
@@ -394,10 +387,7 @@ impl BinanceClient {
     /// 查询现货价格。当前 v1 固定用于 `BTCUSDT`。
     pub async fn spot_price(&self, symbol: &str) -> AppResult<Decimal> {
         let response = self
-            .public_get(
-                &self.spot_base,
-                &format!("/api/v3/ticker/price?symbol={symbol}"),
-            )
+            .public_get(SPOT_BASE, &format!("/api/v3/ticker/price?symbol={symbol}"))
             .await?;
         decimal_field(&response, "price")
     }
@@ -407,9 +397,7 @@ impl BinanceClient {
     /// 账户估值需要先知道有哪些真实资产，再按 `XXXUSDT` 或 `XXXBTC * BTCUSDT`
     /// 路由估值。一次拉取全部 ticker 可以避免对不存在交易对逐个请求并失败。
     pub async fn spot_price_tickers(&self) -> AppResult<HashMap<String, Decimal>> {
-        let response = self
-            .public_get(&self.spot_base, "/api/v3/ticker/price")
-            .await?;
+        let response = self.public_get(SPOT_BASE, "/api/v3/ticker/price").await?;
         parse_spot_price_tickers(&response)
     }
 
@@ -422,7 +410,7 @@ impl BinanceClient {
     ) -> AppResult<Vec<ExerciseRecord>> {
         let response = self
             .signed_get(
-                &self.eapi_base,
+                EAPI_BASE,
                 "/eapi/v1/exerciseRecord",
                 vec![
                     ("symbol".to_string(), symbol.to_string()),
@@ -450,8 +438,7 @@ impl BinanceClient {
             ("quantity".to_string(), quantity.normalize().to_string()),
             ("newClientOrderId".to_string(), client_order_id.to_string()),
         ];
-        self.signed_post(&self.spot_base, "/api/v3/order", params)
-            .await
+        self.signed_post(SPOT_BASE, "/api/v3/order", params).await
     }
 
     /// 查询现货订单，用于同步和恢复补齐状态。
@@ -468,16 +455,14 @@ impl BinanceClient {
         if let Some(client_order_id) = client_order_id.filter(|value| !value.trim().is_empty()) {
             params.push(("origClientOrderId".to_string(), client_order_id.to_string()));
         }
-        let response = self
-            .signed_get(&self.spot_base, "/api/v3/order", params)
-            .await?;
+        let response = self.signed_get(SPOT_BASE, "/api/v3/order", params).await?;
         parse_order_ack(&response)
     }
 
     /// 发送带签名的 GET 请求。
     ///
     /// 返回值仍是 JSON，只在本模块内继续解析，避免把原始响应扩散到其他层。
-    pub async fn signed_get(
+    async fn signed_get(
         &self,
         base: &str,
         path: &str,
@@ -511,17 +496,17 @@ impl BinanceClient {
         &self,
         path: &str,
         source: &str,
-        amount_keys: &[&str],
+        amount_key: &str,
         flexible: bool,
     ) -> AppResult<Vec<SimpleEarnAssetBalance>> {
-        // Simple Earn 活期和定期接口分页结构相近，但金额字段不同；调用方传入候选字段名。
+        // Simple Earn 活期和定期接口分页结构相同，金额字段分别为 totalAmount 和 amount。
         let mut balances = Vec::new();
         let mut current = 1_u32;
         let size = 100_u32;
         loop {
             let response = self
                 .signed_get(
-                    &self.spot_base,
+                    SPOT_BASE,
                     path,
                     vec![
                         ("current".to_string(), current.to_string()),
@@ -529,7 +514,7 @@ impl BinanceClient {
                     ],
                 )
                 .await?;
-            let page = parse_simple_earn_position_page(&response, source, amount_keys, flexible)?;
+            let page = parse_simple_earn_position_page(&response, source, amount_key, flexible)?;
             let page_len = page.rows.len();
             let total = page.total;
             balances.extend(page.rows);
@@ -619,9 +604,7 @@ impl BinanceClient {
 
     async fn sync_server_time(&self) -> AppResult<()> {
         // Binance 时间戳错误通常来自本机时钟偏移。只缓存偏移量，不修改系统时间。
-        let response = self
-            .public_get_once(&self.spot_base, "/api/v3/time")
-            .await?;
+        let response = self.public_get_once(SPOT_BASE, "/api/v3/time").await?;
         let server_time = response
             .get("serverTime")
             .and_then(Value::as_i64)
@@ -638,44 +621,13 @@ impl BinanceClient {
         path: &str,
         params: Vec<(String, String)>,
     ) -> AppResult<ExchangeOrderAck> {
-        match self.signed_post_once(base, path, &params).await {
-            Ok(value) => Ok(value),
-            Err(error) if is_timestamp_error(&error) => {
-                self.sync_server_time().await?;
-                self.signed_post_once(base, path, &params).await
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    async fn signed_post_once(
-        &self,
-        base: &str,
-        path: &str,
-        params: &[(String, String)],
-    ) -> AppResult<ExchangeOrderAck> {
-        let signed = self.signed_params(params.to_vec())?;
-        // POST 可能产生真实订单，因此这里只发送一次；重试策略由 signed_post 外层严格控制。
-        let response = self
-            .http
-            .post(format!("{base}{path}"))
-            .header("X-MBX-APIKEY", &self.api_key)
-            .query(&signed)
-            .send()
-            .await
-            .map_err(|error| request_error("POST", path, &error))?;
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|error| request_error("POST", path, &error))?;
-        let response_json = Self::decode_response(status, &body)?;
-        parse_order_ack(&response_json)
+        let response = self.signed_post_value(base, path, params).await?;
+        parse_order_ack(&response)
     }
 
     /// 发送带签名的 POST 请求并返回归一化 JSON。
     ///
-    /// 非订单类接口只在本模块解析结果，不把原始响应扩散到上层。
+    /// 订单和资金接口只在本模块解析结果；仅时间戳错误可校时后重试一次。
     async fn signed_post_value(
         &self,
         base: &str,
@@ -699,7 +651,7 @@ impl BinanceClient {
         params: &[(String, String)],
     ) -> AppResult<Value> {
         let signed = self.signed_params(params.to_vec())?;
-        // 资金 POST 同样不能盲目重放；返回 JSON 后只提取交易所引用或状态字段。
+        // 订单和资金 POST 不能盲目重放；重试策略由 signed_post_value 严格控制。
         let response = self
             .http
             .post(format!("{base}{path}"))

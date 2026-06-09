@@ -21,27 +21,11 @@ export const themeOverrides: GlobalThemeOverrides = {
     textColor2: '#c5ced9',
     textColor3: '#8d98a6',
   },
-  Switch: {
-    railColorActive: accentColor,
-    loadingColor: accentColor,
-    boxShadowFocus: accentFocusShadow,
-  },
-  Slider: {
-    fillColor: accentColor,
-    fillColorHover: accentColorHover,
-    dotBorderActive: `2px solid ${accentColor}`,
-    handleBoxShadowFocus: accentFocusShadow,
-  },
   Checkbox: {
     colorChecked: accentColor,
     borderChecked: `1px solid ${accentColor}`,
     borderFocus: `1px solid ${accentColor}`,
     checkMarkColor: '#071017',
     boxShadowFocus: accentFocusShadow,
-  },
-  Progress: {
-    fillColor: accentColor,
-    fillColorInfo: accentColor,
-    fillColorWarning: accentColorHover,
   },
 }

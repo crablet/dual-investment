@@ -2,7 +2,6 @@
 //!
 //! 事件只用于前端交互反馈，内容必须是脱敏摘要，不能作为订单或资金事实来源。
 
-use chrono::Utc;
 use tauri::{AppHandle, Emitter};
 
 use crate::domain::{OrderProgressEvent, OrderProgressStage, OrderProgressStatus, StrategyRequest};
@@ -37,7 +36,6 @@ impl OrderProgressEmitter {
             stage,
             status,
             message: message.into(),
-            timestamp: Utc::now(),
             option_symbol: option_symbol.map(str::to_string),
             exchange_order_id: exchange_order_id.map(str::to_string),
         };

@@ -14,7 +14,7 @@ import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { aggregateBalances } from '@/utils/balances'
 import { localDateTimeLabel } from '@/utils/date'
-import { decimalStringHasValue, decimalStringToDisplayNumber, sumDecimalStrings } from '@/utils/decimal'
+import { decimalStringHasValue, decimalStringToDisplayNumber } from '@/utils/decimal'
 
 const store = useAppStore()
 const { decimal, money } = useFormat()
@@ -60,9 +60,6 @@ const sellCallQuantity = computed(() =>
 )
 const aggregatedBalances = computed(() => aggregateBalances(store.balances))
 const balanceBreakdown = computed<PnlBreakdownItem[]>(() => buildBalanceBreakdown())
-const balanceTotalValue = computed(() =>
-  sumDecimalStrings(balanceBreakdown.value.map(item => item.value)),
-)
 
 function buildBalanceBreakdown(): PnlBreakdownItem[] {
   const rows: PnlBreakdownItem[] = []
@@ -105,7 +102,6 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
     <Panel title="资金与保证金" class="span-4">
       <DonutChart
         :items="balanceBreakdown"
-        :center-value="balanceTotalValue"
         center-label="资产估值"
         empty-text="暂无可估值资产"
       />

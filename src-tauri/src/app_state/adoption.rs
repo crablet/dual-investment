@@ -41,10 +41,8 @@ pub(super) fn adoptable_position_view(
     let already_tracked = has_tracked_option_symbol(orders, &position.symbol);
     let (adoptable, reason) = adoptable_position_state(position, contract, already_tracked);
     Ok(AdoptableOptionPositionView {
-        id: position.symbol.clone(),
         symbol: position.symbol.clone(),
         direction,
-        expiry: contract.expiry,
         expiry_at: contract.expiry_at,
         strike: contract.strike_price,
         quantity: position.quantity,

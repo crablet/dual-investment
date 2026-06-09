@@ -33,7 +33,6 @@ import {
 } from '@/stores/autoReconnect'
 import {
   createInitialOrderProgress,
-  createOrderProgressFromOrder,
   createOrderProgressSteps,
   makeOrderFlowId,
   markCurrentOrderStepError,
@@ -217,8 +216,8 @@ export const useAppStore = defineStore('app', () => {
     orderProgress.value = undefined
   }
 
-  function startOrderProgress(flowId: string, request: StrategyRequest): OrderProgressView {
-    const progress = createInitialOrderProgress(flowId, request)
+  function startOrderProgress(flowId: string, optionSymbol: string): OrderProgressView {
+    const progress = createInitialOrderProgress(flowId, optionSymbol)
     orderProgress.value = progress
     return progress
   }
@@ -230,8 +229,6 @@ export const useAppStore = defineStore('app', () => {
       : {
           flowId: event.flowId,
           status: 'running' as OrderProgressStatus,
-          startedAt: event.timestamp,
-          updatedAt: event.timestamp,
           steps: createOrderProgressSteps(),
         }
 
@@ -241,7 +238,6 @@ export const useAppStore = defineStore('app', () => {
             ...step,
             status: event.status,
             message: event.message,
-            timestamp: event.timestamp,
           }
         : step,
     )
@@ -252,16 +248,14 @@ export const useAppStore = defineStore('app', () => {
       optionSymbol: event.optionSymbol ?? current.optionSymbol,
       exchangeOrderId: event.exchangeOrderId ?? current.exchangeOrderId,
       error: event.status === 'error' ? event.message : current.error,
-      updatedAt: event.timestamp,
     }
   }
 
   function finishOrderProgressSuccess(flowId: string, order: StrategyOrder) {
     // 进度面板只做即时反馈；订单事实仍以随后刷新到的 Rust 快照和本地恢复记录为准。
-    const now = new Date().toISOString()
     const current = orderProgress.value?.flowId === flowId
       ? orderProgress.value
-      : startOrderProgress(flowId, createOrderProgressFromOrder(flowId, order))
+      : startOrderProgress(flowId, order.optionSymbol)
     const steps = current.steps.map((step) => {
       const status: OrderProgressStatus = step.status === 'error' ? 'error' : 'success'
       return {
@@ -270,7 +264,6 @@ export const useAppStore = defineStore('app', () => {
         message: step.id === 'persist'
           ? `订单已保存，交易所状态 ${order.exchangeStatus}`
           : step.message ?? orderProgressSuccessMessages[step.id],
-        timestamp: step.timestamp ?? now,
       }
     })
     orderProgress.value = {
@@ -281,39 +274,32 @@ export const useAppStore = defineStore('app', () => {
       exchangeOrderId: order.exchangeOrderId ?? current.exchangeOrderId,
       order,
       error: undefined,
-      updatedAt: now,
     }
     orderNotice.value = {
-      id: `${flowId}-success-${Date.now()}`,
       type: 'success',
       message: `订单已创建，交易所状态 ${order.exchangeStatus}`,
     }
   }
 
   function finishOrderProgressError(flowId: string, message: string) {
-    const now = new Date().toISOString()
     const current = orderProgress.value?.flowId === flowId
       ? orderProgress.value
       : {
           flowId,
           status: 'running' as OrderProgressStatus,
-          startedAt: now,
-          updatedAt: now,
-          steps: createOrderProgressSteps('validate', 'running', '正在提交下单请求', now),
+          steps: createOrderProgressSteps('validate', 'running', '正在提交下单请求'),
         }
     const hasErrorStep = current.steps.some(step => step.status === 'error')
     const steps = hasErrorStep
       ? current.steps
-      : markCurrentOrderStepError(current.steps, message, now)
+      : markCurrentOrderStepError(current.steps, message)
     orderProgress.value = {
       ...current,
       status: 'error',
       steps,
       error: message,
-      updatedAt: now,
     }
     orderNotice.value = {
-      id: `${flowId}-error-${Date.now()}`,
       type: 'error',
       message,
     }
@@ -400,7 +386,7 @@ export const useAppStore = defineStore('app', () => {
     if (next && snapshot.value) {
       snapshot.value = {
         ...snapshot.value,
-        candidates: next.candidates,
+        candidates: next,
       }
     }
   }
@@ -530,7 +516,7 @@ export const useAppStore = defineStore('app', () => {
   async function placeStrategy(request: PlaceStrategyRequest) {
     const flowId = makeOrderFlowId()
     const orderRequest: StrategyRequest = { ...request, clientFlowId: flowId }
-    startOrderProgress(flowId, orderRequest)
+    startOrderProgress(flowId, orderRequest.optionSymbol)
     const order = await run('order', () => api.placeManualStrategy(orderRequest))
     if (order && snapshot.value) {
       snapshot.value = { ...snapshot.value, orders: [order, ...snapshot.value.orders] }

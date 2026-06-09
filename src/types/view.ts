@@ -24,12 +24,10 @@ export interface MetricCardModel {
 
 /** 构成图展示项。 */
 export interface PnlBreakdownItem {
-  /** 稳定业务 key 用于固定颜色和图形排序；缺省时组件会退回到 label。 */
-  key?: string
+  /** 稳定业务 key 用于固定颜色和图形排序。 */
+  key: string
   label: string
   value: DecimalString
-  /** 可由调用方指定固定色，避免刷新后图表色彩漂移。 */
-  color?: string
 }
 
 /** 轻量条形图展示项。 */
@@ -45,7 +43,6 @@ export interface OrderProgressStepView {
   label: string
   status: OrderProgressStepStatus
   message?: string
-  timestamp?: string
 }
 
 /** 手动下单进度展示模型。 */
@@ -57,12 +54,9 @@ export interface OrderProgressView {
   exchangeOrderId?: string
   order?: StrategyOrder
   error?: string
-  startedAt: string
-  updatedAt: string
 }
 
 export interface OrderProgressNotice {
-  id: string
   type: 'success' | 'error'
   message: string
 }

@@ -34,7 +34,7 @@ fn spot_assets(spot: &SpotAccountSnapshot) -> SettlementAssets {
 }
 
 fn sweep_started(batch: &SettlementBatch) -> bool {
-    batch.option_sweep.is_some() || batch.spot_sweep.is_some()
+    batch.option_sweep_usdt.is_some() || batch.spot_sweep.is_some()
 }
 
 impl AppState {
@@ -134,10 +134,9 @@ impl AppState {
                 redemption: None,
                 option_funding: None,
                 sweep_after_at: None,
-                option_sweep: None,
-                spot_before_transfer: SettlementAssets::default(),
+                option_sweep_usdt: None,
+                spot_usdt_before_transfer: Decimal::ZERO,
                 spot_sweep: None,
-                created_at: now,
                 updated_at: now,
             })?;
         }
@@ -166,14 +165,10 @@ impl AppState {
             .lock()
             .map_err(|error| AppError::Storage(error.to_string()))?
             .list_order_attempts(usize::MAX)?;
-        for attempt in attempts.into_iter().filter(|attempt| {
-            matches!(
-                attempt.status,
-                OrderAttemptStatus::SpotAttempted
-                    | OrderAttemptStatus::SpotExchangeAck
-                    | OrderAttemptStatus::SpotPersistFailed
-            )
-        }) {
+        for attempt in attempts
+            .into_iter()
+            .filter(|attempt| attempt.status == OrderAttemptStatus::SpotAttempted)
+        {
             if let Err(error) = self.recover_spot_attempt(attempt).await {
                 self.record_warning(
                     "settlement.order.confirming",
@@ -464,18 +459,16 @@ impl AppState {
             ));
         }
         validate_spot_rebalance(&order, &client.spot_account().await?)?;
-        order.spot_client_order_id = make_spot_client_order_id(order.direction);
+        order.spot_client_order_id = make_spot_client_order_id();
         order.updated_at = Utc::now();
         let mut attempt = OrderAttempt {
             id: Uuid::new_v4().to_string(),
             client_order_id: order.spot_client_order_id.clone(),
             symbol: "BTCUSDT".to_string(),
             option_symbol: order.option_symbol.clone(),
-            direction: order.direction,
             status: OrderAttemptStatus::SpotAttempted,
             exchange_order_id: None,
             message: "现货补齐意图已登记，发送前关联策略订单".to_string(),
-            created_at: Utc::now(),
             updated_at: Utc::now(),
         };
         self.save_settlement_order(&order, &attempt).await?;
@@ -582,24 +575,19 @@ impl AppState {
         if batch.spot_sweep.is_some() {
             return Ok(true);
         }
-        if batch.option_sweep.is_none() {
+        if batch.option_sweep_usdt.is_none() {
             let account = client.option_account().await?;
             let amount = round_down_funding_amount(option_idle_usdt_sweep_amount(&account));
-            batch.option_sweep = Some(SettlementAssets {
-                usdt: if amount >= OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT {
-                    amount
-                } else {
-                    Decimal::ZERO
-                },
-                btc: Decimal::ZERO,
+            batch.option_sweep_usdt = Some(if amount >= OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT {
+                amount
+            } else {
+                Decimal::ZERO
             });
-            batch.spot_before_transfer = spot_assets(&client.spot_account().await?);
+            batch.spot_usdt_before_transfer =
+                spot_asset_free(&client.spot_account().await?, "USDT");
             self.save_batch(batch)?;
         }
-        let amount = batch
-            .option_sweep
-            .as_ref()
-            .map_or(Decimal::ZERO, |assets| assets.usdt);
+        let amount = batch.option_sweep_usdt.unwrap_or(Decimal::ZERO);
         if amount <= Decimal::ZERO {
             return Ok(true);
         }
@@ -608,7 +596,7 @@ impl AppState {
         if self.funding_attempts_by_chain(&chain_id)?.is_empty() {
             let account = client.option_account().await?;
             if option_idle_usdt_sweep_amount(&account) < amount {
-                batch.option_sweep = None;
+                batch.option_sweep_usdt = None;
                 self.update_batch(
                     batch,
                     SettlementStage::PendingSweep,
@@ -627,7 +615,7 @@ impl AppState {
         )
         .await?;
         if !self
-            .wait_for_spot_asset_available(client, "USDT", batch.spot_before_transfer.usdt + amount)
+            .wait_for_spot_asset_available(client, "USDT", batch.spot_usdt_before_transfer + amount)
             .await?
         {
             self.update_batch(

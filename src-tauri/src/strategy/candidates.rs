@@ -9,10 +9,10 @@ use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use super::math::{abs_decimal, align_decimal_down_to_step, max_decimal, min_decimal};
+use super::math::align_decimal_down_to_step;
 use crate::domain::{
-    CandidateScanResult, OptionContract, OptionMarkPrice, OptionOrderBook, OptionTicker,
-    StrategyCandidate, StrategyDirection, StrategyStatus,
+    OptionContract, OptionMarkPrice, OptionOrderBook, OptionTicker, StrategyCandidate,
+    StrategyDirection, StrategyStatus,
 };
 
 const BROWSE_MIN_DAYS_TO_EXPIRY: i64 = 1;
@@ -33,7 +33,7 @@ pub struct CandidateBuildInputs<'a> {
 /// 候选可见范围固定为到期 1-90 天，并使用 0.01 张作为手动下单初始数量。
 /// 方向过滤必须使用 BTCUSDT 现货价：低买只保留现货价下方 Put，高卖只保留现货价上方 Call。
 #[allow(clippy::too_many_lines)]
-pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult {
+pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> Vec<StrategyCandidate> {
     let CandidateBuildInputs {
         contracts,
         marks,
@@ -42,9 +42,7 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
     } = inputs;
 
     if spot_price <= Decimal::ZERO {
-        return CandidateScanResult {
-            candidates: Vec::new(),
-        };
+        return Vec::new();
     }
 
     let mark_by_symbol = marks
@@ -93,7 +91,7 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
                 return None;
             }
 
-            let delta_abs = abs_decimal(mark.delta);
+            let delta_abs = mark.delta.abs();
             let quantity = DEFAULT_CANDIDATE_QUANTITY;
             // 候选展示使用 Binance 买一价估算卖出 IOC 的可主动成交限价；
             // 真实下单前会重新读取订单簿并按当时买盘深度重算。
@@ -106,17 +104,15 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
                 premium,
                 contract.strike_price,
                 quantity * contract.unit,
-                days_to_expiry.max(1),
+                days_to_expiry,
             );
             let exercise_probability = (delta_abs * dec!(100)).round_dp(2);
             let strike_distance_percent =
                 calculate_strike_distance_percent(contract.strike_price, spot_price);
             Some(StrategyCandidate {
-                id: format!("{}-{}", contract.symbol, Utc::now().timestamp()),
                 symbol: contract.underlying.clone(),
                 option_symbol: contract.symbol.clone(),
                 direction,
-                expiry: contract.expiry,
                 expiry_at: contract.expiry_at,
                 strike: contract.strike_price,
                 quantity,
@@ -133,7 +129,7 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> CandidateScanResult
 
     sort_candidates(&mut candidates);
 
-    CandidateScanResult { candidates }
+    candidates
 }
 
 /// 按精确 UTC 到期时间计算剩余天数。
@@ -177,18 +173,14 @@ pub fn required_margin(
     let notional = contract.strike_price * contract_units;
     let ratio_margin = notional * contract.initial_margin;
     let min_margin = contract.min_initial_margin * contract_units;
-    let maintenance_margin = max_decimal(
-        notional * contract.maintenance_margin,
-        contract.min_maintenance_margin * contract_units,
-    );
+    let maintenance_margin = (notional * contract.maintenance_margin)
+        .max(contract.min_maintenance_margin * contract_units);
     match direction {
-        StrategyDirection::SellPut => max_decimal(
-            notional,
-            max_decimal(maintenance_margin, max_decimal(ratio_margin, min_margin)),
-        ),
-        StrategyDirection::SellCall => {
-            max_decimal(maintenance_margin, max_decimal(ratio_margin, min_margin))
-        }
+        StrategyDirection::SellPut => notional
+            .max(maintenance_margin)
+            .max(ratio_margin)
+            .max(min_margin),
+        StrategyDirection::SellCall => maintenance_margin.max(ratio_margin).max(min_margin),
     }
 }
 
@@ -245,7 +237,7 @@ pub fn option_sell_taker_limit_price_for_quantity(
 pub fn option_sell_taker_limit_price(price: Decimal, contract: &OptionContract) -> Decimal {
     let tick_aligned = align_decimal_down_to_step(price, contract.price_tick_size);
     if contract.max_price > Decimal::ZERO {
-        min_decimal(tick_aligned, contract.max_price)
+        tick_aligned.min(contract.max_price)
     } else {
         tick_aligned
     }

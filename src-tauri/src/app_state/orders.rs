@@ -61,7 +61,6 @@ pub(super) fn request_from_option_attempt(
         symbol: attempt.symbol.clone(),
         option_symbol: attempt.option_symbol.clone(),
         direction,
-        expiry: contract.expiry,
         expiry_at: contract.expiry_at,
         strike: contract.strike_price,
         quantity,
@@ -117,15 +116,10 @@ pub(super) fn apply_option_position(order: &mut StrategyOrder, position: &Option
         order.avg_price = position.entry_price;
     }
     order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
-    let annualized_quantity = if order.filled_quantity > Decimal::ZERO {
-        order.filled_quantity
-    } else {
-        order.quantity
-    };
     order.annualized = strategy::annualized_from_order_terms(
         order.premium,
         order.strike,
-        annualized_quantity,
+        position.quantity,
         order.created_at,
         order.expiry_at,
     );
@@ -183,10 +177,7 @@ pub(super) fn apply_spot_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) 
 pub(super) fn is_spot_attempt(status: OrderAttemptStatus) -> bool {
     matches!(
         status,
-        OrderAttemptStatus::SpotAttempted
-            | OrderAttemptStatus::SpotExchangeAck
-            | OrderAttemptStatus::SpotPersisted
-            | OrderAttemptStatus::SpotPersistFailed
+        OrderAttemptStatus::SpotAttempted | OrderAttemptStatus::SpotPersisted
     )
 }
 

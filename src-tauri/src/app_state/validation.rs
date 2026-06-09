@@ -67,11 +67,6 @@ pub(super) fn ensure_contract_matches_request(
             "期权合约标的与下单标的不一致".to_string(),
         ));
     }
-    if contract.expiry != request.expiry {
-        return Err(AppError::RiskRejected(
-            "期权合约到期日与下单到期日不一致".to_string(),
-        ));
-    }
     if contract.expiry_at != request.expiry_at {
         return Err(AppError::RiskRejected(
             "期权合约精确到期时间与复核快照不一致，请重新扫描并复核".to_string(),
@@ -90,16 +85,12 @@ pub(super) fn ensure_contract_matches_request(
     Ok(())
 }
 
-/// 下单前合约与交易所约束校验。
-///
-/// 包含交易状态、v1 标的限制、数量精度、价格精度、价格上下限和保证金检查。
-pub(super) fn validate_contract_order(
+/// 备资完成后，按最新账户可用余额校验本次订单的保证金需求。
+pub(super) fn validate_option_margin(
     request: &StrategyRequest,
     contract: &OptionContract,
     account: &OptionAccountSnapshot,
-    marks: &[OptionMarkPrice],
 ) -> AppResult<()> {
-    validate_contract_terms(request, contract, marks)?;
     let available = account
         .asset("USDT")
         .map_or(Decimal::ZERO, |asset| asset.available);

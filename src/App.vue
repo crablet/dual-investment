@@ -4,7 +4,7 @@
 业务状态全部放在 Pinia store，视图组件只消费当前快照和触发显式操作。
 -->
 <script setup lang="ts">
-import { darkTheme, dateZhCN, NConfigProvider, NDialogProvider, NMessageProvider, zhCN } from 'naive-ui'
+import { darkTheme, dateZhCN, NConfigProvider, NMessageProvider, zhCN } from 'naive-ui'
 import { computed, defineAsyncComponent } from 'vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import { useBackgroundSync } from '@/composables/useBackgroundSync'
@@ -31,12 +31,10 @@ const currentView = computed(() => views[store.activeView] ?? OverviewView)
 
 <template>
   <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
-    <NDialogProvider>
-      <NMessageProvider>
-        <AppShell>
-          <component :is="currentView" />
-        </AppShell>
-      </NMessageProvider>
-    </NDialogProvider>
+    <NMessageProvider>
+      <AppShell>
+        <component :is="currentView" />
+      </AppShell>
+    </NMessageProvider>
   </NConfigProvider>
 </template>

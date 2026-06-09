@@ -25,7 +25,7 @@ import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 const props = defineProps<{
   candidates: StrategyCandidate[]
-  selectedCandidateId?: string
+  selectedOptionSymbol?: string
   sortKey: CandidateSortKey
   sortDirection: CandidateSortDirection
 }>()
@@ -68,9 +68,9 @@ function signedPercent(value: string | number) {
     </div>
     <button
       v-for="candidate in props.candidates"
-      :key="candidate.id"
+      :key="candidate.optionSymbol"
       class="opportunity-row"
-      :class="{ selected: props.selectedCandidateId === candidate.id }"
+      :class="{ selected: props.selectedOptionSymbol === candidate.optionSymbol }"
       type="button"
       @click="emit('select', candidate)"
     >

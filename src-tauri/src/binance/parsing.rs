@@ -40,8 +40,6 @@ pub(super) fn parse_account_snapshot(value: &Value) -> AppResult<OptionAccountSn
 pub(super) fn parse_option_positions(value: &Value) -> AppResult<Vec<OptionPosition>> {
     let rows = value
         .as_array()
-        .or_else(|| value.get("data").and_then(Value::as_array))
-        .or_else(|| value.get("rows").and_then(Value::as_array))
         .ok_or_else(|| AppError::Binance("Binance 期权持仓响应不是数组".to_string()))?;
 
     rows.iter()
@@ -54,35 +52,15 @@ pub(super) fn parse_option_positions(value: &Value) -> AppResult<Vec<OptionPosit
         .collect()
 }
 
-/// 解析单条期权持仓。Binance 字段在不同响应版本中可能略有差异，这里只抽取接管所需事实。
+/// 解析当前 EAPI 持仓字段；数量负号表示义务仓，领域数量统一保留绝对值。
 fn parse_option_position(value: &Value) -> AppResult<OptionPosition> {
-    let raw_quantity =
-        decimal_from_any_field(value, &["quantity", "positionAmt", "positionAmount"])?
-            .unwrap_or(Decimal::ZERO);
-    let side = optional_string_field(value, "side").unwrap_or_else(|| {
-        if raw_quantity < Decimal::ZERO {
-            "SHORT"
-        } else {
-            "LONG"
-        }
-        .to_string()
-    });
-    let quantity = if raw_quantity < Decimal::ZERO {
-        -raw_quantity
-    } else {
-        raw_quantity
-    };
     Ok(OptionPosition {
         symbol: string_field(value, "symbol")?,
-        side,
-        quantity,
-        entry_price: decimal_from_any_field(
-            value,
-            &["entryPrice", "avgPrice", "averagePrice", "costPrice"],
-        )?
-        .unwrap_or(Decimal::ZERO),
+        side: string_field(value, "side")?,
+        quantity: decimal_field(value, "quantity")?.abs(),
+        entry_price: decimal_field(value, "entryPrice")?,
         mark_price: optional_decimal_field(value, "markPrice")?.unwrap_or(Decimal::ZERO),
-        update_time: date_time_from_any_millis_field(value, &["updateTime", "time"]),
+        update_time: date_time_from_millis_field(value, "time"),
     })
 }
 
@@ -135,7 +113,7 @@ pub(super) struct SimpleEarnPositionPage {
 pub(super) fn parse_simple_earn_position_page(
     value: &Value,
     source: &str,
-    amount_keys: &[&str],
+    amount_key: &str,
     flexible: bool,
 ) -> AppResult<SimpleEarnPositionPage> {
     let rows = value
@@ -143,7 +121,7 @@ pub(super) fn parse_simple_earn_position_page(
         .and_then(Value::as_array)
         .ok_or_else(|| AppError::Binance("Binance Simple Earn 响应缺少 rows 字段".to_string()))?
         .iter()
-        .map(|row| parse_simple_earn_position(row, source, amount_keys, flexible))
+        .map(|row| parse_simple_earn_position(row, source, amount_key, flexible))
         .collect::<AppResult<Vec<_>>>()?;
     let total = value
         .get("total")
@@ -156,16 +134,14 @@ pub(super) fn parse_simple_earn_position_page(
 fn parse_simple_earn_position(
     value: &Value,
     source: &str,
-    amount_keys: &[&str],
+    amount_key: &str,
     flexible: bool,
 ) -> AppResult<SimpleEarnAssetBalance> {
-    let amount = decimal_from_any_field(value, amount_keys)?
-        .ok_or_else(|| AppError::Binance("Binance Simple Earn 持仓响应缺少数量字段".to_string()))?;
     Ok(SimpleEarnAssetBalance {
         asset: string_field(value, "asset")?,
         source: source.to_string(),
         product_id: optional_string_field(value, "productId").unwrap_or_default(),
-        amount,
+        amount: decimal_field(value, amount_key)?,
         flexible,
         can_redeem: value
             .get("canRedeem")
@@ -282,14 +258,8 @@ fn history_rows<'a>(value: &'a Value, operation: &str) -> AppResult<&'a [Value]>
 
 fn parse_simple_earn_redemption_record(value: &Value) -> AppResult<SimpleEarnRedemptionRecord> {
     Ok(SimpleEarnRedemptionRecord {
-        product_id: value
-            .get("productId")
-            .or_else(|| value.get("projectId"))
-            .map(value_to_string)
-            .filter(|text| !text.trim().is_empty())
-            .ok_or_else(|| {
-                AppError::Binance("Binance 赎回历史响应缺少 productId 字段".to_string())
-            })?,
+        // 活期赎回请求用 productId，但当前历史响应字段名是 projectId。
+        product_id: string_field(value, "projectId")?,
         asset: string_field(value, "asset")?,
         amount: decimal_field(value, "amount")?,
         status: string_field(value, "status")?,
@@ -297,25 +267,12 @@ fn parse_simple_earn_redemption_record(value: &Value) -> AppResult<SimpleEarnRed
     })
 }
 
-fn decimal_from_any_field(value: &Value, keys: &[&str]) -> AppResult<Option<Decimal>> {
-    // Binance Simple Earn 不同端点对同一金额使用不同字段名，按优先级取第一个有效值。
-    for key in keys {
-        if let Some(amount) = optional_decimal_field(value, key)? {
-            return Ok(Some(amount));
-        }
-    }
-    Ok(None)
-}
-
-fn date_time_from_any_millis_field(value: &Value, keys: &[&str]) -> Option<DateTime<Utc>> {
-    // 历史记录时间字段也会随接口变化；解析失败时返回 None，让调用方保留可选时间语义。
-    keys.iter().find_map(|key| {
-        value
-            .get(*key)
-            .map(value_to_string)
-            .and_then(|text| text.parse::<i64>().ok())
-            .and_then(DateTime::<Utc>::from_timestamp_millis)
-    })
+fn date_time_from_millis_field(value: &Value, key: &str) -> Option<DateTime<Utc>> {
+    value
+        .get(key)
+        .map(value_to_string)
+        .and_then(|text| text.parse::<i64>().ok())
+        .and_then(DateTime::<Utc>::from_timestamp_millis)
 }
 
 /// 解析现货交易对价格列表。
@@ -351,7 +308,6 @@ fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
         .ok_or_else(|| AppError::Binance("期权合约缺少 expiryDate".to_string()))?;
     let expiry_at = DateTime::<Utc>::from_timestamp_millis(expiry_ms)
         .ok_or_else(|| AppError::Binance("期权合约 expiryDate 无效".to_string()))?;
-    let expiry = expiry_at.date_naive();
     let price_filter = exchange_info_filter(value, "PRICE_FILTER")?;
     let lot_filter = exchange_info_filter(value, "LOT_SIZE")?;
 
@@ -375,7 +331,6 @@ fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
         quantity_scale: u32_field(value, "quantityScale")?,
         quote_asset: string_field(value, "quoteAsset")?,
         status: string_field(value, "status")?,
-        expiry,
         expiry_at,
     })
 }
@@ -491,9 +446,10 @@ pub(super) fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
         .or(optional_decimal_field(value, "origQty")?)
         .unwrap_or(Decimal::ZERO);
     let price = optional_decimal_field(value, "price")?.unwrap_or(Decimal::ZERO);
-    let avg_price = optional_decimal_field(value, "avgPrice")?
-        .or_else(|| average_price_from_spot_ack(value, executed_qty))
-        .unwrap_or(price);
+    let avg_price = match optional_decimal_field(value, "avgPrice")? {
+        Some(avg_price) => avg_price,
+        None => average_price_from_spot_ack(value, executed_qty)?.unwrap_or(price),
+    };
     let transact_time = value
         .get("transactTime")
         .and_then(Value::as_i64)
@@ -527,46 +483,32 @@ pub(super) fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
 }
 
 /// 从现货订单累计成交额反推均价。
-fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> Option<Decimal> {
+fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> AppResult<Option<Decimal>> {
     // 现货市价单常只返回累计成交额，均价需要用 quoteQty / executedQty 反推。
     if executed_qty <= Decimal::ZERO {
-        return None;
+        return Ok(None);
     }
-    let quote_qty = optional_decimal_field(value, "cummulativeQuoteQty")
-        .ok()
-        .flatten()
-        .or_else(|| {
-            optional_decimal_field(value, "cumulativeQuoteQty")
-                .ok()
-                .flatten()
-        })?;
+    let quote_qty = decimal_field(value, "cummulativeQuoteQty")?;
     if quote_qty <= Decimal::ZERO {
-        None
+        Ok(None)
     } else {
-        Some((quote_qty / executed_qty).round_dp(8))
+        Ok(Some((quote_qty / executed_qty).round_dp(8)))
     }
 }
 
 /// 解析行权记录。
 ///
-/// Binance 历史接口可能返回数组、`data` 或 `rows` 包装，这里只提取结算价相关字段。
+/// 当前 EAPI 行权记录返回数组，行权价由 exercisePrice 提供。
 pub(super) fn parse_exercise_records(value: &Value) -> AppResult<Vec<ExerciseRecord>> {
     let rows = value
         .as_array()
-        .or_else(|| value.get("data").and_then(Value::as_array))
-        .or_else(|| value.get("rows").and_then(Value::as_array))
         .ok_or_else(|| AppError::Binance("Binance 行权记录响应不是数组".to_string()))?;
 
     rows.iter()
         .map(|row| {
-            let settlement_price = optional_decimal_field(row, "settlePrice")?
-                .or(optional_decimal_field(row, "settlementPrice")?)
-                .or(optional_decimal_field(row, "exercisePrice")?)
-                .or(optional_decimal_field(row, "price")?)
-                .unwrap_or(Decimal::ZERO);
             Ok(ExerciseRecord {
                 symbol: string_field(row, "symbol")?,
-                settlement_price,
+                settlement_price: decimal_field(row, "exercisePrice")?,
             })
         })
         .collect()
