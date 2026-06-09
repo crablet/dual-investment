@@ -1,7 +1,7 @@
 // 应用后台同步调度器。
 //
-// 前端只负责定时调用快照、实盘同步和已保存凭据重连，不创建新的期权策略订单。
-// 实盘同步只读取交易所事实。Rust 维护任务自动处理此前已确认订单的到期结算。
+// 前端定时读取 Rust 的本地快照并按后端许可重连。交易所周期同步只有 Rust 维护任务执行，
+// 避免隐藏窗口和页面导航重复查询账户、订单。
 
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
@@ -46,20 +46,16 @@ export function useBackgroundSync() {
     if (store.isLoading('snapshot') || store.isLoading('connect')) {
       syncDelay = reconnectProbeDelay
     }
-    else if (store.settings?.connected && !store.isLoading('sync')) {
-      await store.syncLiveState({ silent: true })
-      syncDelay = store.backgroundError
-        ? Math.min(syncDelay * 2, maxSyncDelay)
-        : baseSyncDelay
-    }
-    else if (!store.settings?.connected) {
+    else {
       await store.refresh({ silent: true })
       if (store.canAutoReconnect) {
         const connected = await store.tryAutoReconnectSaved()
         syncDelay = connected ? baseSyncDelay : store.autoReconnectDelayMs
       }
       else {
-        syncDelay = baseSyncDelay
+        syncDelay = store.backgroundError
+          ? Math.min(syncDelay * 2, maxSyncDelay)
+          : baseSyncDelay
       }
     }
     scheduleBackgroundSync()

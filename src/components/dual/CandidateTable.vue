@@ -21,7 +21,6 @@ import {
 } from '@/composables/useDualInvestmentCandidates'
 import { useFormat } from '@/composables/useFormat'
 import { localDateTimeLabel } from '@/utils/date'
-import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 const props = defineProps<{
   candidates: StrategyCandidate[]
@@ -35,15 +34,7 @@ const emit = defineEmits<{
   toggleSort: [key: CandidateSortKey]
 }>()
 
-const { money, percent } = useFormat()
-
-function signedPercent(value: string | number) {
-  const numeric = typeof value === 'number' ? value : decimalStringToDisplayNumber(value)
-  if (!Number.isFinite(numeric))
-    return '--'
-  const sign = numeric > 0 ? '+' : ''
-  return `${sign}${percent(numeric)}`
-}
+const { money, percent, signedPercent } = useFormat()
 </script>
 
 <template>

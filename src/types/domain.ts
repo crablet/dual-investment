@@ -52,6 +52,12 @@ export interface AppSettings {
   savedCredentials: boolean
 }
 
+/** 后端提供重连资格，前端不从错误文案推断业务类别。 */
+export interface CommandErrorPayload {
+  message: string
+  canAutoReconnect: boolean
+}
+
 /** 账户资产展示行，可能来自期权保证金、现货或 Simple Earn。 */
 export interface BalanceRow {
   asset: string
@@ -60,6 +66,26 @@ export interface BalanceRow {
   locked: DecimalString
   usdtValue: DecimalString
   usdtValueKnown: boolean
+}
+
+/** Rust 按资产聚合的余额，明细保留真实账户来源。 */
+export interface AssetBalance {
+  asset: string
+  free: DecimalString
+  locked: DecimalString
+  usdtValue: DecimalString
+  usdtValueKnown: boolean
+  details: BalanceRow[]
+}
+
+/** 最后一次成功账户查询的缓存；失败保留旧数据和独立错误。 */
+export interface AccountSnapshot {
+  balances: AssetBalance[]
+  totalUsdtValue: DecimalString
+  availableMargin: DecimalString
+  unpricedAssetCount: number
+  updatedAt: string | null
+  error: string | null
 }
 
 /** Binance 实盘合约、买一价和 mark greeks 派生出的候选机会。 */
@@ -136,6 +162,17 @@ export interface PnlReport {
   today: DecimalString
   optionPremium: DecimalString
   floatingSpot: DecimalString
+  sellPutPremium: DecimalString
+  sellCallPremium: DecimalString
+}
+
+/** 已成交且仍存续的义务仓汇总；名义本金不代表真实保证金占用。 */
+export interface PortfolioSummary {
+  putCount: number
+  callCount: number
+  putQuantity: DecimalString
+  putNotional: DecimalString
+  callQuantity: DecimalString
 }
 
 /** 文件日志记录，只展示后端写入的脱敏摘要。 */
@@ -151,10 +188,11 @@ export interface LogEntry {
 export interface LogSnapshot {
   hasFiles: boolean
   recentEntries: LogEntry[]
+  writeError: string | null
 }
 
 /** 下单/补齐恢复记录视图。 */
-export interface OrderAttemptView {
+export interface OrderAttempt {
   id: string
   clientOrderId: string
   symbol: string
@@ -241,11 +279,12 @@ export interface OrderProgressEvent {
 /** 前端一次刷新拿到的完整应用快照。 */
 export interface AppSnapshot {
   settings: AppSettings
-  balances: BalanceRow[]
+  account: AccountSnapshot
   candidates: StrategyCandidate[]
   orders: StrategyOrder[]
   pnl: PnlReport
-  orderAttempts: OrderAttemptView[]
+  portfolio: PortfolioSummary
+  orderAttempts: OrderAttempt[]
   fundingAttempts: FundingAttemptView[]
   settlementRecoveries: SettlementRecoveryView[]
 }
@@ -267,4 +306,17 @@ export interface StrategyRequest {
   quantity: DecimalString
   limitPrice: DecimalString
   confirmLive: boolean
+}
+
+/** 纯本地 Decimal 预估，不读取交易所或创建订单。 */
+export interface StrategyPreviewRequest {
+  direction: StrategyDirection
+  strike: DecimalString
+  limitPrice: DecimalString
+  quantity: DecimalString
+}
+
+export interface StrategyPreview {
+  premium: DecimalString
+  breakeven: DecimalString
 }

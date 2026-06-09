@@ -7,8 +7,8 @@ import type {
   FundingAttemptManualResolution,
   FundingAttemptStatus,
   FundingAttemptView,
+  OrderAttempt,
   OrderAttemptStatus,
-  OrderAttemptView,
   SettlementRecoveryView,
   SettlementStage,
 } from '@/types/domain'
@@ -142,7 +142,7 @@ function settlementRecoveryRow(recovery: SettlementRecoveryView): RecoveryRow {
   }
 }
 
-function orderAttemptRecoveryRow(attempt: OrderAttemptView): RecoveryRow {
+function orderAttemptRecoveryRow(attempt: OrderAttempt): RecoveryRow {
   return {
     id: attempt.id,
     source: 'order',

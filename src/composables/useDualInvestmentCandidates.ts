@@ -1,12 +1,13 @@
 // 双币赢候选列表的前端交互状态。
 //
 // Rust 策略层已经完成实盘合约过滤和方向硬约束；这个 composable 只负责
-// 页面上的方向切换、到期/年化筛选、稳定排序、默认选中和下单卡片展示估算。
+// 页面上的方向切换、到期/年化筛选、稳定排序、默认选中和下单卡片的预览状态。
 
-import type { StrategyCandidate, StrategyDirection } from '@/types/domain'
+import type { StrategyCandidate, StrategyDirection, StrategyPreview } from '@/types/domain'
 import { computed, reactive, shallowRef, watch } from 'vue'
+import { api, commandError } from '@/services/api'
 import { useAppStore } from '@/stores/app'
-import { decimalStringToDisplayNumber } from '@/utils/decimal'
+import { compareDecimalStrings, isPositiveDecimalString } from '@/utils/decimal'
 
 interface CandidateFilterForm {
   minAnnualized: number | null
@@ -57,7 +58,7 @@ export function useDualInvestmentCandidates() {
 
   const form = reactive({
     direction: 'sellPut' as StrategyDirection,
-    quantity: 0.01,
+    quantity: '0.01',
   })
 
   const candidateFilter = reactive<CandidateFilterForm>({
@@ -79,19 +80,11 @@ export function useDualInvestmentCandidates() {
   })
 
   const sortedCandidates = computed(() => {
-    // 排序保持稳定：字段相同时使用扫描顺序，避免列表在同一批数据中跳动。
-    return filteredCandidates.value
-      .map((candidate, index) => ({ candidate, index }))
-      .sort((left, right) => {
-        const modifier = candidateSortDirection.value === 'asc' ? 1 : -1
-        const delta = compareCandidateSortValue(
-          left.candidate,
-          right.candidate,
-          candidateSortKey.value,
-        )
-        return delta === 0 ? left.index - right.index : delta * modifier
-      })
-      .map(item => item.candidate)
+    const modifier = candidateSortDirection.value === 'asc' ? 1 : -1
+    // 原生稳定排序保留同值候选的扫描顺序，复制数组以免改变筛选结果。
+    return [...filteredCandidates.value].sort((left, right) =>
+      compareCandidateSortValue(left, right, candidateSortKey.value) * modifier,
+    )
   })
 
   const activeCandidateFilterCount = computed(() =>
@@ -103,7 +96,7 @@ export function useDualInvestmentCandidates() {
   )
 
   const referenceSpotPrice = computed(() =>
-    store.candidates.find(candidate => decimalStringToDisplayNumber(candidate.spotPrice) > 0)?.spotPrice,
+    store.candidates.find(candidate => isPositiveDecimalString(candidate.spotPrice))?.spotPrice,
   )
 
   const directionStats = computed(() => ({
@@ -157,29 +150,56 @@ export function useDualInvestmentCandidates() {
     return '当前到期日筛选没有命中；候选浏览范围为 1-90 天，可以切换到所有到期日，或重新扫描候选。'
   })
 
-  const projectedPremium = computed(() => {
-    // 右侧卡片的预计权利金只是 UI 估算；真实权利金以 Binance 成交回报为准。
-    if (!selectedCandidate.value)
-      return 0
-    return decimalStringToDisplayNumber(selectedCandidate.value.limitPrice) * form.quantity
-  })
+  const strategyPreview = shallowRef<StrategyPreview>()
+  const previewLoading = shallowRef(false)
+  const previewError = shallowRef<string>()
 
-  const projectedBreakeven = computed(() => {
-    // 保本价预览帮助用户理解下单意图，不会写入订单事实；成交后以后端快照为准。
-    if (!selectedCandidate.value)
-      return 0
-    const strike = decimalStringToDisplayNumber(selectedCandidate.value.strike)
-    const price = decimalStringToDisplayNumber(selectedCandidate.value.limitPrice)
-    return selectedCandidate.value.direction === 'sellPut'
-      ? strike - price
-      : strike + price
-  })
+  // 输入变化时立即清空预览并使旧请求失效；卸载时 Vue 同样执行清理。
+  watch([
+    () => selectedCandidate.value?.direction,
+    () => selectedCandidate.value?.strike,
+    () => selectedCandidate.value?.limitPrice,
+    () => form.quantity.trim(),
+  ], async ([direction, strike, limitPrice, quantity], _previous, onCleanup) => {
+    strategyPreview.value = undefined
+    previewError.value = undefined
+    previewLoading.value = false
+    if (!direction || !strike || !limitPrice || !quantity) {
+      return
+    }
+    let active = true
+    onCleanup(() => {
+      active = false
+    })
+    previewLoading.value = true
+    try {
+      const value = await api.previewStrategy({
+        direction,
+        strike,
+        limitPrice,
+        quantity,
+      })
+      if (active) {
+        strategyPreview.value = value
+      }
+    }
+    catch (caught) {
+      if (active) {
+        previewError.value = commandError(caught).message
+      }
+    }
+    finally {
+      if (active) {
+        previewLoading.value = false
+      }
+    }
+  }, { immediate: true, flush: 'sync' })
 
   const canSubmit = computed(() => {
     // 前端只做基本可用性判断，真实合约精度、保证金和风控仍在 Rust 下单链路校验。
     return Boolean(store.settings?.connected)
       && Boolean(selectedCandidate.value)
-      && form.quantity >= 0.01
+      && Boolean(strategyPreview.value)
   })
 
   watch(
@@ -219,7 +239,7 @@ export function useDualInvestmentCandidates() {
     selectedOptionSymbol.value = candidate.optionSymbol
     form.direction = candidate.direction
     // 后端候选数量是 Binance 期权“张”口径，前端只承接默认值，真实校验仍在 Rust。
-    form.quantity = decimalStringToDisplayNumber(candidate.quantity)
+    form.quantity = candidate.quantity
   }
 
   function resetCandidateFilters() {
@@ -241,8 +261,9 @@ export function useDualInvestmentCandidates() {
     panelTitle,
     emptyCandidateTitle,
     emptyCandidateHint,
-    projectedPremium,
-    projectedBreakeven,
+    strategyPreview,
+    previewLoading,
+    previewError,
     canSubmit,
     daysUntil,
     toggleCandidateSort,
@@ -279,31 +300,22 @@ function matchesCandidateFilters(
   candidate: StrategyCandidate,
   candidateFilter: CandidateFilterForm,
 ) {
-  const annualized = decimalStringToDisplayNumber(candidate.annualized)
-  const exerciseProbability = decimalStringToDisplayNumber(candidate.exerciseProbability)
-  const distanceAbs = Math.abs(decimalStringToDisplayNumber(candidate.strikeDistancePercent))
-
-  if (candidateFilter.minAnnualized !== null && annualized < candidateFilter.minAnnualized) {
+  if (candidateFilter.minAnnualized !== null
+    && compareDecimalStrings(candidate.annualized, String(candidateFilter.minAnnualized)) === -1) {
     return false
   }
   if (
     candidateFilter.maxExerciseProbability !== null
-    && exerciseProbability > candidateFilter.maxExerciseProbability
+    && compareDecimalStrings(candidate.exerciseProbability, String(candidateFilter.maxExerciseProbability)) === 1
   ) {
     return false
   }
-  if (candidateFilter.maxDistanceAbs !== null && distanceAbs > candidateFilter.maxDistanceAbs) {
+  const distanceAbs = candidate.strikeDistancePercent.replace(/^[+-]/, '')
+  if (candidateFilter.maxDistanceAbs !== null
+    && compareDecimalStrings(distanceAbs, String(candidateFilter.maxDistanceAbs)) === 1) {
     return false
   }
   return true
-}
-
-/** 读取排序字段的数值表示，非法值排到列表后面。 */
-function candidateSortNumber(candidate: StrategyCandidate, key: CandidateSortKey) {
-  if (key === 'expiry') {
-    return new Date(candidate.expiryAt).getTime()
-  }
-  return decimalStringToDisplayNumber(candidate[key])
 }
 
 function compareCandidateSortValue(
@@ -311,14 +323,8 @@ function compareCandidateSortValue(
   right: StrategyCandidate,
   key: CandidateSortKey,
 ) {
-  // 非法数值排在后面，但不丢弃候选，方便用户看到后端返回的异常数据形态。
-  const leftValue = candidateSortNumber(left, key)
-  const rightValue = candidateSortNumber(right, key)
-  if (!Number.isFinite(leftValue) && !Number.isFinite(rightValue))
-    return 0
-  if (!Number.isFinite(leftValue))
-    return 1
-  if (!Number.isFinite(rightValue))
-    return -1
-  return leftValue - rightValue
+  if (key === 'expiry') {
+    return new Date(left.expiryAt).getTime() - new Date(right.expiryAt).getTime()
+  }
+  return compareDecimalStrings(left[key], right[key]) ?? 0
 }

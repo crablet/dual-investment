@@ -1,7 +1,6 @@
 // 展示格式化工具。
 //
-// 这些函数只用于 UI 格式化；真实金融计算不在这里做，金额和数量仍由 Rust Decimal
-// 或前端 BigInt 辅助函数处理。
+// 这些函数只用于 UI 格式化；金额、数量和收益计算都由 Rust Decimal 完成。
 
 import type { StrategyDirection, StrategyStatus } from '@/types/domain'
 import { decimalStringToDisplayNumber } from '@/utils/decimal'
@@ -60,6 +59,14 @@ export function useFormat() {
   const percent = (value: string | number, digits = 2) =>
     `${percentFormatter(digits).format(toDisplayNumber(value))}%`
 
+  const signedPercent = (value: string | number) => {
+    const numeric = toDisplayNumber(value)
+    if (!Number.isFinite(numeric)) {
+      return '--'
+    }
+    return `${numeric > 0 ? '+' : ''}${percent(numeric)}`
+  }
+
   const directionText = (direction: StrategyDirection) => directionTextMap[direction]
 
   const directionTone = (direction: StrategyDirection) => directionToneMap[direction]
@@ -72,6 +79,7 @@ export function useFormat() {
     decimal,
     money,
     percent,
+    signedPercent,
     directionText,
     directionTone,
     statusText,

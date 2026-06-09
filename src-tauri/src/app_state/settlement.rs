@@ -9,9 +9,8 @@ use super::{
     OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT, OrderAttempt, OrderAttemptStatus,
     SETTLEMENT_SWEEP_DELAY_MINUTES, SettlementBatch, SettlementStage, SpotAccountSnapshot,
     StrategyOrder, StrategyStatus, Utc, Uuid, apply_spot_ack, is_in_the_money,
-    is_transient_binance_error, is_uncertain_submit_error, make_spot_client_order_id,
-    option_idle_usdt_sweep_amount, round_down_funding_amount, spot_asset_free,
-    validate_spot_rebalance,
+    make_spot_client_order_id, option_idle_usdt_sweep_amount, round_down_funding_amount,
+    spot_asset_free, validate_spot_rebalance,
 };
 use crate::domain::SettlementAssets;
 
@@ -64,7 +63,7 @@ impl AppState {
         batch.message = message.to_string();
         self.save_batch(batch)?;
         if changed {
-            self.record_log("settlement.batch", &format!("{} {}", batch.id, message))?;
+            self.record_log("settlement.batch", &format!("{} {}", batch.id, message));
         }
         Ok(())
     }
@@ -173,7 +172,7 @@ impl AppState {
                 self.record_warning(
                     "settlement.order.confirming",
                     &format!("现货补齐等待原订单确认：{error}"),
-                )?;
+                );
             }
         }
         Ok(())
@@ -207,12 +206,11 @@ impl AppState {
             }
             let result = self.advance_batch(&client, &mut batch).await;
             if let Err(error) = result {
-                let stage =
-                    if is_transient_binance_error(&error) || self.pending_recovery_count()? > 0 {
-                        batch.stage
-                    } else {
-                        SettlementStage::Blocked
-                    };
+                let stage = if error.is_retryable_query() || self.pending_recovery_count()? > 0 {
+                    batch.stage
+                } else {
+                    SettlementStage::Blocked
+                };
                 self.update_batch(&mut batch, stage, &format!("结算暂停：{error}"))?;
             }
             if self.pending_recovery_count()? > 0
@@ -387,7 +385,7 @@ impl AppState {
             .map(|record| record.settlement_price);
         let first = prices.next();
         if prices.any(|price| Some(price) != first) {
-            return Err(AppError::Binance(
+            return Err(AppError::response(
                 "行权记录结算价不一致，需要人工核对".to_string(),
             ));
         }
@@ -490,7 +488,7 @@ impl AppState {
                 attempt.message.clone_from(&order.rebalance_message);
             }
             Err(error) => {
-                if !is_uncertain_submit_error(&error) {
+                if !error.is_uncertain_submit() {
                     order.status = StrategyStatus::RebalanceFailed;
                     attempt.status = OrderAttemptStatus::Failed;
                 }
@@ -503,7 +501,7 @@ impl AppState {
         self.record_log(
             "settlement.spot",
             &format!("{} {}", order.option_symbol, order.rebalance_message),
-        )?;
+        );
         Ok(order)
     }
 

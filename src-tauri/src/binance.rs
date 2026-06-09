@@ -9,10 +9,7 @@ mod parsing;
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::{
-    Arc,
-    atomic::{AtomicI64, Ordering},
-};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use chrono::Utc;
@@ -23,7 +20,7 @@ use serde_json::Value;
 use sha2::Sha256;
 use tokio::time::sleep;
 
-use self::http::{encode_query, is_timestamp_error, is_transient_query_error, request_error};
+use self::http::{encode_query, request_context, request_error};
 use self::parsing::{
     decimal_field, ensure_success_response, parse_account_snapshot, parse_exchange_info,
     parse_exercise_records, parse_mark_prices, parse_option_order_book, parse_option_positions,
@@ -39,6 +36,7 @@ use crate::domain::{
     SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyDirection, StrategyRequest,
     UniversalTransferRecord,
 };
+use crate::errors::BinanceErrorKind;
 
 type HmacSha256 = Hmac<Sha256>;
 const QUERY_RETRY_DELAYS: [Duration; 2] = [Duration::from_millis(500), Duration::from_millis(1500)];
@@ -49,12 +47,11 @@ const SPOT_BASE: &str = "https://api.binance.com";
 /// Binance HTTP 客户端。
 ///
 /// `api_secret` 只保存在 Rust 内存里用于签名，不能进入日志、审计事件或前端状态。
-#[derive(Clone)]
 pub struct BinanceClient {
     http: Client,
     api_key: String,
     api_secret: String,
-    timestamp_offset_ms: Arc<AtomicI64>,
+    timestamp_offset_ms: AtomicI64,
 }
 
 impl BinanceClient {
@@ -69,7 +66,7 @@ impl BinanceClient {
             http,
             api_key,
             api_secret,
-            timestamp_offset_ms: Arc::new(AtomicI64::new(0)),
+            timestamp_offset_ms: AtomicI64::new(0),
         })
     }
 
@@ -199,6 +196,7 @@ impl BinanceClient {
                 "活期理财",
                 "totalAmount",
                 true,
+                None,
             )
             .await?;
         balances.extend(
@@ -207,9 +205,30 @@ impl BinanceClient {
                 "定期理财",
                 "amount",
                 false,
+                None,
             )
             .await?,
         );
+        Ok(SimpleEarnSnapshot { balances })
+    }
+
+    /// 资金流程只读取目标资产的活期持仓，不依赖定期理财或其他资产。
+    pub async fn simple_earn_flexible_positions(
+        &self,
+        asset: &str,
+    ) -> AppResult<SimpleEarnSnapshot> {
+        if asset.trim().is_empty() {
+            return Err(AppError::Config("活期持仓查询资产不能为空".to_string()));
+        }
+        let balances = self
+            .simple_earn_positions(
+                "/sapi/v1/simple-earn/flexible/position",
+                "活期理财",
+                "totalAmount",
+                true,
+                Some(asset),
+            )
+            .await?;
         Ok(SimpleEarnSnapshot { balances })
     }
 
@@ -498,22 +517,21 @@ impl BinanceClient {
         source: &str,
         amount_key: &str,
         flexible: bool,
+        asset: Option<&str>,
     ) -> AppResult<Vec<SimpleEarnAssetBalance>> {
         // Simple Earn 活期和定期接口分页结构相同，金额字段分别为 totalAmount 和 amount。
         let mut balances = Vec::new();
         let mut current = 1_u32;
         let size = 100_u32;
         loop {
-            let response = self
-                .signed_get(
-                    SPOT_BASE,
-                    path,
-                    vec![
-                        ("current".to_string(), current.to_string()),
-                        ("size".to_string(), size.to_string()),
-                    ],
-                )
-                .await?;
+            let mut params = vec![
+                ("current".to_string(), current.to_string()),
+                ("size".to_string(), size.to_string()),
+            ];
+            if let Some(asset) = asset {
+                params.push(("asset".to_string(), asset.to_string()));
+            }
+            let response = self.signed_get(SPOT_BASE, path, params).await?;
             let page = parse_simple_earn_position_page(&response, source, amount_key, flexible)?;
             let page_len = page.rows.len();
             let total = page.total;
@@ -556,7 +574,7 @@ impl BinanceClient {
             .text()
             .await
             .map_err(|error| request_error("GET", path, &error))?;
-        Self::decode_response(status, &body)
+        Self::decode_response("GET", path, status, &body)
     }
 
     async fn public_get_once(&self, base: &str, path: &str) -> AppResult<Value> {
@@ -572,7 +590,7 @@ impl BinanceClient {
             .text()
             .await
             .map_err(|error| request_error("GET", path, &error))?;
-        Self::decode_response(status, &body)
+        Self::decode_response("GET", path, status, &body)
     }
 
     async fn query_with_retry<T, F, Fut>(&self, mut request: F) -> AppResult<T>
@@ -586,11 +604,11 @@ impl BinanceClient {
         loop {
             match request().await {
                 Ok(value) => return Ok(value),
-                Err(error) if !synced_time && is_timestamp_error(&error) => {
+                Err(error) if !synced_time && error.is_timestamp_error() => {
                     self.sync_server_time().await?;
                     synced_time = true;
                 }
-                Err(error) if is_transient_query_error(&error) => {
+                Err(error) if error.is_retryable_query() => {
                     let Some(delay) = QUERY_RETRY_DELAYS.get(transient_failures).copied() else {
                         return Err(error);
                     };
@@ -608,7 +626,7 @@ impl BinanceClient {
         let server_time = response
             .get("serverTime")
             .and_then(Value::as_i64)
-            .ok_or_else(|| AppError::Binance("Binance serverTime 字段缺失".to_string()))?;
+            .ok_or_else(|| AppError::response("Binance serverTime 字段缺失"))?;
         let offset = server_time - Utc::now().timestamp_millis();
         self.timestamp_offset_ms.store(offset, Ordering::SeqCst);
         Ok(())
@@ -636,7 +654,7 @@ impl BinanceClient {
     ) -> AppResult<Value> {
         match self.signed_post_value_once(base, path, &params).await {
             Ok(value) => Ok(value),
-            Err(error) if is_timestamp_error(&error) => {
+            Err(error) if error.is_timestamp_error() => {
                 self.sync_server_time().await?;
                 self.signed_post_value_once(base, path, &params).await
             }
@@ -665,7 +683,7 @@ impl BinanceClient {
             .text()
             .await
             .map_err(|error| request_error("POST", path, &error))?;
-        Self::decode_response(status, &body)
+        Self::decode_response("POST", path, status, &body)
     }
 
     /// 生成 Binance 签名参数。
@@ -705,26 +723,27 @@ impl BinanceClient {
 
     /// 解码 Binance HTTP 响应。
     ///
-    /// 非 2xx 响应只返回 code/msg 摘要，不把完整响应体带到错误文本里。
-    fn decode_response(status: StatusCode, body: &str) -> AppResult<Value> {
+    /// 仅提取 HTTP 状态与数值错误码；原始 body、msg 和解析错误片段不离开本层。
+    fn decode_response(
+        method: &str,
+        path: &str,
+        status: StatusCode,
+        body: &str,
+    ) -> AppResult<Value> {
         if !status.is_success() {
-            if let Ok(value) = serde_json::from_str::<Value>(body) {
-                let code = value
-                    .get("code")
-                    .map_or_else(|| status.as_u16().to_string(), value_to_string);
-                let message = value
-                    .get("msg")
-                    .and_then(Value::as_str)
-                    .unwrap_or("请求被 Binance 拒绝");
-                return Err(AppError::Binance(format!(
-                    "Binance 请求失败（HTTP {status}, code {code}）：{message}"
-                )));
-            }
-            return Err(AppError::Binance(format!(
-                "Binance 请求失败（HTTP {status}）"
-            )));
+            let code = serde_json::from_str::<Value>(body)
+                .ok()
+                .and_then(|value| value.get("code").and_then(Value::as_i64));
+            return Err(AppError::binance(
+                BinanceErrorKind::Http {
+                    status: status.as_u16(),
+                    code,
+                },
+                request_context(method, path),
+            ));
         }
-        serde_json::from_str::<Value>(body).map_err(|error| AppError::Binance(error.to_string()))
+        serde_json::from_str::<Value>(body)
+            .map_err(|_| AppError::binance(BinanceErrorKind::Decode, request_context(method, path)))
     }
 }
 
@@ -734,7 +753,7 @@ fn response_id(value: &Value, key: &str, operation: &str) -> AppResult<String> {
         .get(key)
         .map(value_to_string)
         .filter(|text| !text.trim().is_empty())
-        .ok_or_else(|| AppError::Binance(format!("{operation}响应缺少 {key} 字段")))
+        .ok_or_else(|| AppError::response(format!("{operation}响应缺少 {key} 字段")))
 }
 
 /// 根据双币赢方向决定现货补齐方向。

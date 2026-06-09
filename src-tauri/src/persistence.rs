@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
@@ -14,6 +14,12 @@ use crate::domain::{
     AppError, AppResult, FundingAttempt, FundingAttemptKind, FundingAttemptStatus, OrderAttempt,
     OrderAttemptStatus, SettlementBatch, StrategyOrder,
 };
+
+const ORDER_ATTEMPT_COLUMNS: &str =
+    "id, client_order_id, symbol, option_symbol, status, exchange_order_id, message, updated_at";
+const FUNDING_ATTEMPT_COLUMNS: &str = "id, chain_id, kind, purpose, asset, amount, transfer_type, product_id,
+    exchange_ref, status, message, query_after_at, query_count, effective_query_count, transport_error_count,
+    submit_error_kind, history_error_kind, history_window_start_at, history_window_end_at, created_at, updated_at";
 
 pub struct Persistence {
     connection: Connection,
@@ -126,16 +132,7 @@ impl Persistence {
     pub fn save_order_attempt(&self, attempt: &OrderAttempt) -> AppResult<()> {
         self.connection
             .execute(
-                "INSERT OR REPLACE INTO order_attempts (
-                    id,
-                    client_order_id,
-                    symbol,
-                    option_symbol,
-                    status,
-                    exchange_order_id,
-                    message,
-                    updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                &format!("INSERT OR REPLACE INTO order_attempts ({ORDER_ATTEMPT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"),
                 params![
                     attempt.id,
                     attempt.client_order_id,
@@ -155,29 +152,7 @@ impl Persistence {
     pub fn save_funding_attempt(&self, attempt: &FundingAttempt) -> AppResult<()> {
         self.connection
             .execute(
-                "INSERT OR REPLACE INTO funding_attempts (
-                    id,
-                    chain_id,
-                    kind,
-                    purpose,
-                    asset,
-                    amount,
-                    transfer_type,
-                    product_id,
-                    exchange_ref,
-                    status,
-                    message,
-                    query_after_at,
-                    query_count,
-                    effective_query_count,
-                    transport_error_count,
-                    submit_error_kind,
-                    history_error_kind,
-                    history_window_start_at,
-                    history_window_end_at,
-                    created_at,
-                    updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                &format!("INSERT OR REPLACE INTO funding_attempts ({FUNDING_ATTEMPT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)"),
                 params![
                     attempt.id,
                     attempt.chain_id,
@@ -276,8 +251,9 @@ impl Persistence {
         let mut orders = Vec::new();
         for row in mapped {
             let payload = row.map_err(|error| AppError::Storage(error.to_string()))?;
-            let order = serde_json::from_str::<StrategyOrder>(&payload)
+            let mut order = serde_json::from_str::<StrategyOrder>(&payload)
                 .map_err(|error| AppError::Storage(error.to_string()))?;
+            crate::strategy::refresh_order_metrics(&mut order);
             orders.push(order);
         }
         Ok(orders)
@@ -286,54 +262,38 @@ impl Persistence {
     /// 按更新时间倒序读取恢复记录。
     pub fn list_order_attempts(&self, limit: usize) -> AppResult<Vec<OrderAttempt>> {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        let mut statement = self
-            .connection
-            .prepare(
-                "SELECT id, client_order_id, symbol, option_symbol, status, exchange_order_id, message, updated_at
-                 FROM order_attempts
-                 ORDER BY updated_at DESC
-                 LIMIT ?1",
-            )
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT {ORDER_ATTEMPT_COLUMNS} FROM order_attempts ORDER BY updated_at DESC LIMIT ?1"
+        )).map_err(|error| AppError::Storage(error.to_string()))?;
+        let rows = statement
+            .query_map([limit], read_order_attempt)
             .map_err(|error| AppError::Storage(error.to_string()))?;
-        let mapped = statement
-            .query_map([limit], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                ))
-            })
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+        rows.map(|row| row.map_err(|error| AppError::Storage(error.to_string())))
+            .collect()
+    }
 
-        let mut attempts = Vec::new();
-        for row in mapped {
-            let (
-                id,
-                client_order_id,
-                symbol,
-                option_symbol,
-                status,
-                exchange_order_id,
-                message,
-                updated_at,
-            ) = row.map_err(|error| AppError::Storage(error.to_string()))?;
-            attempts.push(OrderAttempt {
-                id,
-                client_order_id,
-                symbol,
-                option_symbol,
-                status: parse_attempt_status(&status)?,
-                exchange_order_id,
-                message,
-                updated_at: parse_time(&updated_at)?,
-            });
-        }
-        Ok(attempts)
+    pub fn get_order_attempt(&self, id: &str) -> AppResult<Option<OrderAttempt>> {
+        self.connection
+            .query_row(
+                &format!("SELECT {ORDER_ATTEMPT_COLUMNS} FROM order_attempts WHERE id = ?1"),
+                [id],
+                read_order_attempt,
+            )
+            .optional()
+            .map_err(|error| AppError::Storage(error.to_string()))
+    }
+
+    pub fn get_funding_attempt(&self, id: &str) -> AppResult<Option<FundingAttempt>> {
+        self.connection
+            .query_row(
+                &format!("SELECT {FUNDING_ATTEMPT_COLUMNS} FROM funding_attempts WHERE id = ?1"),
+                [id],
+                FundingAttemptRow::read,
+            )
+            .optional()
+            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map(FundingAttemptRow::into_attempt)
+            .transpose()
     }
 
     /// 按更新时间倒序读取资金动作恢复记录。
@@ -342,14 +302,7 @@ impl Persistence {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT id, chain_id, kind, purpose, asset, amount, transfer_type, product_id,
-                        exchange_ref, status, message, query_after_at, query_count,
-                        effective_query_count, transport_error_count, submit_error_kind,
-                        history_error_kind, history_window_start_at, history_window_end_at,
-                        created_at, updated_at
-                 FROM funding_attempts
-                 ORDER BY updated_at DESC
-                 LIMIT ?1",
+                &format!("SELECT {FUNDING_ATTEMPT_COLUMNS} FROM funding_attempts ORDER BY updated_at DESC LIMIT ?1"),
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
         let mapped = statement
@@ -369,14 +322,7 @@ impl Persistence {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT id, chain_id, kind, purpose, asset, amount, transfer_type, product_id,
-                        exchange_ref, status, message, query_after_at, query_count,
-                        effective_query_count, transport_error_count, submit_error_kind,
-                        history_error_kind, history_window_start_at, history_window_end_at,
-                        created_at, updated_at
-                 FROM funding_attempts
-                 WHERE chain_id = ?1
-                 ORDER BY created_at ASC",
+                &format!("SELECT {FUNDING_ATTEMPT_COLUMNS} FROM funding_attempts WHERE chain_id = ?1 ORDER BY created_at ASC"),
             )
             .map_err(|error| AppError::Storage(error.to_string()))?;
         let mapped = statement
@@ -434,6 +380,25 @@ impl Persistence {
             .map_err(|error| AppError::Storage(error.to_string()))?;
         usize::try_from(count).map_err(|error| AppError::Storage(error.to_string()))
     }
+}
+
+fn read_order_attempt(row: &Row<'_>) -> rusqlite::Result<OrderAttempt> {
+    let status = parse_attempt_status(&row.get::<_, String>(4)?).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    let updated_at = parse_time(&row.get::<_, String>(7)?).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(OrderAttempt {
+        id: row.get(0)?,
+        client_order_id: row.get(1)?,
+        symbol: row.get(2)?,
+        option_symbol: row.get(3)?,
+        status,
+        exchange_order_id: row.get(5)?,
+        message: row.get(6)?,
+        updated_at,
+    })
 }
 
 struct FundingAttemptRow {

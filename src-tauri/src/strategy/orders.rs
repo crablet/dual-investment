@@ -1,7 +1,7 @@
 //! 策略订单快照构造。
 //!
 //! 本模块把用户请求、Binance 订单回报或当前期权持仓转换成本地 `StrategyOrder`。
-//! 订单一旦持久化，其中的年化、权利金、成交数量等字段就是展示事实，前端不得重算。
+//! 权利金、年化和保本价统一从已保存的成交字段派生，构造、同步和读库展示使用同一口径。
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -21,26 +21,8 @@ use crate::domain::{
 pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> StrategyOrder {
     let now = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
     let opened_at = ack.create_time.or(ack.update_time).unwrap_or(now);
-    let avg_price = if ack.avg_price > Decimal::ZERO {
-        ack.avg_price
-    } else {
-        ack.price
-    };
-    let premium = (avg_price * ack.executed_qty).round_dp(2);
     let status = status_from_exchange(&ack.status, ack.executed_qty, ack.quantity);
-    let annualized_quantity = if ack.executed_qty > Decimal::ZERO {
-        ack.executed_qty
-    } else {
-        request.quantity
-    };
-    let annualized = annualized_from_order_terms(
-        premium,
-        request.strike,
-        annualized_quantity,
-        opened_at,
-        request.expiry_at,
-    );
-    StrategyOrder {
+    let mut order = StrategyOrder {
         id: format!("LIVE-{}", Uuid::new_v4().simple()),
         source: StrategyOrderSource::LiveOrder,
         exchange_order_id: Some(ack.order_id.clone()),
@@ -53,12 +35,12 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         strike: request.strike,
         quantity: request.quantity,
         filled_quantity: ack.executed_qty,
-        avg_price,
-        premium,
-        annualized,
-        breakeven: breakeven_from_entry(request.strike, request.limit_price, request.direction),
+        avg_price: ack.avg_price,
+        premium: Decimal::ZERO,
+        annualized: Decimal::ZERO,
+        breakeven: Decimal::ZERO,
         exchange_status: ack.status.clone(),
-        created_at: now,
+        created_at: opened_at,
         updated_at: now,
         settlement_action: match request.direction {
             StrategyDirection::SellPut => "若到期低于执行价，自动买入 BTC 补齐换币".to_string(),
@@ -72,7 +54,9 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         rebalance_message: String::new(),
         spot_filled_quantity: Decimal::ZERO,
         spot_avg_price: Decimal::ZERO,
-    }
+    };
+    refresh_order_metrics(&mut order);
+    order
 }
 
 /// 从 Binance 当前期权持仓构造本地接管订单。
@@ -85,15 +69,7 @@ pub fn order_from_adopted_position(
     let direction = direction_from_option_side(&contract.side)
         .expect("validated option contract side before adoption");
     let now = position.update_time.unwrap_or_else(Utc::now);
-    let premium = (position.entry_price * position.quantity).round_dp(2);
-    let annualized = annualized_from_order_terms(
-        premium,
-        contract.strike_price,
-        position.quantity,
-        now,
-        contract.expiry_at,
-    );
-    StrategyOrder {
+    let mut order = StrategyOrder {
         id: format!("ADOPT-{}", Uuid::new_v4().simple()),
         source: StrategyOrderSource::AdoptedPosition,
         exchange_order_id: None,
@@ -107,9 +83,9 @@ pub fn order_from_adopted_position(
         quantity: position.quantity,
         filled_quantity: position.quantity,
         avg_price: position.entry_price,
-        premium,
-        annualized,
-        breakeven: breakeven_from_entry(contract.strike_price, position.entry_price, direction),
+        premium: Decimal::ZERO,
+        annualized: Decimal::ZERO,
+        breakeven: Decimal::ZERO,
         exchange_status: "POSITION".to_string(),
         created_at: now,
         updated_at: now,
@@ -129,13 +105,33 @@ pub fn order_from_adopted_position(
         rebalance_message: "已从 Binance 当前期权持仓接管，本机继续监控到期结算".to_string(),
         spot_filled_quantity: Decimal::ZERO,
         spot_avg_price: Decimal::ZERO,
-    }
+    };
+    refresh_order_metrics(&mut order);
+    order
 }
 
-/// 按真实成交/持仓字段估算订单年化收益率。
+/// 刷新金融展示指标，不改写订单身份、成交数量或结算事实。
 ///
-/// 订单持久化后年化成为订单事实字段，前端只负责展示，不重新做金融计算。
-pub fn annualized_from_order_terms(
+/// 没有真实成交或有效成交均价时，不用委托价格生成已成交收益和保本价。
+pub fn refresh_order_metrics(order: &mut StrategyOrder) {
+    if order.filled_quantity <= Decimal::ZERO || order.avg_price <= Decimal::ZERO {
+        order.premium = Decimal::ZERO;
+        order.annualized = Decimal::ZERO;
+        order.breakeven = Decimal::ZERO;
+        return;
+    }
+    order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
+    order.breakeven = breakeven_from_entry(order.strike, order.avg_price, order.direction);
+    order.annualized = annualized_from_order_terms(
+        order.premium,
+        order.strike,
+        order.filled_quantity,
+        order.created_at,
+        order.expiry_at,
+    );
+}
+
+fn annualized_from_order_terms(
     premium: Decimal,
     strike: Decimal,
     quantity: Decimal,

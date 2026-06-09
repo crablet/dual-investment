@@ -6,7 +6,7 @@
 use std::{
     ffi::OsStr,
     fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -17,29 +17,35 @@ use uuid::Uuid;
 use crate::domain::{AppError, AppResult, LogEntry, LogLevel, LogSnapshot};
 
 const RECENT_ENTRY_LIMIT: usize = 120;
+const MAX_LINE_BYTES: usize = 64 * 1024;
 
 pub struct LogStore {
     directory: PathBuf,
-    write_lock: Mutex<()>,
+    write_error: Mutex<Option<String>>,
 }
 
 impl LogStore {
-    /// 打开应用数据目录中的日志目录。
-    pub fn open_app_data(data_dir: impl AsRef<Path>) -> AppResult<Self> {
-        let directory = data_dir.as_ref().join("logs");
-        fs::create_dir_all(&directory).map_err(storage_error)?;
-        Ok(Self {
-            directory,
-            write_lock: Mutex::new(()),
-        })
+    /// 日志目录按需创建；日志不可写不能阻止本地订单加载或交易事实保存。
+    pub fn open_app_data(data_dir: impl AsRef<Path>) -> Self {
+        Self {
+            directory: data_dir.as_ref().join("logs"),
+            write_error: Mutex::new(None),
+        }
     }
 
-    /// 写入一条脱敏日志。
-    pub fn append(&self, level: LogLevel, event: &str, message: &str) -> AppResult<()> {
-        let _guard = self
-            .write_lock
+    /// 写入失败只更新日志面板的错误状态，不改变交易操作的返回结果。
+    pub fn append(&self, level: LogLevel, event: &str, message: &str) {
+        let mut write_error = self
+            .write_error
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *write_error = self
+            .write_entry(level, event, message)
+            .err()
+            .map(|error| error.to_string());
+    }
+
+    fn write_entry(&self, level: LogLevel, event: &str, message: &str) -> AppResult<()> {
         fs::create_dir_all(&self.directory).map_err(storage_error)?;
         let entry = LogEntry {
             id: Uuid::new_v4().to_string(),
@@ -67,13 +73,18 @@ impl LogStore {
         Ok(LogSnapshot {
             has_files: !paths.is_empty(),
             recent_entries,
+            write_error: self
+                .write_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
         })
     }
 
     /// 确保今日日志文件存在，并返回文件路径。
     pub fn ensure_current_file(&self) -> AppResult<PathBuf> {
         let _guard = self
-            .write_lock
+            .write_error
             .lock()
             .map_err(|error| AppError::Storage(error.to_string()))?;
         fs::create_dir_all(&self.directory).map_err(storage_error)?;
@@ -95,7 +106,7 @@ impl LogStore {
     /// 删除日志目录下的所有 `.log` 文件。
     pub fn clear(&self) -> AppResult<()> {
         let _guard = self
-            .write_lock
+            .write_error
             .lock()
             .map_err(|error| AppError::Storage(error.to_string()))?;
         fs::create_dir_all(&self.directory).map_err(storage_error)?;
@@ -123,33 +134,60 @@ impl LogStore {
     }
 
     fn recent_entries(paths: &[PathBuf], limit: usize) -> AppResult<Vec<LogEntry>> {
-        // 文件名倒序读取，再把单文件内容反转，得到最新日志优先的设置页列表。
+        // 从文件尾按需读取，达到展示上限后不再扫描当天更早的内容。
         let mut entries = Vec::new();
         for path in paths {
-            let mut file_entries = read_entries(path)?;
-            file_entries.reverse();
-            for entry in file_entries {
-                entries.push(entry);
-                if entries.len() >= limit {
-                    return Ok(entries);
-                }
+            entries.extend(read_recent_entries(path, limit - entries.len())?);
+            if entries.len() >= limit {
+                break;
             }
         }
         Ok(entries)
     }
 }
 
-fn read_entries(path: &Path) -> AppResult<Vec<LogEntry>> {
-    let file = File::open(path).map_err(storage_error)?;
-    let reader = BufReader::new(file);
+fn read_recent_entries(path: &Path, limit: usize) -> AppResult<Vec<LogEntry>> {
+    let mut file = File::open(path).map_err(storage_error)?;
+    let mut position = file.metadata().map_err(storage_error)?.len();
+    let mut chunk = [0_u8; 8192];
+    let mut line = Vec::new();
     let mut entries = Vec::new();
-    for line in reader.lines() {
-        let line = line.map_err(storage_error)?;
-        if line.trim().is_empty() {
-            continue;
+    // 脱敏摘要不会需要超长行；损坏文件中的无换行内容也不能无限占用内存。
+    let mut oversized = false;
+    while position > 0 && entries.len() < limit {
+        let length = usize::try_from(position.min(chunk.len() as u64))
+            .map_err(|error| AppError::Storage(error.to_string()))?;
+        position -= length as u64;
+        file.seek(SeekFrom::Start(position))
+            .map_err(storage_error)?;
+        file.read_exact(&mut chunk[..length])
+            .map_err(storage_error)?;
+        for byte in chunk[..length].iter().rev() {
+            if *byte == b'\n' {
+                if !oversized {
+                    line.reverse();
+                    if let Ok(entry) = serde_json::from_slice::<LogEntry>(&line) {
+                        entries.push(entry);
+                    }
+                }
+                line.clear();
+                oversized = false;
+                if entries.len() == limit {
+                    break;
+                }
+            } else if !oversized {
+                if line.len() == MAX_LINE_BYTES {
+                    line.clear();
+                    oversized = true;
+                } else {
+                    line.push(*byte);
+                }
+            }
         }
-        // 单行 JSON 损坏时跳过该行，避免一个坏日志条目让设置页整体打不开。
-        if let Ok(entry) = serde_json::from_str::<LogEntry>(&line) {
+    }
+    if entries.len() < limit && !oversized {
+        line.reverse();
+        if let Ok(entry) = serde_json::from_slice::<LogEntry>(&line) {
             entries.push(entry);
         }
     }

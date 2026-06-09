@@ -4,7 +4,7 @@
 
 import type { MaybeRefOrGetter } from 'vue'
 import type { AppViewId } from '@/stores/app'
-import type { FundingAttemptView, OrderAttemptView, StrategyOrder } from '@/types/domain'
+import type { FundingAttemptView, OrderAttempt, StrategyOrder } from '@/types/domain'
 import { computed, toValue } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
@@ -113,7 +113,7 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
       date: localDateKey(order.createdAt),
       timeLabel: localTimeLabel(order.createdAt),
       title: `${direction} 下单`,
-      detail: `${order.optionSymbol}，${order.quantity} 张，权利金 ${order.premium} USDT`,
+      detail: `${order.optionSymbol}，已成交 ${order.filledQuantity} 张，权利金 ${order.premium} USDT`,
       tone: 'gold',
       targetView: 'orders',
       priority: 30,
@@ -163,7 +163,7 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
 }
 
 /** 从恢复记录派生日历事件；已持久化成功的记录不再提示待办。 */
-function eventFromOrderAttempt(attempt: OrderAttemptView): CalendarEvent | undefined {
+function eventFromOrderAttempt(attempt: OrderAttempt): CalendarEvent | undefined {
   if (attempt.status === 'persisted' || attempt.status === 'spot_persisted') {
     return undefined
   }

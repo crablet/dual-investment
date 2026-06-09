@@ -1,55 +1,32 @@
 //! Binance HTTP 辅助函数。
 //!
-//! 这里集中处理网络错误分类、查询类重试判断和签名 query 编码。错误消息只保留方法、
-//! 路径和原因，不能包含 API Secret、签名原文或 Binance 原始响应。
+//! 这里归类网络错误并编码签名 query；恢复与重试策略集中在 errors.rs。
+//! 错误消息只保留方法、路径和原因，不包含 API Secret、签名原文或原始响应。
 
-use crate::domain::AppError;
+use crate::errors::{AppError, BinanceErrorKind};
 
 /// 把 `reqwest` 错误转成脱敏的 Binance 错误消息。
 pub(super) fn request_error(method: &str, path: &str, error: &reqwest::Error) -> AppError {
-    let reason = if error.is_timeout() {
-        "请求超时"
+    let kind = if error.is_timeout() {
+        BinanceErrorKind::Timeout
     } else if error.is_connect() {
-        "连接失败"
+        BinanceErrorKind::Connection
     } else if error.is_decode() {
-        "响应解码失败"
+        BinanceErrorKind::Decode
     } else if error.is_body() {
-        "响应体读取失败"
+        BinanceErrorKind::BodyRead
     } else if error.is_request() {
-        "请求构造失败"
+        BinanceErrorKind::Request
     } else {
-        "网络请求失败"
+        BinanceErrorKind::Network
     };
-    AppError::Binance(format!("Binance {method} {path} {reason}"))
+    AppError::binance(kind, request_context(method, path))
 }
 
-/// 判断是否为 Binance 时间戳偏移错误，可通过重新同步 server time 后重试。
-pub(super) fn is_timestamp_error(error: &AppError) -> bool {
-    matches!(
-        error,
-        AppError::Binance(message)
-            if message.contains("code -1021")
-                || message.contains("timestamp")
-                || message.contains("Timestamp")
-    )
-}
-
-/// 判断查询类 GET 请求是否可短退避重试；真实资金/下单动作不能套用这个判断盲目重发。
-pub(super) fn is_transient_query_error(error: &AppError) -> bool {
-    matches!(
-        error,
-        AppError::Binance(message)
-            if message.contains("请求超时")
-                || message.contains("连接失败")
-                || message.contains("响应体读取失败")
-                || message.contains("网络请求失败")
-                || message.contains("响应缺少 rows 字段")
-                || message.contains("HTTP 429")
-                || message.contains("HTTP 500")
-                || message.contains("HTTP 502")
-                || message.contains("HTTP 503")
-                || message.contains("HTTP 504")
-    )
+/// 错误中只保留方法和接口路径，剥离所有查询参数。
+pub(super) fn request_context(method: &str, path: &str) -> String {
+    let endpoint = path.split('?').next().unwrap_or(path);
+    format!("{method} {endpoint}")
 }
 
 /// 构造 Binance 签名原文。

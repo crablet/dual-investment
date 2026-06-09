@@ -17,29 +17,18 @@ const store = useAppStore()
 const { directionText, money, percent } = useFormat()
 
 const strategyPerformance = computed(() => {
-  // 条形图只比较当前前端订单快照中的权利金展示宽度，不替代 Rust 的收益报表事实。
+  // 金额已经由 Rust 按方向汇总；number 只参与图形宽度计算。
   const rows = [
-    { label: directionText('sellPut'), value: totalPremiumByDirection('sellPut') },
-    { label: directionText('sellCall'), value: totalPremiumByDirection('sellCall') },
+    { label: directionText('sellPut'), value: store.pnl?.sellPutPremium ?? '0' },
+    { label: directionText('sellCall'), value: store.pnl?.sellCallPremium ?? '0' },
   ]
-  const max = Math.max(...rows.map(row => row.value), 1)
+  const max = Math.max(...rows.map(row => decimalStringToDisplayNumber(row.value)), 1)
   return rows.map(row => ({
     label: row.label,
-    value: money(String(row.value)),
-    width: relativeBarWidth(row.value, max),
+    value: money(row.value),
+    width: relativeBarWidth(decimalStringToDisplayNumber(row.value), max),
   }))
 })
-
-/**
- * 按策略方向汇总权利金，用于图形展示。
- *
- * 这里转成展示 number 只影响 UI 宽度和标签格式；真实金额仍以后端 Decimal 字符串为准。
- */
-function totalPremiumByDirection(direction: 'sellPut' | 'sellCall') {
-  return store.orders
-    .filter(order => order.direction === direction)
-    .reduce((sum, order) => sum + decimalStringToDisplayNumber(order.premium), 0)
-}
 </script>
 
 <template>

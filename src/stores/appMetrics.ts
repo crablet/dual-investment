@@ -1,14 +1,10 @@
 // 总览指标的展示派生。
 //
-// 这里只把后端快照整理成指标卡模型，不做真实金融决策。金额求和使用 Decimal
-// 字符串工具，避免为了 UI 汇总先转成 JavaScript number。
+// Rust 已完成金额汇总，这里只整理卡片文案；未首次查询的账户不能显示为零余额。
 
-import type { AppSettings, AppSnapshot } from '@/types/domain'
+import type { AccountSnapshot, AppSettings, PnlReport } from '@/types/domain'
 import type { MetricCardModel } from '@/types/view'
-import {
-  decimalStringToDisplayNumber,
-  sumDecimalStrings,
-} from '@/utils/decimal'
+import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 const metricMoneyFormatter = new Intl.NumberFormat('zh-CN', {
   minimumFractionDigits: 2,
@@ -18,15 +14,12 @@ const metricMoneyFormatter = new Intl.NumberFormat('zh-CN', {
 /** 根据连接状态、账户资产和收益快照构造总览顶部指标卡。 */
 export function buildMetrics(
   settings: AppSettings | undefined,
-  balances: AppSnapshot['balances'],
-  pnl: AppSnapshot['pnl'] | undefined,
+  account: AccountSnapshot | undefined,
+  pnl: PnlReport | undefined,
 ): MetricCardModel[] {
   const connected = settings?.connected ?? false
-  const totalEquity = sumDecimalStrings(balances.map(balance => balance.usdtValue))
-  const availableMargin = balances.find(
-    balance => balance.asset === 'USDT' && balance.source === '期权保证金',
-  )?.free ?? '0'
-  const todayPremium = pnl?.today ?? '0'
+  const totalEquity = account?.updatedAt ? account.totalUsdtValue : undefined
+  const availableMargin = account?.updatedAt ? account.availableMargin : undefined
 
   return [
     {
@@ -46,7 +39,7 @@ export function buildMetrics(
     {
       id: 'premium',
       title: '今日权利金',
-      value: formatMetricMoney(todayPremium),
+      value: formatMetricMoney(pnl?.today),
       icon: 'coins',
       tone: 'gold',
     },
@@ -60,8 +53,10 @@ export function buildMetrics(
   ]
 }
 
-function formatMetricMoney(value: string) {
-  // 指标卡格式化允许转 number；汇总本身已经由 Decimal 字符串工具完成。
+function formatMetricMoney(value: string | undefined) {
+  if (value === undefined) {
+    return '-- USDT'
+  }
   const numeric = decimalStringToDisplayNumber(value)
   return `${metricMoneyFormatter.format(numeric)} USDT`
 }

@@ -1,27 +1,7 @@
 // Decimal 字符串展示层工具。
 //
-// 这些工具只服务前端 UI 派生，避免为了展示聚合把金额或数量先转成 JS number。
+// 金额计算交给 Rust；这里只判断字符串、比较展示顺序，以及转换图形或格式化的输入。
 import type { DecimalString } from '@/types/domain'
-
-interface ParsedDecimal {
-  units: bigint
-  scale: number
-}
-
-/**
- * 汇总 Decimal 字符串。
- *
- * 用 BigInt 对齐小数位，避免把金额、价格或数量转成 number 后再求和。
- */
-export function sumDecimalStrings(values: DecimalString[]): DecimalString {
-  const parsed = values.map(parseDecimalString)
-  const scale = Math.max(0, ...parsed.map(value => value.scale))
-  const total = parsed.reduce((sum, value) => {
-    const multiplier = 10n ** BigInt(scale - value.scale)
-    return sum + value.units * multiplier
-  }, 0n)
-  return formatScaledDecimal(total, scale)
-}
 
 /** 判断 Decimal 字符串是否为 0。 */
 export function isZeroDecimalString(value: DecimalString): boolean {
@@ -33,7 +13,7 @@ export function isNegativeDecimalString(value: DecimalString): boolean {
   return value.trim().startsWith('-') && !isZeroDecimalString(value)
 }
 
-/** Decimal 字符串转展示用 number；只能用于排序、图形比例、Intl 格式化和表单控件。 */
+/** 仅供图形几何和 Intl 格式化使用，返回值不能参与金额、数量或收益计算。 */
 export function decimalStringToDisplayNumber(value: DecimalString): number {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : 0
@@ -44,29 +24,41 @@ export function decimalStringHasValue(value: DecimalString): boolean {
   return !isZeroDecimalString(value)
 }
 
-/** 把 Decimal 字符串拆成整数单位和小数位数。非法输入按 0 处理，避免 UI 派生中断。 */
-function parseDecimalString(raw: DecimalString): ParsedDecimal {
+/** 按十进制文本比较大小；筛选和排序不必先丢失精度转成 number。 */
+export function compareDecimalStrings(left: DecimalString, right: DecimalString): number | undefined {
+  const a = decimalParts(left)
+  const b = decimalParts(right)
+  if (!a || !b) {
+    return undefined
+  }
+  if (a.negative !== b.negative) {
+    return a.negative ? -1 : 1
+  }
+  const fractionLength = Math.max(a.fraction.length, b.fraction.length)
+  const order = a.integer.length - b.integer.length
+    || compareText(a.integer, b.integer)
+    || compareText(a.fraction.padEnd(fractionLength, '0'), b.fraction.padEnd(fractionLength, '0'))
+  return a.negative ? -Math.sign(order) : Math.sign(order)
+}
+
+export function isPositiveDecimalString(value: DecimalString): boolean {
+  return compareDecimalStrings(value, '0') === 1
+}
+
+function decimalParts(raw: DecimalString) {
   const matched = raw.trim().match(/^([+-])?(\d+)(?:\.(\d+))?$/)
   if (!matched) {
-    return { units: 0n, scale: 0 }
+    return undefined
   }
-  const [, sign, integer, fraction = ''] = matched
-  const digits = `${integer}${fraction}`.replace(/^0+(?=\d)/, '') || '0'
-  const direction = sign === '-' ? -1n : 1n
+  const integer = matched[2].replace(/^0+(?=\d)/, '')
+  const fraction = (matched[3] ?? '').replace(/0+$/, '')
   return {
-    units: BigInt(digits) * direction,
-    scale: fraction.length,
+    integer,
+    fraction,
+    negative: matched[1] === '-' && (integer !== '0' || fraction !== ''),
   }
 }
 
-/** 把对齐后的整数单位格式化回 Decimal 字符串。 */
-function formatScaledDecimal(units: bigint, scale: number): DecimalString {
-  if (scale === 0) {
-    return units.toString()
-  }
-  const sign = units < 0n ? '-' : ''
-  const digits = (units < 0n ? -units : units).toString().padStart(scale + 1, '0')
-  const integer = digits.slice(0, -scale)
-  const fraction = digits.slice(-scale).replace(/0+$/, '')
-  return fraction ? `${sign}${integer}.${fraction}` : `${sign}${integer}`
+function compareText(left: string, right: string) {
+  return left === right ? 0 : left < right ? -1 : 1
 }

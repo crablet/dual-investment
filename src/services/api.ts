@@ -8,6 +8,7 @@ import type {
   AdoptOptionPositionsRequest,
   AppSettings,
   AppSnapshot,
+  CommandErrorPayload,
   ConnectBinanceRequest,
   FinishSettlementSweepRequest,
   FundingAttemptView,
@@ -17,6 +18,8 @@ import type {
   SettlementRecoveryView,
   StrategyCandidate,
   StrategyOrder,
+  StrategyPreview,
+  StrategyPreviewRequest,
   StrategyRequest,
 } from '@/types/domain'
 import { invoke } from '@tauri-apps/api/core'
@@ -24,6 +27,19 @@ import { listen } from '@tauri-apps/api/event'
 
 function isTauriRuntime() {
   return typeof window !== 'undefined' && Reflect.has(window, '__TAURI_INTERNALS__')
+}
+
+/** Tauri 自身的传输错误没有业务重试许可，仍须向用户显示错误。 */
+export function commandError(caught: unknown): CommandErrorPayload {
+  if (typeof caught === 'object' && caught !== null
+    && 'message' in caught && typeof caught.message === 'string'
+    && 'canAutoReconnect' in caught && typeof caught.canAutoReconnect === 'boolean') {
+    return { message: caught.message, canAutoReconnect: caught.canAutoReconnect }
+  }
+  const message = caught instanceof Error
+    ? caught.message
+    : typeof caught === 'string' ? caught : '客户端请求失败，请检查错误记录'
+  return { message, canAutoReconnect: false }
 }
 
 /**
@@ -45,6 +61,8 @@ export const api = {
   connectSavedBinance: () => call<AppSettings>('connect_saved_binance'),
   forgetBinanceCredentials: () => call<AppSettings>('forget_binance_credentials'),
   scanCandidates: () => call<StrategyCandidate[]>('scan_candidates'),
+  previewStrategy: (request: StrategyPreviewRequest) =>
+    call<StrategyPreview>('preview_strategy', { request }),
   placeManualStrategy: (request: StrategyRequest) =>
     call<StrategyOrder>('place_manual_strategy', { request }),
   recoverOrderAttempt: (attemptId: string) =>
@@ -59,7 +77,7 @@ export const api = {
     call<AdoptableOptionPositionView[]>('list_adoptable_option_positions'),
   adoptOptionPositions: (request: AdoptOptionPositionsRequest) =>
     call<StrategyOrder[]>('adopt_option_positions', { request }),
-  syncLiveState: () => call<AppSnapshot>('sync_live_state'),
+  syncLiveState: () => call<void>('sync_live_state'),
   runSettlementScan: () => call<StrategyOrder[]>('run_settlement_scan'),
   getLogSnapshot: () => call<LogSnapshot>('get_log_snapshot'),
   openCurrentLogFile: () => call<void>('open_current_log_file'),

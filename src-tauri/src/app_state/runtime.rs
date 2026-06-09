@@ -1,9 +1,7 @@
 //! 运行期辅助函数。
 //!
-//! 这里封装 Binance 权限验证、异步查询任务和客户端订单号生成。
-//! 它只处理内存中的运行状态，不直接读取或写入 keyring。
-
-use std::future::Future;
+//! 这里封装 Binance 权限验证和客户端订单号生成。
+//! 权限验证调用只读账户接口；系统 keyring 的读写由上层连接流程处理。
 
 use chrono::Utc;
 
@@ -11,16 +9,8 @@ use crate::binance::BinanceClient;
 use crate::domain::{AppError, AppResult, StrategyDirection};
 
 pub(super) async fn verify_binance_access(client: &BinanceClient) -> AppResult<()> {
-    let option_account_task = spawn_binance_request({
-        let client = client.clone();
-        async move { client.verify_account().await }
-    });
-    let spot_account_task = spawn_binance_request({
-        let client = client.clone();
-        async move { client.spot_account().await }
-    });
-    let option_account = join_binance_request(option_account_task).await;
-    let spot_account = join_binance_request(spot_account_task).await;
+    let (option_account, spot_account) =
+        tokio::join!(client.verify_account(), client.spot_account());
     option_account?;
     let spot_account = spot_account?;
     if !spot_account.can_trade {
@@ -29,26 +19,6 @@ pub(super) async fn verify_binance_access(client: &BinanceClient) -> AppResult<(
         ));
     }
     Ok(())
-}
-
-/// 在 Tauri 异步运行时里启动一个 Binance 查询任务。
-pub(super) fn spawn_binance_request<T, F>(
-    future: F,
-) -> tauri::async_runtime::JoinHandle<AppResult<T>>
-where
-    T: Send + 'static,
-    F: Future<Output = AppResult<T>> + Send + 'static,
-{
-    tauri::async_runtime::spawn(future)
-}
-
-/// 等待 Binance 子任务并把 join 错误转换成业务错误。
-pub(super) async fn join_binance_request<T>(
-    handle: tauri::async_runtime::JoinHandle<AppResult<T>>,
-) -> AppResult<T> {
-    handle
-        .await
-        .map_err(|error| AppError::Binance(format!("Binance 异步请求任务失败：{error}")))?
 }
 
 /// 生成期权订单客户端订单号。

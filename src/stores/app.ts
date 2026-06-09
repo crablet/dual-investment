@@ -22,12 +22,10 @@ import type {
 } from '@/types/view'
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
-import { api } from '@/services/api'
+import { api, commandError } from '@/services/api'
 import { buildMetrics } from '@/stores/appMetrics'
-import { mergeOrdersByUpdatedAt } from '@/stores/appSnapshot'
 import {
   formatReconnectDelay,
-  isPermanentSavedConnectionError,
   reconnectBackoffDelays,
   reconnectDelayAfterAttempt,
 } from '@/stores/autoReconnect'
@@ -39,6 +37,7 @@ import {
   orderProgressSuccessMessages,
   progressStatusFromSteps,
 } from '@/stores/orderProgress'
+import { isPositiveDecimalString } from '@/utils/decimal'
 
 type RequestKey
   = | 'snapshot'
@@ -102,23 +101,28 @@ export const useAppStore = defineStore('app', () => {
   const autoReconnectAttempts = shallowRef(0)
   const autoReconnectDelayMs = shallowRef(reconnectBackoffDelays[0])
   const lastAutoReconnectError = shallowRef<string>()
+  let snapshotRequestId = 0
 
   const loading = computed(() => foregroundPending.value > 0)
   const settings = computed(() => snapshot.value?.settings)
-  const balances = computed(() => snapshot.value?.balances ?? [])
+  const account = computed(() => snapshot.value?.account)
   const candidates = computed(() => snapshot.value?.candidates ?? [])
   const orders = computed(() => snapshot.value?.orders ?? [])
   const pnl = computed(() => snapshot.value?.pnl)
+  const portfolio = computed(() => snapshot.value?.portfolio)
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
   const fundingAttempts = computed(() => snapshot.value?.fundingAttempts ?? [])
   const settlementRecoveries = computed(() => snapshot.value?.settlementRecoveries ?? [])
   const runningOrders = computed(() =>
-    orders.value.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
+    orders.value.filter(order =>
+      (order.status === 'running' || order.status === 'partiallyFilled')
+      && isPositiveDecimalString(order.filledQuantity),
+    ),
   )
   // 指标卡从快照派生，避免再通过 IPC 请求 Rust 做轻量 UI 聚合。
   const metrics = computed<MetricCardModel[]>(() => buildMetrics(
     settings.value,
-    balances.value,
+    account.value,
     pnl.value,
   ))
   const canAutoReconnect = computed(() =>
@@ -165,7 +169,7 @@ export const useAppStore = defineStore('app', () => {
       return result
     }
     catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught)
+      const message = commandError(caught).message
       if (silent) {
         backgroundError.value = message
       }
@@ -203,7 +207,7 @@ export const useAppStore = defineStore('app', () => {
       unlistenOrderProgress.value = await api.listenOrderProgress(applyOrderProgressEvent)
     }
     catch (caught) {
-      backgroundError.value = caught instanceof Error ? caught.message : String(caught)
+      backgroundError.value = commandError(caught).message
     }
   }
 
@@ -306,8 +310,10 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function refresh(options: RunOptions = {}) {
+    // 多个动作可同时要求读取本地状态；较早发出的快照不能覆盖动作后的读取结果。
+    const requestId = ++snapshotRequestId
     const next = await run('snapshot', () => api.getAppSnapshot(), options)
-    if (next) {
+    if (next && requestId === snapshotRequestId) {
       snapshot.value = next
       reconcileAutoReconnectSettings(next.settings)
     }
@@ -329,13 +335,28 @@ export const useAppStore = defineStore('app', () => {
       resetAutoReconnect()
       await syncLiveState()
     }
+    else {
+      await refresh({ silent: true })
+    }
   }
 
   async function connectSaved(options: ConnectSavedOptions = {}) {
     if (!options.autoReconnect) {
       resetAutoReconnect()
     }
-    const next = await run('connect', () => api.connectSavedBinance(), options)
+    const next = await run('connect', async () => {
+      try {
+        return await api.connectSavedBinance()
+      }
+      catch (caught) {
+        const failure = commandError(caught)
+        if (options.autoReconnect) {
+          lastAutoReconnectError.value = failure.message
+          autoReconnectState.value = failure.canAutoReconnect ? 'waiting' : 'paused'
+        }
+        throw failure
+      }
+    }, options)
     patchSettings(next)
     if (next?.connected) {
       // 重连入口只同步事实；后台继续处理此前已确认的既有订单。
@@ -343,6 +364,11 @@ export const useAppStore = defineStore('app', () => {
       await syncLiveState(options)
       return true
     }
+    if (options.autoReconnect && autoReconnectState.value === 'connecting') {
+      lastAutoReconnectError.value = '连接没有返回成功状态，请手动检查连接'
+      autoReconnectState.value = 'paused'
+    }
+    await refresh({ silent: true })
     return false
   }
 
@@ -367,11 +393,7 @@ export const useAppStore = defineStore('app', () => {
       return true
     }
 
-    const message = backgroundError.value ?? '自动连接 Binance 失败'
-    lastAutoReconnectError.value = message
-    if (isPermanentSavedConnectionError(message)) {
-      // 凭据缺失、权限不足等人工错误需要暂停，避免后台持续打扰 Binance 接口。
-      autoReconnectState.value = 'paused'
+    if (autoReconnectPaused.value) {
       autoReconnectDelayMs.value = reconnectBackoffDelays.at(-1) ?? reconnectBackoffDelays[0]
       return false
     }
@@ -382,13 +404,8 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function scan(options: RunOptions = {}) {
-    const next = await run('scan', () => api.scanCandidates(), options)
-    if (next && snapshot.value) {
-      snapshot.value = {
-        ...snapshot.value,
-        candidates: next,
-      }
-    }
+    await run('scan', () => api.scanCandidates(), options)
+    await refresh({ silent: true })
   }
 
   async function openView(view: AppViewId) {
@@ -396,31 +413,11 @@ export const useAppStore = defineStore('app', () => {
     await refreshViewData(view)
   }
 
-  /** 根据视图刷新所需数据；实盘同步只刷新订单和结算计划。 */
+  /** 导航读取本地状态；已连接且双币赢没有缓存候选时会扫描。 */
   async function refreshViewData(view: AppViewId = activeView.value, options: RunOptions = {}) {
-    if (view === 'dual') {
-      if (settings.value?.connected) {
-        if (!isLoading('scan')) {
-          await scan(options)
-        }
-        return
-      }
-      if (!isLoading('snapshot')) {
-        await refresh(options)
-      }
-      return
-    }
-
-    if (view === 'settings') {
-      if (!isLoading('snapshot')) {
-        await refresh(options)
-      }
-      return
-    }
-
-    if (settings.value?.connected) {
-      if (!isLoading('sync')) {
-        await syncLiveState(options)
+    if (view === 'dual' && settings.value?.connected && candidates.value.length === 0) {
+      if (!isLoading('scan')) {
+        await scan(options)
       }
       return
     }
@@ -431,65 +428,42 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function syncLiveState(options: RunOptions = {}) {
-    const next = await run('sync', () => api.syncLiveState(), options)
-    if (next) {
-      snapshot.value = next
-    }
+    await run('sync', () => api.syncLiveState(), options)
+    // 同步可能部分完成后失败；本地状态仍须展示，且不能覆盖上面的业务错误。
+    await refresh({ silent: true })
   }
 
   async function runSettlementScan() {
-    const next = await run('settlement', () => api.runSettlementScan())
-    if (next && snapshot.value) {
-      snapshot.value = { ...snapshot.value, orders: mergeOrdersByUpdatedAt(next, snapshot.value.orders) }
-      // 结算扫描可能产生风险状态、恢复记录或资金结果，完成后拉完整快照校正局部合并。
-      await refresh()
-    }
+    await run('settlement', () => api.runSettlementScan())
+    await refresh({ silent: true })
   }
 
   async function recoverAttempt(attemptId: string) {
-    const order = await run('recover', () => api.recoverOrderAttempt(attemptId))
-    if (order && snapshot.value) {
-      snapshot.value = { ...snapshot.value, orders: mergeOrdersByUpdatedAt([order], snapshot.value.orders) }
-      // 订单恢复先由 Rust 重新查询 Binance 事实；前端只刷新展示，不触发重放下单。
-      await refresh()
-    }
+    await run('recover', () => api.recoverOrderAttempt(attemptId))
+    await refresh({ silent: true })
   }
 
   async function recoverFundingAttempt(attemptId: string) {
-    const attempt = await run('recover', () => api.recoverFundingAttempt(attemptId))
-    if (attempt) {
-      // 资金恢复会阻断后续自动资金动作，直到后端确认终态或人工解除 blocked。
-      await refresh()
-    }
+    await run('recover', () => api.recoverFundingAttempt(attemptId))
+    await refresh({ silent: true })
   }
 
   async function resolveFundingAttempt(attemptId: string, resolution: FundingAttemptManualResolution) {
-    const attempt = await run('recover', () =>
+    await run('recover', () =>
       api.resolveFundingAttempt({
         attemptId,
         resolution,
         confirmManual: true,
       }))
-    if (attempt) {
-      // 人工解除只更新恢复记录；真实 Simple Earn/Universal Transfer 请求不能由这里重发。
-      await refresh()
-    }
+    await refresh({ silent: true })
   }
 
   async function finishSettlementSweep(batchId: string) {
-    const recovery = await run('recover', () => api.finishSettlementSweep({
+    await run('recover', () => api.finishSettlementSweep({
       batchId,
       confirmManual: true,
     }))
-    if (recovery && snapshot.value) {
-      snapshot.value = {
-        ...snapshot.value,
-        settlementRecoveries: snapshot.value.settlementRecoveries.map(row =>
-          row.id === recovery.id ? recovery : row,
-        ),
-      }
-      await refresh()
-    }
+    await refresh({ silent: true })
   }
 
   async function loadAdoptableOptionPositions() {
@@ -501,16 +475,14 @@ export const useAppStore = defineStore('app', () => {
 
   async function adoptOptionPositions(request: AdoptOptionPositionsRequest) {
     const orders = await run('adopt', () => api.adoptOptionPositions(request))
-    if (orders && snapshot.value) {
-      // 接管只把 Binance 当前义务仓转成本地跟踪订单，不混入 order_attempts 恢复记录。
-      snapshot.value = { ...snapshot.value, orders: mergeOrdersByUpdatedAt(orders, snapshot.value.orders) }
+    if (orders) {
       adoptableOptionPositions.value = adoptableOptionPositions.value.map(row =>
         request.symbols.includes(row.symbol)
           ? { ...row, adoptable: false, alreadyTracked: true, reason: '本地已有跟踪记录' }
           : row,
       )
-      await refresh()
     }
+    await refresh({ silent: true })
   }
 
   async function placeStrategy(request: PlaceStrategyRequest) {
@@ -518,10 +490,9 @@ export const useAppStore = defineStore('app', () => {
     const orderRequest: StrategyRequest = { ...request, clientFlowId: flowId }
     startOrderProgress(flowId, orderRequest.optionSymbol)
     const order = await run('order', () => api.placeManualStrategy(orderRequest))
-    if (order && snapshot.value) {
-      snapshot.value = { ...snapshot.value, orders: [order, ...snapshot.value.orders] }
+    if (order) {
       finishOrderProgressSuccess(flowId, order)
-      await refresh()
+      await refresh({ silent: true })
       return
     }
     finishOrderProgressError(flowId, error.value ?? '下单失败，请查看错误提示和恢复记录')
@@ -530,10 +501,14 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function patchSettings(next?: AppSettings) {
-    if (next && snapshot.value) {
-      snapshot.value = { ...snapshot.value, settings: next }
-      reconcileAutoReconnectSettings(next)
+    if (!next) {
+      return
     }
+    snapshotRequestId += 1
+    if (snapshot.value) {
+      snapshot.value = { ...snapshot.value, settings: next }
+    }
+    reconcileAutoReconnectSettings(next)
   }
 
   function reconcileAutoReconnectSettings(next: AppSettings) {
@@ -564,10 +539,11 @@ export const useAppStore = defineStore('app', () => {
     adoptableOptionPositions,
     settings,
     metrics,
-    balances,
+    account,
     candidates,
     orders,
     pnl,
+    portfolio,
     orderAttempts,
     fundingAttempts,
     settlementRecoveries,

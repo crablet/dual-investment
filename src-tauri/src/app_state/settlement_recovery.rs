@@ -173,7 +173,7 @@ impl AppState {
             self.record_log(
                 "settlement.sweep.skipped",
                 &format!("{} 用户确认结束理财收尾，保留原资金结果", batch.id),
-            )?;
+            );
         }
         Ok(recovery_view(&batch, &orders, &funding, has_pending))
     }

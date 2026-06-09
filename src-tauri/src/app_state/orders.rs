@@ -82,19 +82,7 @@ pub(super) fn apply_option_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck
     if ack.avg_price > Decimal::ZERO {
         order.avg_price = ack.avg_price;
     }
-    order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
-    let annualized_quantity = if order.filled_quantity > Decimal::ZERO {
-        order.filled_quantity
-    } else {
-        order.quantity
-    };
-    order.annualized = strategy::annualized_from_order_terms(
-        order.premium,
-        order.strike,
-        annualized_quantity,
-        order.created_at,
-        order.expiry_at,
-    );
+    strategy::refresh_order_metrics(order);
     order.updated_at = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
 }
 
@@ -115,18 +103,7 @@ pub(super) fn apply_option_position(order: &mut StrategyOrder, position: &Option
     if position.entry_price > Decimal::ZERO {
         order.avg_price = position.entry_price;
     }
-    order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
-    order.annualized = strategy::annualized_from_order_terms(
-        order.premium,
-        order.strike,
-        position.quantity,
-        order.created_at,
-        order.expiry_at,
-    );
-    order.breakeven = match order.direction {
-        StrategyDirection::SellPut => order.strike - order.avg_price,
-        StrategyDirection::SellCall => order.strike + order.avg_price,
-    };
+    strategy::refresh_order_metrics(order);
     order.updated_at = position.update_time.unwrap_or_else(Utc::now);
 }
 

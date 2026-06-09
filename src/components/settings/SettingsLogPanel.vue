@@ -35,6 +35,10 @@ async function clearLogs() {
       {{ logs.error.value }}
     </NAlert>
 
+    <NAlert v-if="logs.writeError.value" type="warning" class="settings-log-error">
+      本地日志写入失败：{{ logs.writeError.value }}。交易与恢复状态仍以订单记录为准。
+    </NAlert>
+
     <div class="settings-log-actions">
       <NButton secondary :loading="logs.pendingAction.value === 'openFile'" @click="logs.openCurrentFile">
         <template #icon><NIcon :component="FileText" /></template>

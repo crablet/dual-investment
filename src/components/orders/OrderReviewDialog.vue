@@ -15,7 +15,6 @@ import {
 import { computed } from 'vue'
 import { useFormat } from '@/composables/useFormat'
 import { localDateTimeLabel } from '@/utils/date'
-import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
 interface Props {
   show: boolean
@@ -39,7 +38,7 @@ const emit = defineEmits<{
   afterLeave: []
 }>()
 
-const { money, percent } = useFormat()
+const { money, percent, signedPercent } = useFormat()
 
 const isSellPut = computed(() => props.candidate?.direction === 'sellPut')
 const productType = computed(() => isSellPut.value ? '低买 · 卖 Put 抄底' : '高卖 · 卖 Call 止盈')
@@ -65,15 +64,6 @@ const reviewFacts = computed<ReviewFact[]>(() => {
     { label: '距现货', value: signedPercent(props.candidate.strikeDistancePercent) },
   ]
 })
-
-function signedPercent(value: string | number) {
-  const numeric = typeof value === 'number' ? value : decimalStringToDisplayNumber(value)
-  if (!Number.isFinite(numeric)) {
-    return '--'
-  }
-  const sign = numeric > 0 ? '+' : ''
-  return `${sign}${percent(numeric)}`
-}
 
 function confirm() {
   emit('confirm')

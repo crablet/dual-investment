@@ -9,24 +9,7 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-/// 应用内部错误类型。
-///
-/// Tauri command 最终会把这些错误转成 `String` 返回前端；在 Rust 内部保留
-/// 分类是为了区分配置错误、风控拒绝、交易所错误和本地持久化错误。
-#[derive(Debug, thiserror::Error)]
-pub enum AppError {
-    #[error("配置错误：{0}")]
-    Config(String),
-    #[error("交易被风控拒绝：{0}")]
-    RiskRejected(String),
-    #[error("币安接口错误：{0}")]
-    Binance(String),
-    #[error("数据库错误：{0}")]
-    Storage(String),
-}
-
-/// Rust 内部统一结果类型。
-pub type AppResult<T> = Result<T, AppError>;
+pub use crate::errors::{AppError, AppResult};
 
 /// 双币赢策略方向。
 ///
@@ -122,12 +105,12 @@ pub struct LogEntry {
 pub struct LogSnapshot {
     pub has_files: bool,
     pub recent_entries: Vec<LogEntry>,
+    pub write_error: Option<String>,
 }
 
 /// 账户资产行。
 ///
-/// `free`、`locked` 和 `usdt_value` 以字符串序列化给前端，前端只负责展示或
-/// 派生 UI 指标，不反向作为真实资金事实。
+/// 数值以字符串序列化给前端；跨账户金额与数量在 Rust 聚合，前端只负责展示。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BalanceRow {
@@ -140,6 +123,49 @@ pub struct BalanceRow {
     #[serde(with = "rust_decimal::serde::str")]
     pub usdt_value: Decimal,
     pub usdt_value_known: bool,
+}
+
+/// 同名资产的 Decimal 汇总，明细保留原账户来源和估值口径。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetBalance {
+    pub asset: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub free: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub locked: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub usdt_value: Decimal,
+    pub usdt_value_known: bool,
+    pub details: Vec<BalanceRow>,
+}
+
+/// 账户展示缓存。刷新失败时保留最后一次成功结果，并独立返回错误。
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSnapshot {
+    pub balances: Vec<AssetBalance>,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub total_usdt_value: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub available_margin: Decimal,
+    pub unpriced_asset_count: usize,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+/// 已成交且仍在运行的期权义务。名义本金不代表 Binance 实际保证金占用。
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortfolioSummary {
+    pub put_count: usize,
+    pub call_count: usize,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub put_quantity: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub put_notional: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub call_quantity: Decimal,
 }
 
 /// 一条可浏览、可下单的策略候选。
@@ -217,7 +243,7 @@ pub struct StrategyOrder {
 
 /// 收益汇总。
 ///
-/// 这里保留真实订单和现货补齐派生出的收益字段；展示用构成比例由前端从这些字段再派生。
+/// 金额和按策略方向的合计均由 Rust 计算；前端只将这些结果转换为图形比例。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PnlReport {
@@ -227,6 +253,10 @@ pub struct PnlReport {
     pub today: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub option_premium: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub sell_put_premium: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub sell_call_premium: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub floating_spot: Decimal,
 }
@@ -264,8 +294,9 @@ impl OrderAttemptStatus {
 
 /// 本地恢复记录。
 ///
-/// 这个结构不走前端反序列化，先在 Rust 中保留强类型状态，再转换成前端视图结构。
-#[derive(Clone, Debug)]
+/// 只包含可展示的恢复事实，不接收前端反序列化，也不复制到另一套同形 DTO。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OrderAttempt {
     pub id: String,
     pub client_order_id: String,
@@ -275,35 +306,6 @@ pub struct OrderAttempt {
     pub exchange_order_id: Option<String>,
     pub message: String,
     pub updated_at: DateTime<Utc>,
-}
-
-/// 前端可展示的恢复记录。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderAttemptView {
-    pub id: String,
-    pub client_order_id: String,
-    pub symbol: String,
-    pub option_symbol: String,
-    pub status: OrderAttemptStatus,
-    pub exchange_order_id: Option<String>,
-    pub message: String,
-    pub updated_at: DateTime<Utc>,
-}
-
-impl From<OrderAttempt> for OrderAttemptView {
-    fn from(attempt: OrderAttempt) -> Self {
-        Self {
-            id: attempt.id,
-            client_order_id: attempt.client_order_id,
-            symbol: attempt.symbol,
-            option_symbol: attempt.option_symbol,
-            status: attempt.status,
-            exchange_order_id: attempt.exchange_order_id,
-            message: attempt.message,
-            updated_at: attempt.updated_at,
-        }
-    }
 }
 
 /// 真实资金动作恢复记录类型。
@@ -809,7 +811,8 @@ pub struct OptionOrderBook {
 
 /// 交易所订单查询或下单响应的归一化结构。
 ///
-/// 期权和现货接口字段不完全一致，`binance.rs` 会在解析时补齐成交数量和均价等公共字段。
+/// 期权和现货接口字段不完全一致，`binance.rs` 负责归一化成交字段。
+/// 已成交回报必须提供有效均价或可推算均价的累计成交额，不用委托价格代替。
 #[derive(Clone, Debug)]
 pub struct ExchangeOrderAck {
     pub order_id: String,
@@ -866,25 +869,25 @@ pub struct ExerciseRecord {
     pub settlement_price: Decimal,
 }
 
-/// 前端一次刷新所需的完整应用快照。
-///
-/// 通过一个快照减少细粒度 IPC 往返；前端再从快照派生指标、日历和列表状态。
+/// 本地订单和恢复事实，加上最近一次成功刷新的账户展示缓存。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSnapshot {
     pub settings: AppSettings,
-    pub balances: Vec<BalanceRow>,
+    pub account: AccountSnapshot,
     pub candidates: Vec<StrategyCandidate>,
     pub orders: Vec<StrategyOrder>,
     pub pnl: PnlReport,
-    pub order_attempts: Vec<OrderAttemptView>,
+    pub portfolio: PortfolioSummary,
+    pub order_attempts: Vec<OrderAttempt>,
     pub funding_attempts: Vec<FundingAttemptView>,
     pub settlement_recoveries: Vec<SettlementRecoveryView>,
 }
 
 /// 连接 Binance 的请求。
 ///
-/// Secret 只会在 Rust 端写入系统 keyring，不会进入 SQLite、审计日志或前端状态。
+/// 用户输入的 Secret 仅由 Rust 凭据模块写入系统 keyring，
+/// 不进入 SQLite、日志或返回前端的快照。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConnectBinanceRequest {
@@ -912,6 +915,28 @@ pub struct StrategyRequest {
     #[serde(with = "rust_decimal::serde::str")]
     pub limit_price: Decimal,
     pub confirm_live: bool,
+}
+
+/// 纯计算预览输入，不包含账户、合约查询或真实下单授权。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StrategyPreviewRequest {
+    pub direction: StrategyDirection,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub strike: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub limit_price: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub quantity: Decimal,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyPreview {
+    #[serde(with = "rust_decimal::serde::str")]
+    pub premium: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub breakeven: Decimal,
 }
 
 /// 接管 Binance 当前期权持仓的请求。

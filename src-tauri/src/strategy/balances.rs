@@ -3,14 +3,14 @@
 //! 这里把期权保证金、现货和 Simple Earn 的真实账户快照转换成前端展示行，并按已保存订单
 //! 派生收益报告。无法估值的资产保留数量事实，但不参与 USDT 汇总。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::Local;
 use rust_decimal::Decimal;
 
 use crate::domain::{
-    BalanceRow, OptionAccountSnapshot, PnlReport, SimpleEarnSnapshot, SpotAccountSnapshot,
-    StrategyDirection, StrategyOrder,
+    AccountSnapshot, AssetBalance, BalanceRow, OptionAccountSnapshot, PnlReport, PortfolioSummary,
+    SimpleEarnSnapshot, SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyStatus,
 };
 
 struct BalanceValuation {
@@ -24,8 +24,77 @@ fn empty_pnl_report() -> PnlReport {
         cumulative: Decimal::ZERO,
         today: Decimal::ZERO,
         option_premium: Decimal::ZERO,
+        sell_put_premium: Decimal::ZERO,
+        sell_call_premium: Decimal::ZERO,
         floating_spot: Decimal::ZERO,
     }
+}
+
+/// 按资产聚合各账户来源，缺少估值的整组不计入总额，和前端比例图保持相同口径。
+pub fn account_snapshot_from_balances(balances: Vec<BalanceRow>) -> AccountSnapshot {
+    let mut grouped = BTreeMap::<String, Vec<BalanceRow>>::new();
+    let mut available_margin = Decimal::ZERO;
+    for mut balance in balances {
+        let asset = balance.asset.trim().to_ascii_uppercase();
+        balance.asset.clone_from(&asset);
+        if asset == "USDT" && balance.source == "期权保证金" {
+            available_margin += balance.free;
+        }
+        grouped.entry(asset).or_default().push(balance);
+    }
+
+    let balances = grouped
+        .into_iter()
+        .map(|(asset, mut details)| {
+            details.sort_by(|left, right| left.source.cmp(&right.source));
+            AssetBalance {
+                asset,
+                free: details.iter().map(|row| row.free).sum(),
+                locked: details.iter().map(|row| row.locked).sum(),
+                usdt_value: details.iter().map(|row| row.usdt_value).sum(),
+                usdt_value_known: details.iter().all(|row| row.usdt_value_known),
+                details,
+            }
+        })
+        .collect::<Vec<_>>();
+    AccountSnapshot {
+        total_usdt_value: balances
+            .iter()
+            .filter(|balance| balance.usdt_value_known)
+            .map(|balance| balance.usdt_value)
+            .sum(),
+        available_margin,
+        unpriced_asset_count: balances
+            .iter()
+            .filter(|balance| !balance.usdt_value_known)
+            .count(),
+        balances,
+        ..AccountSnapshot::default()
+    }
+}
+
+/// 义务仓只累计真实成交数量；未成交的委托数量不形成持仓或名义本金。
+pub fn portfolio_summary_from_orders(orders: &[StrategyOrder]) -> PortfolioSummary {
+    let mut summary = PortfolioSummary::default();
+    for order in orders.iter().filter(|order| {
+        matches!(
+            order.status,
+            StrategyStatus::Running | StrategyStatus::PartiallyFilled
+        ) && order.filled_quantity > Decimal::ZERO
+    }) {
+        match order.direction {
+            StrategyDirection::SellPut => {
+                summary.put_count += 1;
+                summary.put_quantity += order.filled_quantity;
+                summary.put_notional += order.strike * order.filled_quantity;
+            }
+            StrategyDirection::SellCall => {
+                summary.call_count += 1;
+                summary.call_quantity += order.filled_quantity;
+            }
+        }
+    }
+    summary
 }
 
 /// 从期权保证金账户构造前端资产行。
@@ -189,7 +258,15 @@ pub fn pnl_report_from_orders_with_spot(
         return empty_pnl_report();
     }
 
-    let option_premium: Decimal = orders.iter().map(|order| order.premium).sum();
+    let mut sell_put_premium = Decimal::ZERO;
+    let mut sell_call_premium = Decimal::ZERO;
+    for order in orders {
+        match order.direction {
+            StrategyDirection::SellPut => sell_put_premium += order.premium,
+            StrategyDirection::SellCall => sell_call_premium += order.premium,
+        }
+    }
+    let option_premium = sell_put_premium + sell_call_premium;
     let today = today_option_premium(orders);
     let floating_spot = spot_price.map_or(Decimal::ZERO, |price| {
         orders
@@ -208,6 +285,8 @@ pub fn pnl_report_from_orders_with_spot(
         cumulative,
         today,
         option_premium,
+        sell_put_premium,
+        sell_call_premium,
         floating_spot,
     }
 }

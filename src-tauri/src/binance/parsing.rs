@@ -9,6 +9,8 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde_json::Value;
 
+use crate::errors::BinanceErrorKind;
+
 use crate::domain::{
     AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot,
     OptionAssetBalance, OptionContract, OptionMarkPrice, OptionOrderBook, OptionPosition,
@@ -22,7 +24,7 @@ pub(super) fn parse_account_snapshot(value: &Value) -> AppResult<OptionAccountSn
     let assets = value
         .get("asset")
         .and_then(Value::as_array)
-        .ok_or_else(|| AppError::Binance("Binance 账户响应缺少 asset 字段".to_string()))?
+        .ok_or_else(|| AppError::response("Binance 账户响应缺少 asset 字段".to_string()))?
         .iter()
         .map(parse_asset_balance)
         .collect::<AppResult<Vec<_>>>()?;
@@ -40,7 +42,7 @@ pub(super) fn parse_account_snapshot(value: &Value) -> AppResult<OptionAccountSn
 pub(super) fn parse_option_positions(value: &Value) -> AppResult<Vec<OptionPosition>> {
     let rows = value
         .as_array()
-        .ok_or_else(|| AppError::Binance("Binance 期权持仓响应不是数组".to_string()))?;
+        .ok_or_else(|| AppError::response("Binance 期权持仓响应不是数组".to_string()))?;
 
     rows.iter()
         .map(parse_option_position)
@@ -81,7 +83,7 @@ pub(super) fn parse_spot_account(value: &Value) -> AppResult<SpotAccountSnapshot
     let balances = value
         .get("balances")
         .and_then(Value::as_array)
-        .ok_or_else(|| AppError::Binance("Binance 现货账户响应缺少 balances 字段".to_string()))?
+        .ok_or_else(|| AppError::response("Binance 现货账户响应缺少 balances 字段".to_string()))?
         .iter()
         .map(parse_spot_asset_balance)
         .collect::<AppResult<Vec<_>>>()?;
@@ -119,7 +121,12 @@ pub(super) fn parse_simple_earn_position_page(
     let rows = value
         .get("rows")
         .and_then(Value::as_array)
-        .ok_or_else(|| AppError::Binance("Binance Simple Earn 响应缺少 rows 字段".to_string()))?
+        .ok_or_else(|| {
+            AppError::binance(
+                BinanceErrorKind::MissingRows,
+                "Binance Simple Earn 响应缺少 rows 字段",
+            )
+        })?
         .iter()
         .map(|row| parse_simple_earn_position(row, source, amount_key, flexible))
         .collect::<AppResult<Vec<_>>>()?;
@@ -158,7 +165,10 @@ pub(super) fn parse_simple_earn_flexible_product_page(
         .get("rows")
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            AppError::Binance("Binance Simple Earn 产品列表响应缺少 rows 字段".to_string())
+            AppError::binance(
+                BinanceErrorKind::MissingRows,
+                "Binance Simple Earn 产品列表响应缺少 rows 字段",
+            )
         })?
         .iter()
         .map(parse_simple_earn_flexible_product)
@@ -186,8 +196,8 @@ fn parse_simple_earn_flexible_product(value: &Value) -> AppResult<SimpleEarnFlex
 pub(super) fn ensure_success_response(value: &Value, operation: &str) -> AppResult<()> {
     match value.get("success").and_then(Value::as_bool) {
         Some(true) => Ok(()),
-        Some(false) => Err(AppError::Binance(format!("{operation}未成功"))),
-        None => Err(AppError::Binance(format!(
+        Some(false) => Err(AppError::response(format!("{operation}未成功"))),
+        None => Err(AppError::response(format!(
             "{operation}响应缺少 success 字段"
         ))),
     }
@@ -253,7 +263,10 @@ fn history_rows<'a>(value: &'a Value, operation: &str) -> AppResult<&'a [Value]>
     if total_is_zero {
         return Ok(&[]);
     }
-    Err(AppError::Binance(format!("{operation}响应缺少 rows 字段")))
+    Err(AppError::binance(
+        BinanceErrorKind::MissingRows,
+        format!("{operation}响应缺少 rows 字段"),
+    ))
 }
 
 fn parse_simple_earn_redemption_record(value: &Value) -> AppResult<SimpleEarnRedemptionRecord> {
@@ -279,7 +292,7 @@ fn date_time_from_millis_field(value: &Value, key: &str) -> Option<DateTime<Utc>
 pub(super) fn parse_spot_price_tickers(value: &Value) -> AppResult<HashMap<String, Decimal>> {
     let rows = value
         .as_array()
-        .ok_or_else(|| AppError::Binance("Binance ticker price 响应不是数组".to_string()))?;
+        .ok_or_else(|| AppError::response("Binance ticker price 响应不是数组".to_string()))?;
     let mut prices = HashMap::with_capacity(rows.len());
     for row in rows {
         prices.insert(string_field(row, "symbol")?, decimal_field(row, "price")?);
@@ -293,7 +306,7 @@ pub(super) fn parse_exchange_info(value: &Value) -> AppResult<Vec<OptionContract
         .get("optionSymbols")
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            AppError::Binance("Binance exchangeInfo 响应缺少 optionSymbols 字段".to_string())
+            AppError::response("Binance exchangeInfo 响应缺少 optionSymbols 字段".to_string())
         })?
         .iter()
         .map(parse_option_contract)
@@ -305,9 +318,9 @@ fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
     let expiry_ms = value
         .get("expiryDate")
         .and_then(Value::as_i64)
-        .ok_or_else(|| AppError::Binance("期权合约缺少 expiryDate".to_string()))?;
+        .ok_or_else(|| AppError::response("期权合约缺少 expiryDate".to_string()))?;
     let expiry_at = DateTime::<Utc>::from_timestamp_millis(expiry_ms)
-        .ok_or_else(|| AppError::Binance("期权合约 expiryDate 无效".to_string()))?;
+        .ok_or_else(|| AppError::response("期权合约 expiryDate 无效".to_string()))?;
     let price_filter = exchange_info_filter(value, "PRICE_FILTER")?;
     let lot_filter = exchange_info_filter(value, "LOT_SIZE")?;
 
@@ -348,14 +361,14 @@ fn exchange_info_filter<'a>(value: &'a Value, filter_type: &str) -> AppResult<&'
                     .is_some_and(|current| current == filter_type)
             })
         })
-        .ok_or_else(|| AppError::Binance(format!("Binance 期权合约缺少 {filter_type} 过滤器")))
+        .ok_or_else(|| AppError::response(format!("Binance 期权合约缺少 {filter_type} 过滤器")))
 }
 
 /// 解析 mark price 列表。
 pub(super) fn parse_mark_prices(value: &Value) -> AppResult<Vec<OptionMarkPrice>> {
     value
         .as_array()
-        .ok_or_else(|| AppError::Binance("Binance mark 响应不是数组".to_string()))?
+        .ok_or_else(|| AppError::response("Binance mark 响应不是数组".to_string()))?
         .iter()
         .map(parse_mark_price)
         .collect()
@@ -376,7 +389,7 @@ fn parse_mark_price(value: &Value) -> AppResult<OptionMarkPrice> {
 pub(super) fn parse_option_tickers(value: &Value) -> AppResult<Vec<OptionTicker>> {
     value
         .as_array()
-        .ok_or_else(|| AppError::Binance("Binance option ticker 响应不是数组".to_string()))?
+        .ok_or_else(|| AppError::response("Binance option ticker 响应不是数组".to_string()))?
         .iter()
         .map(parse_option_ticker)
         .collect()
@@ -400,7 +413,7 @@ fn parse_order_book_side(value: &Value, key: &str, label: &str) -> AppResult<Vec
     value
         .get(key)
         .and_then(Value::as_array)
-        .ok_or_else(|| AppError::Binance(format!("Binance 订单簿响应缺少{label}数组")))?
+        .ok_or_else(|| AppError::response(format!("Binance 订单簿响应缺少{label}数组")))?
         .iter()
         .map(|level| parse_order_book_level(level, label))
         .collect()
@@ -409,7 +422,7 @@ fn parse_order_book_side(value: &Value, key: &str, label: &str) -> AppResult<Vec
 fn parse_order_book_level(value: &Value, label: &str) -> AppResult<OrderBookLevel> {
     let values = value
         .as_array()
-        .ok_or_else(|| AppError::Binance(format!("Binance 订单簿{label}档位不是数组")))?;
+        .ok_or_else(|| AppError::response(format!("Binance 订单簿{label}档位不是数组")))?;
     let price = decimal_array_value(values, 0, label, "价格")?;
     let quantity = decimal_array_value(values, 1, label, "数量")?;
     Ok(OrderBookLevel { price, quantity })
@@ -425,10 +438,9 @@ fn decimal_array_value(
         .get(index)
         .map(value_to_string)
         .filter(|text| !text.trim().is_empty())
-        .ok_or_else(|| AppError::Binance(format!("Binance 订单簿{label}缺少{field}")))?;
-    Decimal::from_str(&text).map_err(|error| {
-        AppError::Binance(format!("Binance 订单簿{label}{field}无法解析：{error}"))
-    })
+        .ok_or_else(|| AppError::response(format!("Binance 订单簿{label}缺少{field}")))?;
+    Decimal::from_str(&text)
+        .map_err(|_| AppError::response(format!("Binance 订单簿{label}{field}无法解析")))
 }
 
 /// 归一化期权/现货订单响应。
@@ -439,16 +451,28 @@ pub(super) fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
         .get("orderId")
         .map(value_to_string)
         .filter(|text| !text.trim().is_empty())
-        .ok_or_else(|| AppError::Binance("Binance 下单响应缺少 orderId".to_string()))?;
+        .ok_or_else(|| AppError::response("Binance 下单响应缺少 orderId".to_string()))?;
 
     let executed_qty = optional_decimal_field(value, "executedQty")?.unwrap_or(Decimal::ZERO);
+    if executed_qty < Decimal::ZERO {
+        return Err(AppError::response("Binance 订单成交数量不能为负数"));
+    }
     let quantity = optional_decimal_field(value, "quantity")?
         .or(optional_decimal_field(value, "origQty")?)
         .unwrap_or(Decimal::ZERO);
     let price = optional_decimal_field(value, "price")?.unwrap_or(Decimal::ZERO);
-    let avg_price = match optional_decimal_field(value, "avgPrice")? {
-        Some(avg_price) => avg_price,
-        None => average_price_from_spot_ack(value, executed_qty)?.unwrap_or(price),
+    // 委托限价不是成交事实；零成交不产生均价，已成交订单必须提供可验证的实际均价。
+    let avg_price = if executed_qty == Decimal::ZERO {
+        Decimal::ZERO
+    } else {
+        let avg_price = match optional_decimal_field(value, "avgPrice")? {
+            Some(avg_price) => avg_price,
+            None => average_price_from_spot_ack(value, executed_qty)?,
+        };
+        if avg_price <= Decimal::ZERO {
+            return Err(AppError::response("Binance 已成交订单缺少有效成交均价"));
+        }
+        avg_price
     };
     let transact_time = value
         .get("transactTime")
@@ -483,17 +507,18 @@ pub(super) fn parse_order_ack(value: &Value) -> AppResult<ExchangeOrderAck> {
 }
 
 /// 从现货订单累计成交额反推均价。
-fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> AppResult<Option<Decimal>> {
+fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> AppResult<Decimal> {
     // 现货市价单常只返回累计成交额，均价需要用 quoteQty / executedQty 反推。
     if executed_qty <= Decimal::ZERO {
-        return Ok(None);
+        return Err(AppError::response("Binance 现货成交均价需要正成交数量"));
     }
     let quote_qty = decimal_field(value, "cummulativeQuoteQty")?;
     if quote_qty <= Decimal::ZERO {
-        Ok(None)
-    } else {
-        Ok(Some((quote_qty / executed_qty).round_dp(8)))
+        return Err(AppError::response(
+            "Binance 已成交现货订单缺少有效累计成交额",
+        ));
     }
+    Ok((quote_qty / executed_qty).round_dp(8))
 }
 
 /// 解析行权记录。
@@ -502,7 +527,7 @@ fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> AppResul
 pub(super) fn parse_exercise_records(value: &Value) -> AppResult<Vec<ExerciseRecord>> {
     let rows = value
         .as_array()
-        .ok_or_else(|| AppError::Binance("Binance 行权记录响应不是数组".to_string()))?;
+        .ok_or_else(|| AppError::response("Binance 行权记录响应不是数组".to_string()))?;
 
     rows.iter()
         .map(|row| {
@@ -520,7 +545,7 @@ fn string_field(value: &Value, key: &str) -> AppResult<String> {
         .get(key)
         .map(value_to_string)
         .filter(|text| !text.trim().is_empty())
-        .ok_or_else(|| AppError::Binance(format!("Binance 响应缺少 {key} 字段")))
+        .ok_or_else(|| AppError::response(format!("Binance 响应缺少 {key} 字段")))
 }
 
 fn optional_string_field(value: &Value, key: &str) -> Option<String> {
@@ -535,15 +560,15 @@ fn u32_field(value: &Value, key: &str) -> AppResult<u32> {
     let text = value
         .get(key)
         .map(value_to_string)
-        .ok_or_else(|| AppError::Binance(format!("Binance 响应缺少 {key} 字段")))?;
+        .ok_or_else(|| AppError::response(format!("Binance 响应缺少 {key} 字段")))?;
     text.parse::<u32>()
-        .map_err(|error| AppError::Binance(format!("Binance 字段 {key} 无法解析：{error}")))
+        .map_err(|_| AppError::response(format!("Binance 字段 {key} 无法解析")))
 }
 
 /// 读取必填 Decimal 字段。
 pub(super) fn decimal_field(value: &Value, key: &str) -> AppResult<Decimal> {
     optional_decimal_field(value, key)?
-        .ok_or_else(|| AppError::Binance(format!("Binance 响应缺少 {key} 字段")))
+        .ok_or_else(|| AppError::response(format!("Binance 响应缺少 {key} 字段")))
 }
 
 /// 读取可选 Decimal 字段。
@@ -556,7 +581,7 @@ fn optional_decimal_field(value: &Value, key: &str) -> AppResult<Option<Decimal>
         .filter(|text| !text.trim().is_empty())
         .map(|text| {
             Decimal::from_str(&text)
-                .map_err(|error| AppError::Binance(format!("Binance 字段 {key} 无法解析：{error}")))
+                .map_err(|_| AppError::response(format!("Binance 字段 {key} 无法解析")))
         })
         .transpose()
 }

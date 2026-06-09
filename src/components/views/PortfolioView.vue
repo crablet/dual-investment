@@ -1,7 +1,7 @@
 <!--
 持仓与现货视图。
 
-展示期权义务仓和现货资产；所有资金事实来自后端快照，前端仅做展示聚合。
+展示期权义务仓和现货资产；金额与数量已在 Rust 汇总，前端组织列表和图表。
 -->
 <script setup lang="ts">
 import type { PnlBreakdownItem } from '@/types/view'
@@ -12,9 +12,9 @@ import DonutChart from '@/components/common/DonutChart.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
-import { aggregateBalances } from '@/utils/balances'
+import { presentAccountBalances } from '@/utils/balances'
 import { localDateTimeLabel } from '@/utils/date'
-import { decimalStringHasValue, decimalStringToDisplayNumber } from '@/utils/decimal'
+import { decimalStringHasValue } from '@/utils/decimal'
 
 const store = useAppStore()
 const { decimal, money } = useFormat()
@@ -33,37 +33,18 @@ onUnmounted(() => {
   }
 })
 
-const obligationOrders = computed(() =>
-  store.orders.filter(order => order.status === 'running' || order.status === 'partiallyFilled'),
-)
+const obligationOrders = computed(() => store.runningOrders)
 const upcomingExpiryOrders = computed(() =>
   obligationOrders.value
     .filter(order => new Date(order.expiryAt).getTime() > currentTimeMs.value)
     .sort((left, right) => new Date(left.expiryAt).getTime() - new Date(right.expiryAt).getTime()),
 )
-// 这里的义务仓暴露额用于 UI 概览，真实保证金校验仍在 Rust 风控中完成。
-const sellPutMargin = computed(() =>
-  obligationOrders.value
-    .filter(order => order.direction === 'sellPut')
-    .reduce(
-      (sum, order) =>
-        sum
-        + decimalStringToDisplayNumber(order.strike)
-        * decimalStringToDisplayNumber(order.quantity),
-      0,
-    ),
-)
-const sellCallQuantity = computed(() =>
-  obligationOrders.value
-    .filter(order => order.direction === 'sellCall')
-    .reduce((sum, order) => sum + decimalStringToDisplayNumber(order.quantity), 0),
-)
-const aggregatedBalances = computed(() => aggregateBalances(store.balances))
+const balances = computed(() => presentAccountBalances(store.account?.balances ?? []))
 const balanceBreakdown = computed<PnlBreakdownItem[]>(() => buildBalanceBreakdown())
 
 function buildBalanceBreakdown(): PnlBreakdownItem[] {
   const rows: PnlBreakdownItem[] = []
-  for (const balance of aggregatedBalances.value) {
+  for (const balance of balances.value) {
     if (!balance.usdtValueKnown) {
       // 后端无法定价的资产不能参与比例图；账户概览仍会显示“暂无估值”。
       continue
@@ -81,20 +62,20 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
 <template>
   <div class="view-grid">
     <Panel title="账户概览" class="span-4">
-      <AccountBalanceList :balances="store.balances" class="large" empty-text="暂无持仓" />
+      <AccountBalanceList :account="store.account" class="large" empty-text="暂无持仓" />
     </Panel>
 
     <Panel title="义务仓概览" class="span-4">
       <div class="obligation-list">
         <article>
           <strong>卖出看跌义务仓</strong>
-          <span>{{ obligationOrders.filter(order => order.direction === 'sellPut').length }} 个</span>
-          <em>保证金占用 {{ money(String(sellPutMargin)) }}</em>
+          <span>{{ store.portfolio?.putCount ?? 0 }} 个 · {{ store.portfolio ? decimal(store.portfolio.putQuantity) : '--' }} BTC</span>
+          <em>已成交名义本金 {{ store.portfolio ? money(store.portfolio.putNotional) : '--' }}</em>
         </article>
         <article>
           <strong>卖出看涨义务仓</strong>
-          <span>{{ obligationOrders.filter(order => order.direction === 'sellCall').length }} 个</span>
-          <em>BTC 占用 {{ decimal(sellCallQuantity) }}</em>
+          <span>{{ store.portfolio?.callCount ?? 0 }} 个</span>
+          <em>已成交数量 {{ store.portfolio ? decimal(store.portfolio.callQuantity) : '--' }} BTC</em>
         </article>
       </div>
     </Panel>
@@ -102,6 +83,7 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
     <Panel title="资金与保证金" class="span-4">
       <DonutChart
         :items="balanceBreakdown"
+        :total-value="store.account?.updatedAt ? store.account.totalUsdtValue : null"
         center-label="资产估值"
         empty-text="暂无可估值资产"
       />
@@ -125,14 +107,14 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
             <tr v-for="order in obligationOrders" :key="order.id">
               <td>BTC</td>
               <td>{{ order.direction === 'sellPut' ? '卖出看跌（义务）' : '卖出看涨（义务）' }}</td>
-              <td>{{ decimal(order.quantity) }} BTC</td>
+              <td>{{ decimal(order.filledQuantity) }} BTC</td>
               <td>{{ money(order.strike, 'USDT', 0) }}</td>
               <td>{{ localDateTimeLabel(order.expiryAt) }}</td>
               <td class="positive">{{ money(order.premium) }}</td>
               <td>{{ order.status === 'partiallyFilled' ? '部分成交' : '运行中' }}</td>
             </tr>
             <tr
-              v-for="balance in aggregatedBalances"
+              v-for="balance in balances"
               :key="balance.asset"
             >
               <td>{{ balance.asset }}</td>
@@ -171,7 +153,7 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
             </tr>
           </tbody>
         </table>
-        <p v-if="obligationOrders.length === 0 && aggregatedBalances.length === 0" class="empty-state">暂无持仓明细</p>
+        <p v-if="obligationOrders.length === 0 && balances.length === 0" class="empty-state">暂无持仓明细</p>
       </div>
     </Panel>
 
@@ -181,7 +163,7 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
         <article v-for="order in upcomingExpiryOrders" :key="order.id">
           <strong>{{ localDateTimeLabel(order.expiryAt) }}</strong>
           <span>{{ order.direction === 'sellPut' ? '卖出看跌' : '卖出看涨' }}</span>
-          <em>{{ order.quantity }} BTC</em>
+          <em>{{ order.filledQuantity }} BTC</em>
         </article>
       </div>
     </Panel>

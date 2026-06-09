@@ -4,7 +4,7 @@
 
 import type { LogSnapshot } from '@/types/domain'
 import { computed, onMounted, shallowRef } from 'vue'
-import { api } from '@/services/api'
+import { api, commandError } from '@/services/api'
 
 type LogAction = 'refresh' | 'openFile' | 'openFolder' | 'clear'
 
@@ -15,6 +15,7 @@ export function useLogSnapshot() {
 
   const hasFiles = computed(() => snapshot.value?.hasFiles ?? false)
   const recentEntries = computed(() => snapshot.value?.recentEntries ?? [])
+  const writeError = computed(() => snapshot.value?.writeError)
 
   /**
    * 包装日志相关 Tauri command。
@@ -28,7 +29,7 @@ export function useLogSnapshot() {
       return await task()
     }
     catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught)
+      error.value = commandError(caught).message
       return undefined
     }
     finally {
@@ -67,6 +68,7 @@ export function useLogSnapshot() {
     recentEntries,
     pendingAction,
     error,
+    writeError,
     refresh,
     openCurrentFile,
     openFolder,

@@ -53,15 +53,23 @@ impl AppState {
                 } else {
                     Decimal::ZERO
                 };
-            let earn = if batch.required.usdt > spot_asset_free(&spot, "USDT") + option_amount
-                || batch.required.btc > spot_asset_free(&spot, "BTC")
-            {
-                client.simple_earn_snapshot().await?
-            } else {
-                SimpleEarnSnapshot {
-                    balances: Vec::new(),
-                }
+            let mut earn = SimpleEarnSnapshot {
+                balances: Vec::new(),
             };
+            for (asset, available) in [
+                ("USDT", spot_asset_free(&spot, "USDT") + option_amount),
+                ("BTC", spot_asset_free(&spot, "BTC")),
+            ] {
+                let required = if asset == "USDT" {
+                    batch.required.usdt
+                } else {
+                    batch.required.btc
+                };
+                if required > available {
+                    earn.balances
+                        .extend(client.simple_earn_flexible_positions(asset).await?.balances);
+                }
+            }
             let plans = self.plan_batch_redemptions(batch, &spot, &earn, option_amount)?;
             if batch.shortfall.usdt > Decimal::ZERO || batch.shortfall.btc > Decimal::ZERO {
                 self.update_batch(

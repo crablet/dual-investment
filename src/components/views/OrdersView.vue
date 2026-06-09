@@ -15,7 +15,6 @@ import { useLocalToday } from '@/composables/useLocalToday'
 import { useRecoveryRows } from '@/composables/useRecoveryRows'
 import { useAppStore } from '@/stores/app'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
-import { sumDecimalStrings } from '@/utils/decimal'
 
 const store = useAppStore()
 const { todayKey } = useLocalToday()
@@ -46,10 +45,6 @@ watchEffect(() => {
 })
 
 const selected = computed(() => store.orders.find(order => order.id === selectedId.value) ?? store.orders[0])
-const totalPremium = computed(() => {
-  // 这里只是订单页摘要展示；收益报表事实来自 Rust 返回的 pnl 快照。
-  return sumDecimalStrings(store.orders.map(order => order.premium))
-})
 const todayExpiryCount = computed(() => {
   // “今日到期”按本地日期展示，真实结算触发仍以后端 expiryAt 毫秒时间戳为准。
   return store.orders.filter(order => localDateKey(order.expiryAt) === todayKey.value).length
@@ -104,7 +99,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
         <article><span>总订单数</span><strong>{{ store.orders.length }}</strong></article>
         <article><span>进行中订单</span><strong>{{ store.runningOrders.length }}</strong></article>
         <article><span>今日到期</span><strong>{{ todayExpiryCount }}</strong></article>
-        <article><span>累计权利金</span><strong>{{ money(totalPremium) }}</strong></article>
+        <article><span>累计权利金</span><strong>{{ store.pnl ? money(store.pnl.optionPremium) : '--' }}</strong></article>
       </div>
     </Panel>
 

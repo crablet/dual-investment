@@ -23,7 +23,7 @@ const activeStrategies = computed(() => store.runningOrders.slice(0, 4))
     <MetricCard v-for="metric in store.metrics" :key="metric.id" :metric="metric" />
 
     <Panel title="账户概览" class="span-6">
-      <AccountBalanceList :balances="store.balances" />
+      <AccountBalanceList :account="store.account" />
     </Panel>
 
     <Panel title="活跃策略" class="span-6">

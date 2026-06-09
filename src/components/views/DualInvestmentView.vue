@@ -12,8 +12,10 @@ import {
   Zap,
 } from '@lucide/vue'
 import {
+  NAlert,
   NButton,
   NIcon,
+  NInput,
   NInputNumber,
 } from 'naive-ui'
 import { shallowRef } from 'vue'
@@ -27,7 +29,7 @@ import {
 import { useFormat } from '@/composables/useFormat'
 import { useAppStore } from '@/stores/app'
 import { localDateTimeLabel } from '@/utils/date'
-import { decimalStringToDisplayNumber } from '@/utils/decimal'
+import { isPositiveDecimalString } from '@/utils/decimal'
 
 interface ManualOrderReview {
   candidate: StrategyCandidate
@@ -38,7 +40,7 @@ interface ManualOrderReview {
 }
 
 const store = useAppStore()
-const { money, percent } = useFormat()
+const { money, percent, signedPercent } = useFormat()
 const {
   form,
   candidateFilter,
@@ -52,8 +54,9 @@ const {
   panelTitle,
   emptyCandidateTitle,
   emptyCandidateHint,
-  projectedPremium,
-  projectedBreakeven,
+  strategyPreview,
+  previewLoading,
+  previewError,
   canSubmit,
   daysUntil,
   toggleCandidateSort,
@@ -64,26 +67,18 @@ const {
 const orderReviewVisible = shallowRef(false)
 const orderReview = shallowRef<ManualOrderReview>()
 
-function signedPercent(value: string | number) {
-  // 展示用百分比允许 number；真实年化和风控阈值提交前会回到字符串契约。
-  const numeric = typeof value === 'number' ? value : decimalStringToDisplayNumber(value)
-  if (!Number.isFinite(numeric))
-    return '--'
-  const sign = numeric > 0 ? '+' : ''
-  return `${sign}${percent(numeric)}`
-}
-
 function submit() {
   const candidate = selectedCandidate.value
-  if (!candidate) {
+  const preview = strategyPreview.value
+  if (!candidate || !preview || !canSubmit.value) {
     return
   }
   // 冻结用户点击发送时看到的候选快照，避免确认弹窗打开后候选刷新导致展示和实际下单不一致。
   orderReview.value = {
     candidate,
-    quantity: form.quantity.toFixed(2),
-    projectedPremium: String(projectedPremium.value),
-    projectedBreakeven: String(projectedBreakeven.value),
+    quantity: form.quantity.trim(),
+    projectedPremium: preview.premium,
+    projectedBreakeven: preview.breakeven,
     daysToExpiry: daysUntil(candidate.expiryAt),
   }
   orderReviewVisible.value = true
@@ -234,7 +229,7 @@ function confirmOrderReview() {
             <strong :class="{ positive: selectedCandidate }">
               {{ selectedCandidate ? percent(selectedCandidate.annualized) : '--' }}
             </strong>
-            <em v-if="selectedCandidate && decimalStringToDisplayNumber(selectedCandidate.spotPrice) > 0">
+            <em v-if="selectedCandidate && isPositiveDecimalString(selectedCandidate.spotPrice)">
               距现货 {{ signedPercent(selectedCandidate.strikeDistancePercent) }}
             </em>
           </article>
@@ -245,20 +240,22 @@ function confirmOrderReview() {
           </article>
           <article>
             <span>预计权利金</span>
-            <strong>{{ money(String(projectedPremium)) }}</strong>
+            <strong>{{ strategyPreview ? money(strategyPreview.premium) : previewLoading ? '计算中' : '--' }}</strong>
           </article>
           <article>
             <span>保本价</span>
-            <strong>{{ money(String(projectedBreakeven), 'USDT', 0) }}</strong>
+            <strong>{{ strategyPreview ? money(strategyPreview.breakeven, 'USDT', 0) : previewLoading ? '计算中' : '--' }}</strong>
           </article>
         </div>
 
         <div class="order-form">
           <label>
             下单数量（张）
-            <NInputNumber v-model:value="form.quantity" :min="0.01" :step="0.01" />
+            <NInput v-model:value="form.quantity" :input-props="{ inputmode: 'decimal' }" placeholder="至少 0.01" />
           </label>
         </div>
+
+        <NAlert v-if="previewError" type="error">{{ previewError }}</NAlert>
 
         <NButton type="primary" size="large" block :disabled="!canSubmit" :loading="store.isLoading('order')" @click="submit">
           <template #icon><NIcon :component="Zap" /></template>

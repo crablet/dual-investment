@@ -234,21 +234,6 @@ pub(super) fn validate_spot_rebalance(
     Ok(())
 }
 
-/// 判断下单/现货补齐请求是否处于结果不确定状态，需要先查交易所事实再恢复。
-pub(super) fn is_uncertain_submit_error(error: &AppError) -> bool {
-    match error {
-        AppError::Binance(message) => {
-            // 只有明确的请求拒绝才能判定未下单。服务端失败、超时和回报解析失败都需查原单。
-            !message.contains("HTTP 4")
-                || message.contains("HTTP 408")
-                || message.contains("HTTP 429")
-                || message.contains("code -1006")
-                || message.contains("code -1007")
-        }
-        _ => false,
-    }
-}
-
 /// 判断本地订单是否有可用于查询 Binance 的订单引用。
 pub(super) fn has_exchange_order_ref(order: &StrategyOrder) -> bool {
     order

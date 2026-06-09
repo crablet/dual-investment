@@ -7,6 +7,7 @@ mod app_state;
 mod binance;
 mod commands;
 mod domain;
+mod errors;
 mod logs;
 mod persistence;
 mod secrets;
@@ -17,8 +18,8 @@ use commands::{
     adopt_option_positions, clear_log_files, connect_binance, connect_saved_binance,
     finish_settlement_sweep, forget_binance_credentials, get_app_snapshot, get_log_snapshot,
     list_adoptable_option_positions, open_current_log_file, open_log_folder, place_manual_strategy,
-    recover_funding_attempt, recover_order_attempt, resolve_funding_attempt, run_settlement_scan,
-    scan_candidates, sync_live_state,
+    preview_strategy, recover_funding_attempt, recover_order_attempt, resolve_funding_attempt,
+    run_settlement_scan, scan_candidates, sync_live_state,
 };
 use tauri::Manager;
 
@@ -38,6 +39,7 @@ pub fn run() {
             connect_saved_binance,
             forget_binance_credentials,
             scan_candidates,
+            preview_strategy,
             place_manual_strategy,
             recover_order_attempt,
             recover_funding_attempt,

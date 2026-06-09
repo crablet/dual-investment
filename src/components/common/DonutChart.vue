@@ -6,7 +6,6 @@
 <script setup lang="ts">
 import type { PnlBreakdownItem } from '@/types/view'
 import { computed, shallowRef } from 'vue'
-import { sumDecimalStrings } from '@/utils/decimal'
 import {
   absoluteDonutTotal,
   buildDonutSegments,
@@ -16,6 +15,7 @@ import {
 
 const props = defineProps<{
   items: PnlBreakdownItem[]
+  totalValue: string | null
   centerLabel: string
   emptyText: string
 }>()
@@ -37,12 +37,11 @@ const activeSegment = computed(() =>
 
 const activeKey = computed(() => activeSegment.value?.key)
 
-const centerValue = computed(() =>
-  sumDecimalStrings(sortedItems.value.map(item => item.value)),
-)
-
 const centerDisplay = computed(() => {
-  return centerDisplayForSegment(activeSegment.value, props.centerLabel, centerValue.value)
+  if (props.totalValue === null) {
+    return { label: props.centerLabel, value: '--', meta: 'USDT', negative: false }
+  }
+  return centerDisplayForSegment(activeSegment.value, props.centerLabel, props.totalValue)
 })
 
 function setHover(key: string) {
