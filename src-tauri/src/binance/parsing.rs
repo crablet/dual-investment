@@ -271,8 +271,7 @@ fn history_rows<'a>(value: &'a Value, operation: &str) -> AppResult<&'a [Value]>
 
 fn parse_simple_earn_redemption_record(value: &Value) -> AppResult<SimpleEarnRedemptionRecord> {
     Ok(SimpleEarnRedemptionRecord {
-        // 活期赎回请求用 productId，但当前历史响应字段名是 projectId。
-        product_id: string_field(value, "projectId")?,
+        product_id: string_field(value, "productId")?,
         asset: string_field(value, "asset")?,
         amount: decimal_field(value, "amount")?,
         status: string_field(value, "status")?,
