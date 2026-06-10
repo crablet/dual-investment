@@ -79,7 +79,6 @@ function confirm() {
     @after-leave="emit('afterLeave')"
   >
     <section
-      v-if="props.candidate"
       class="order-review-dialog"
       role="dialog"
       aria-modal="true"

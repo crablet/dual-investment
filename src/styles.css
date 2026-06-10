@@ -60,8 +60,7 @@ input {
   height: 100vh;
   padding: 22px 14px;
   border-right: 1px solid var(--line);
-  background: rgba(7, 16, 23, 0.88);
-  backdrop-filter: blur(16px);
+  background: var(--bg);
 }
 
 .nav-list {
