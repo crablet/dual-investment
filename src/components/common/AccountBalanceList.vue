@@ -1,7 +1,7 @@
 <!--
 账户余额聚合列表。
 
-展示 Rust 已聚合的同名资产，hover 展示真实来源数量，并注明缓存时间和查询错误。
+展示 Rust 已聚合的同名资产，hover 展示真实来源数量，并显示查询错误。
 -->
 <script setup lang="ts">
 import type { AccountSnapshot, DecimalString } from '@/types/domain'
@@ -9,7 +9,6 @@ import { NAlert, NTooltip } from 'naive-ui'
 import { computed } from 'vue'
 import { useFormat } from '@/composables/useFormat'
 import { presentAccountBalances } from '@/utils/balances'
-import { localDateTimeLabel } from '@/utils/date'
 import { isZeroDecimalString } from '@/utils/decimal'
 
 const props = withDefaults(defineProps<{
@@ -30,9 +29,8 @@ function valuationText(usdtValue: DecimalString, known: boolean): string {
 
 <template>
   <div class="account-list">
-    <p class="account-snapshot-status">
-      {{ props.account?.updatedAt ? `账户更新于 ${localDateTimeLabel(props.account.updatedAt)}` : '账户数据尚未更新' }}
-      <span v-if="props.account?.unpricedAssetCount"> · {{ props.account.unpricedAssetCount }} 项资产暂无估值</span>
+    <p v-if="props.account?.unpricedAssetCount" class="account-unpriced">
+      {{ props.account.unpricedAssetCount }} 项资产暂无估值
     </p>
     <NAlert v-if="props.account?.error" type="warning" class="account-cache-error">
       账户刷新失败：{{ props.account.error }}
@@ -72,13 +70,13 @@ function valuationText(usdtValue: DecimalString, known: boolean): string {
 </template>
 
 <style scoped>
-.account-snapshot-status,
+.account-unpriced,
 .account-cache-error {
   grid-column: 1 / -1;
   margin: 0 0 8px;
 }
 
-.account-snapshot-status {
+.account-unpriced {
   color: var(--muted);
   font-size: 12px;
 }
