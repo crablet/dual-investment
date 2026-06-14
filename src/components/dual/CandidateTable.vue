@@ -1,7 +1,7 @@
 <!--
 候选机会表格。
 
-组件只展示父级传入的 Binance 实盘候选快照；排序切换和选中操作通过事件交回父级。
+展示父级传入的候选和策略持仓标识；排序切换和选中操作通过事件交回父级。
 -->
 <script setup lang="ts">
 import type {
@@ -14,7 +14,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from '@lucide/vue'
-import { NIcon } from 'naive-ui'
+import { NIcon, NTag } from 'naive-ui'
 import {
   candidateSortColumns,
   daysUntil,
@@ -24,6 +24,7 @@ import { localDateTimeLabel } from '@/utils/date'
 
 const props = defineProps<{
   candidates: StrategyCandidate[]
+  heldOptionSymbols: ReadonlySet<string>
   selectedOptionSymbol?: string
   sortKey: CandidateSortKey
   sortDirection: CandidateSortDirection
@@ -66,7 +67,18 @@ const { money, percent, signedPercent } = useFormat()
       @click="emit('select', candidate)"
     >
       <span>
-        <strong>{{ money(candidate.strike, 'USDT', 0) }}</strong>
+        <span class="opportunity-strike">
+          <strong>{{ money(candidate.strike, 'USDT', 0) }}</strong>
+          <NTag
+            v-if="props.heldOptionSymbols.has(candidate.optionSymbol)"
+            size="small"
+            type="warning"
+            :bordered="false"
+            title="该合约已有进行中的策略持仓"
+          >
+            持仓
+          </NTag>
+        </span>
         <em>
           距现货 {{ signedPercent(candidate.strikeDistancePercent) }}
         </em>
@@ -172,5 +184,16 @@ button.opportunity-row.selected:hover {
   color: var(--muted);
   font-style: normal;
   font-size: 12px;
+}
+
+.opportunity-strike {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.opportunity-strike strong {
+  white-space: nowrap;
 }
 </style>

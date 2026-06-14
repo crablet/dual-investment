@@ -18,7 +18,7 @@ import {
   NInput,
   NInputNumber,
 } from 'naive-ui'
-import { shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
 import OrderProgressPanel from '@/components/common/OrderProgressPanel.vue'
 import CandidateTable from '@/components/dual/CandidateTable.vue'
 import OrderReviewDialog from '@/components/orders/OrderReviewDialog.vue'
@@ -40,6 +40,8 @@ interface ManualOrderReview {
 }
 
 const store = useAppStore()
+// 完整合约代码区分到期日、执行价和 Put/Call，避免把同价的其他合约也标成持仓。
+const heldOptionSymbols = computed(() => new Set(store.runningOrders.map(order => order.optionSymbol)))
 const { money, percent, signedPercent } = useFormat()
 const {
   form,
@@ -198,6 +200,7 @@ function confirmOrderReview() {
 
         <CandidateTable
           :candidates="sortedCandidates"
+          :held-option-symbols="heldOptionSymbols"
           :selected-option-symbol="selectedCandidate?.optionSymbol"
           :sort-key="candidateSortKey"
           :sort-direction="candidateSortDirection"
