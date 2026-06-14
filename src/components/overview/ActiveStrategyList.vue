@@ -30,7 +30,13 @@ function quantityLabel(value: string) {
 </script>
 
 <template>
-  <div v-if="props.orders.length > 0" class="active-strategy-list">
+  <div
+    v-if="props.orders.length > 0"
+    class="active-strategy-list"
+    role="region"
+    aria-label="活跃策略列表"
+    tabindex="0"
+  >
     <article v-for="order in props.orders" :key="order.id" class="active-strategy-row">
       <header class="active-strategy-identity">
         <div class="active-strategy-title">
@@ -80,6 +86,14 @@ function quantityLabel(value: string) {
 .active-strategy-list {
   container-type: inline-size;
   min-width: 0;
+  max-height: clamp(220px, 38vh, 360px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.active-strategy-list:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
 .active-strategy-row {

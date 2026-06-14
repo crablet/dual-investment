@@ -14,8 +14,10 @@ import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 
-// 总览只展示最近几条活跃策略作为入口；完整订单事实仍在订单页和后端快照中。
-const activeStrategies = computed(() => store.runningOrders.slice(0, 4))
+// 按到期时间展示全部活跃策略，不改变共享订单列表的顺序。
+const activeStrategies = computed(() =>
+  [...store.runningOrders].sort((left, right) => new Date(left.expiryAt).getTime() - new Date(right.expiryAt).getTime()),
+)
 </script>
 
 <template>
