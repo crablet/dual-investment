@@ -3,6 +3,7 @@
 // 这些类型不跨 IPC，只服务于组件展示。真实业务事实仍以 `types/domain.ts` 中的
 // Rust 快照类型为准。
 
+import type { LocalizedMessage } from '@/i18n'
 import type {
   DecimalString,
   OrderProgressStage,
@@ -40,9 +41,9 @@ export interface BarListItem {
 /** 手动下单进度步骤展示模型。 */
 export interface OrderProgressStepView {
   id: OrderProgressStage
-  label: string
+  label: LocalizedMessage
   status: OrderProgressStepStatus
-  message?: string
+  message?: LocalizedMessage
 }
 
 /** 手动下单进度展示模型。 */
@@ -53,10 +54,10 @@ export interface OrderProgressView {
   optionSymbol?: string
   exchangeOrderId?: string
   order?: StrategyOrder
-  error?: string
+  error?: LocalizedMessage
 }
 
 export interface OrderProgressNotice {
   type: 'success' | 'error'
-  message: string
+  message: LocalizedMessage
 }

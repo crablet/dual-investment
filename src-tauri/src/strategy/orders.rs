@@ -3,6 +3,8 @@
 //! 本模块把用户请求、Binance 订单回报或当前期权持仓转换成本地 `StrategyOrder`。
 //! 权利金、年化和保本价统一从已保存的成交字段派生，构造、同步和读库展示使用同一口径。
 
+use crate::messages::Message;
+
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use uuid::Uuid;
@@ -43,15 +45,19 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         created_at: opened_at,
         updated_at: now,
         settlement_action: match request.direction {
-            StrategyDirection::SellPut => "若到期低于执行价，自动买入 BTC 补齐换币".to_string(),
-            StrategyDirection::SellCall => "若到期高于执行价，自动卖出 BTC 补齐换币".to_string(),
+            StrategyDirection::SellPut => {
+                crate::msg!("backend.ifExpiryPriceIsBelowStrikeAutomatically")
+            }
+            StrategyDirection::SellCall => {
+                crate::msg!("backend.ifExpiryPriceIsAboveStrikeAutomatically")
+            }
         },
         settlement_price: Decimal::ZERO,
         settled_at: None,
         spot_order_id: None,
         spot_client_order_id: String::new(),
         spot_order_status: String::new(),
-        rebalance_message: String::new(),
+        rebalance_message: Message::default(),
         spot_filled_quantity: Decimal::ZERO,
         spot_avg_price: Decimal::ZERO,
     };
@@ -91,10 +97,10 @@ pub fn order_from_adopted_position(
         updated_at: now,
         settlement_action: match direction {
             StrategyDirection::SellPut => {
-                "接管持仓：若到期低于执行价，自动买入 BTC 补齐换币".to_string()
+                crate::msg!("backend.adoptedPositionIfExpiryPriceIsBelow")
             }
             StrategyDirection::SellCall => {
-                "接管持仓：若到期高于执行价，自动卖出 BTC 补齐换币".to_string()
+                crate::msg!("backend.adoptedPositionIfExpiryPriceIsAbove")
             }
         },
         settlement_price: Decimal::ZERO,
@@ -102,7 +108,7 @@ pub fn order_from_adopted_position(
         spot_order_id: None,
         spot_client_order_id: String::new(),
         spot_order_status: String::new(),
-        rebalance_message: "已从 Binance 当前期权持仓接管，本机继续监控到期结算".to_string(),
+        rebalance_message: crate::msg!("backend.tookOverTheCurrentBinanceOptionPosition"),
         spot_filled_quantity: Decimal::ZERO,
         spot_avg_price: Decimal::ZERO,
     };

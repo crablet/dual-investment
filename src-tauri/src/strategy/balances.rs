@@ -37,7 +37,7 @@ pub fn account_snapshot_from_balances(balances: Vec<BalanceRow>) -> AccountSnaps
     for mut balance in balances {
         let asset = balance.asset.trim().to_ascii_uppercase();
         balance.asset.clone_from(&asset);
-        if asset == "USDT" && balance.source == "期权保证金" {
+        if asset == "USDT" && balance.source == "optionMargin" {
             available_margin += balance.free;
         }
         grouped.entry(asset).or_default().push(balance);
@@ -116,7 +116,7 @@ pub fn build_balances(
             };
             BalanceRow {
                 asset: asset.asset.clone(),
-                source: "期权保证金".to_string(),
+                source: "optionMargin".to_string(),
                 free: asset.available,
                 locked: (asset.margin_balance - asset.available).max(Decimal::ZERO),
                 usdt_value: valuation.usdt_value,
@@ -148,7 +148,7 @@ pub fn build_spot_balances(
             let valuation = asset_usdt_value(&asset.asset, asset.free + asset.locked, spot_prices);
             BalanceRow {
                 asset: asset.asset.clone(),
-                source: "现货".to_string(),
+                source: "spot".to_string(),
                 free: asset.free,
                 locked: asset.locked,
                 usdt_value: valuation.usdt_value,

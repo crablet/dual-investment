@@ -5,11 +5,13 @@
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
+
 import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import EventCalendarBoard from '@/components/common/EventCalendarBoard.vue'
 import MetricCard from '@/components/common/MetricCard.vue'
 import Panel from '@/components/common/Panel.vue'
 import ActiveStrategyList from '@/components/overview/ActiveStrategyList.vue'
+import { t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
@@ -24,15 +26,15 @@ const activeStrategies = computed(() =>
   <div class="view-grid">
     <MetricCard v-for="metric in store.metrics" :key="metric.id" :metric="metric" />
 
-    <Panel title="账户概览" class="span-6">
+    <Panel :title="t('ui.accountOverview')" class="span-6">
       <AccountBalanceList :account="store.account" />
     </Panel>
 
-    <Panel title="活跃策略" class="span-6">
+    <Panel :title="t('ui.activeStrategies2')" class="span-6">
       <ActiveStrategyList :orders="activeStrategies" />
     </Panel>
 
-    <Panel title="事件日历看板" class="span-12">
+    <Panel :title="t('ui.eventCalendar')" class="span-12">
       <EventCalendarBoard />
     </Panel>
   </div>

@@ -3,6 +3,7 @@
 // 这里是前端唯一的跨页面状态源：保存 Tauri 快照、请求 loading/error、当前视图，以及
 // 从快照派生出的总览指标。真实业务计算仍以 Rust 返回的快照为准，前端只做展示层派生。
 
+import type { LocalizedMessage } from '@/i18n'
 import type {
   AdoptableOptionPositionView,
   AdoptOptionPositionsRequest,
@@ -22,6 +23,7 @@ import type {
 } from '@/types/view'
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
+import { message as localized, messageText, t } from '@/i18n'
 import { api, commandError } from '@/services/api'
 import { buildMetrics } from '@/stores/appMetrics'
 import {
@@ -90,8 +92,8 @@ export const useAppStore = defineStore('app', () => {
   const snapshot = shallowRef<AppSnapshot>()
   const pending = shallowRef(emptyPending())
   const foregroundPending = shallowRef(0)
-  const error = shallowRef<string>()
-  const backgroundError = shallowRef<string>()
+  const error = shallowRef<LocalizedMessage>()
+  const backgroundError = shallowRef<LocalizedMessage>()
   const activeView = shallowRef<AppViewId>('overview')
   const orderProgress = shallowRef<OrderProgressView>()
   const orderNotice = shallowRef<OrderProgressNotice>()
@@ -100,7 +102,7 @@ export const useAppStore = defineStore('app', () => {
   const autoReconnectState = shallowRef<AutoReconnectState>('idle')
   const autoReconnectAttempts = shallowRef(0)
   const autoReconnectDelayMs = shallowRef(reconnectBackoffDelays[0])
-  const lastAutoReconnectError = shallowRef<string>()
+  const lastAutoReconnectError = shallowRef<LocalizedMessage>()
   let snapshotRequestId = 0
 
   const loading = computed(() => foregroundPending.value > 0)
@@ -138,15 +140,15 @@ export const useAppStore = defineStore('app', () => {
       return undefined
     }
     if (autoReconnectState.value === 'connecting') {
-      return '正在使用已保存凭据自动连接 Binance'
+      return t('ui.automaticallyConnectingToBinanceWithSavedCredentials')
     }
     if (autoReconnectState.value === 'paused') {
-      return `自动重连已暂停：${lastAutoReconnectError.value ?? '请检查已保存凭据和 Binance API 权限'}`
+      return t('ui.automaticReconnectionPaused', { p0: messageText(lastAutoReconnectError.value ?? localized('ui.checkSavedCredentialsAndBinanceApiPermissions')) })
     }
     if (lastAutoReconnectError.value) {
-      return `自动重连将在约 ${formatReconnectDelay(autoReconnectDelayMs.value)} 后再次尝试。上次失败：${lastAutoReconnectError.value}`
+      return t('ui.automaticReconnectionWillRetryInAboutLast', { p0: formatReconnectDelay(autoReconnectDelayMs.value), p1: messageText(lastAutoReconnectError.value) })
     }
-    return '检测到已保存凭据，后台会自动尝试连接 Binance'
+    return t('ui.savedCredentialsFoundBinanceConnectionWillBe')
   })
 
   async function run<T>(
@@ -266,7 +268,7 @@ export const useAppStore = defineStore('app', () => {
         ...step,
         status,
         message: step.id === 'persist'
-          ? `订单已保存，交易所状态 ${order.exchangeStatus}`
+          ? localized('ui.orderSavedExchangeStatus', { p0: order.exchangeStatus })
           : step.message ?? orderProgressSuccessMessages[step.id],
       }
     })
@@ -281,17 +283,17 @@ export const useAppStore = defineStore('app', () => {
     }
     orderNotice.value = {
       type: 'success',
-      message: `订单已创建，交易所状态 ${order.exchangeStatus}`,
+      message: localized('ui.orderCreatedExchangeStatus', { p0: order.exchangeStatus }),
     }
   }
 
-  function finishOrderProgressError(flowId: string, message: string) {
+  function finishOrderProgressError(flowId: string, message: LocalizedMessage) {
     const current = orderProgress.value?.flowId === flowId
       ? orderProgress.value
       : {
           flowId,
           status: 'running' as OrderProgressStatus,
-          steps: createOrderProgressSteps('validate', 'running', '正在提交下单请求'),
+          steps: createOrderProgressSteps('validate', 'running', localized('ui.submittingOrderRequest')),
         }
     const hasErrorStep = current.steps.some(step => step.status === 'error')
     const steps = hasErrorStep
@@ -365,7 +367,7 @@ export const useAppStore = defineStore('app', () => {
       return true
     }
     if (options.autoReconnect && autoReconnectState.value === 'connecting') {
-      lastAutoReconnectError.value = '连接没有返回成功状态，请手动检查连接'
+      lastAutoReconnectError.value = localized('ui.connectionDidNotReturnASuccessfulStatus')
       autoReconnectState.value = 'paused'
     }
     await refresh({ silent: true })
@@ -478,7 +480,7 @@ export const useAppStore = defineStore('app', () => {
     if (orders) {
       adoptableOptionPositions.value = adoptableOptionPositions.value.map(row =>
         request.symbols.includes(row.symbol)
-          ? { ...row, adoptable: false, alreadyTracked: true, reason: '本地已有跟踪记录' }
+          ? { ...row, adoptable: false, alreadyTracked: true, reason: localized('ui.alreadyTrackedLocally') }
           : row,
       )
     }
@@ -495,7 +497,7 @@ export const useAppStore = defineStore('app', () => {
       await refresh({ silent: true })
       return
     }
-    finishOrderProgressError(flowId, error.value ?? '下单失败，请查看错误提示和恢复记录')
+    finishOrderProgressError(flowId, error.value ?? localized('ui.orderFailedCheckTheErrorAndRecovery2'))
     // 下单失败后的静默刷新用于暴露后端保存的恢复记录；不在前端重试真实订单。
     await refresh({ silent: true })
   }

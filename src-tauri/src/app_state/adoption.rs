@@ -3,6 +3,8 @@
 //! 接管只允许从 Binance 当前义务仓和合约信息创建本地跟踪订单，不会重放历史下单，
 //! 也不会把接管状态混入 `order_attempts` 恢复记录。
 
+use crate::messages::Message;
+
 use std::collections::HashSet;
 
 use chrono::Utc;
@@ -26,7 +28,9 @@ pub(super) fn normalized_unique_symbols(symbols: &[String]) -> AppResult<Vec<Str
         }
     }
     if normalized.is_empty() {
-        return Err(AppError::Config("请选择需要接管的期权持仓".to_string()));
+        return Err(AppError::Config(crate::msg!(
+            "backend.selectOptionPositionsToTakeOver"
+        )));
     }
     Ok(normalized)
 }
@@ -67,9 +71,10 @@ pub(super) fn ensure_position_can_be_adopted(
     if adoptable {
         Ok(())
     } else {
-        Err(AppError::RiskRejected(format!(
-            "{} 不能接管：{}",
-            position.symbol, reason
+        Err(AppError::RiskRejected(crate::msg!(
+            "backend.cannotTakeOver",
+            p0 = position.symbol,
+            p1 = reason
         )))
     }
 }
@@ -79,26 +84,32 @@ pub(super) fn adoptable_position_state(
     position: &OptionPosition,
     contract: &OptionContract,
     already_tracked: bool,
-) -> (bool, String) {
+) -> (bool, Message) {
     if already_tracked {
-        return (false, "本地已有跟踪记录".to_string());
+        return (false, crate::msg!("backend.alreadyTrackedLocally"));
     }
     if contract.underlying != "BTCUSDT" {
-        return (false, "仅支持 BTC/USDT 期权".to_string());
+        return (false, crate::msg!("backend.onlyBtcUsdtOptionsAreSupported"));
     }
     if !is_short_position(position) {
-        return (false, "仅支持接管卖出期权义务仓".to_string());
+        return (
+            false,
+            crate::msg!("backend.onlyShortOptionObligationsCanBeTaken"),
+        );
     }
     if position.quantity <= Decimal::ZERO {
-        return (false, "持仓数量为 0".to_string());
+        return (false, crate::msg!("backend.positionQuantityIsZero"));
     }
     if position.entry_price <= Decimal::ZERO {
-        return (false, "Binance 持仓缺少有效入场价".to_string());
+        return (
+            false,
+            crate::msg!("backend.binancePositionHasNoValidEntryPrice"),
+        );
     }
     if Utc::now() >= contract.expiry_at {
-        return (false, "期权已到期".to_string());
+        return (false, crate::msg!("backend.optionHasExpired"));
     }
-    (true, "可接管".to_string())
+    (true, crate::msg!("backend.availableToTakeOver"))
 }
 
 /// 判断同一合约是否已经存在未终态的本地跟踪订单。
@@ -120,8 +131,9 @@ pub(super) fn direction_from_contract(contract: &OptionContract) -> AppResult<St
     match contract.side.as_str() {
         "PUT" => Ok(StrategyDirection::SellPut),
         "CALL" => Ok(StrategyDirection::SellCall),
-        side => Err(AppError::RiskRejected(format!(
-            "不支持的 Binance 期权方向：{side}"
+        side => Err(AppError::RiskRejected(crate::msg!(
+            "backend.unsupportedBinanceOptionSide",
+            p0 = side
         ))),
     }
 }

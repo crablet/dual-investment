@@ -3,8 +3,10 @@
 // Rust 策略层已经完成实盘合约过滤和方向硬约束；这个 composable 只负责
 // 页面上的方向切换、到期/年化筛选、稳定排序、默认选中和下单卡片的预览状态。
 
+import type { LocalizedMessage } from '@/i18n'
 import type { StrategyCandidate, StrategyDirection, StrategyPreview } from '@/types/domain'
 import { computed, reactive, shallowRef, watch } from 'vue'
+import { t } from '@/i18n'
 import { api, commandError } from '@/services/api'
 import { useAppStore } from '@/stores/app'
 import { compareDecimalStrings, isPositiveDecimalString } from '@/utils/decimal'
@@ -22,20 +24,20 @@ export type CandidateSortDirection = 'asc' | 'desc'
 const dayMs = 86_400_000
 
 export const expiryFilters = [
-  { id: 'all', label: '所有到期日' },
-  { id: 'lt3', label: '< 3 天' },
-  { id: 'lt7', label: '< 7 天' },
-  { id: 'd7_30', label: '7-30 天' },
-  { id: 'd30_60', label: '30-60 天' },
-  { id: 'gt60', label: '> 60 天' },
+  { id: 'all', get label() { return t('ui.allExpiries') } },
+  { id: 'lt3', get label() { return t('ui.days3') } },
+  { id: 'lt7', get label() { return t('ui.days4') } },
+  { id: 'd7_30', get label() { return t('ui.days5') } },
+  { id: 'd30_60', get label() { return t('ui.days6') } },
+  { id: 'gt60', get label() { return t('ui.days7') } },
 ] as const
 
 export const candidateSortColumns: Array<{ key: CandidateSortKey, label: string }> = [
-  { key: 'strike', label: '目标价' },
-  { key: 'annualized', label: '年化' },
-  { key: 'expiry', label: '到期' },
-  { key: 'limitPrice', label: '当前价格' },
-  { key: 'exerciseProbability', label: '被行权概率' },
+  { key: 'strike', get label() { return t('ui.targetPrice') } },
+  { key: 'annualized', get label() { return t('ui.annualizedReturn') } },
+  { key: 'expiry', get label() { return t('ui.expiry') } },
+  { key: 'limitPrice', get label() { return t('ui.currentPrice') } },
+  { key: 'exerciseProbability', get label() { return t('ui.exerciseProbability') } },
 ]
 
 const candidateSortDefaultDirection: Record<CandidateSortKey, CandidateSortDirection> = {
@@ -105,15 +107,15 @@ export function useDualInvestmentCandidates() {
   }))
 
   const panelTitle = computed(() =>
-    form.direction === 'sellPut' ? '以 USDT 低买 BTC' : '以 BTC 高卖 BTC',
+    form.direction === 'sellPut' ? t('ui.buyBtcLowWithUsdt') : t('ui.sellBtcHigh'),
   )
 
   const activeDirectionLabel = computed(() =>
-    form.direction === 'sellPut' ? '低买' : '高卖',
+    form.direction === 'sellPut' ? t('ui.buyLow') : t('ui.sellHigh'),
   )
 
   const otherDirectionLabel = computed(() =>
-    form.direction === 'sellPut' ? '高卖' : '低买',
+    form.direction === 'sellPut' ? t('ui.sellHigh') : t('ui.buyLow'),
   )
 
   const activeOptionType = computed(() =>
@@ -130,29 +132,29 @@ export function useDualInvestmentCandidates() {
 
   const emptyCandidateTitle = computed(() => {
     if (store.candidates.length === 0)
-      return '暂无候选'
+      return t('ui.noCandidates')
     if (activeCandidateFilterCount.value > 0)
-      return '当前筛选没有候选'
+      return t('ui.noCandidatesMatchTheseFilters')
     if (currentDirectionCandidateCount.value > 0)
-      return '当前到期日没有候选'
-    return `暂无${activeDirectionLabel.value}（${activeOptionType.value}）候选`
+      return t('ui.noCandidatesForThisExpiry')
+    return t('ui.noCandidates2', { p0: activeDirectionLabel.value, p1: activeOptionType.value })
   })
 
   const emptyCandidateHint = computed(() => {
     if (store.candidates.length === 0)
-      return '当前还没有候选，请先重新扫描。'
+      return t('ui.noCandidatesYetRunANewScan')
     if (activeCandidateFilterCount.value > 0) {
-      return '可以放宽年化、被行权概率或距现货筛选，也可以一键重置筛选条件。'
+      return t('ui.relaxTheAnnualizedReturnExerciseProbabilityOr')
     }
     if (currentDirectionCandidateCount.value === 0 && otherDirectionCandidateCount.value > 0) {
-      return `本次扫描只有${otherDirectionLabel.value}候选，当前没有${activeDirectionLabel.value}候选。可以切换到${otherDirectionLabel.value}查看。`
+      return t('ui.thisScanOnlyFoundCandidatesNoCandidates', { p0: otherDirectionLabel.value, p1: activeDirectionLabel.value, p2: otherDirectionLabel.value })
     }
-    return '当前到期日筛选没有命中；候选浏览范围为 1-90 天，可以切换到所有到期日，或重新扫描候选。'
+    return t('ui.noMatchesForThisExpiryFilterCandidates')
   })
 
   const strategyPreview = shallowRef<StrategyPreview>()
   const previewLoading = shallowRef(false)
-  const previewError = shallowRef<string>()
+  const previewError = shallowRef<LocalizedMessage>()
 
   // 输入变化时立即清空预览并使旧请求失效；卸载时 Vue 同样执行清理。
   watch([

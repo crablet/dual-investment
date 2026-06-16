@@ -5,7 +5,9 @@
 -->
 <script setup lang="ts">
 import type { PnlBreakdownItem } from '@/types/view'
+
 import { computed, shallowRef } from 'vue'
+import { t } from '@/i18n'
 import {
   absoluteDonutTotal,
   buildDonutSegments,
@@ -60,7 +62,7 @@ function isActive(key: string) {
 
 <template>
   <div class="donut-wrap">
-    <svg class="donut" viewBox="0 0 42 42" role="group" aria-label="构成环形图">
+    <svg class="donut" viewBox="0 0 42 42" role="group" :aria-label="t('ui.compositionChart')">
       <circle class="donut-bg" cx="21" cy="21" r="15.915" />
       <circle
         v-for="item in segments"

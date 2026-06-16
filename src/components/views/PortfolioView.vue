@@ -5,12 +5,14 @@
 -->
 <script setup lang="ts">
 import type { PnlBreakdownItem } from '@/types/view'
+
 import { NTooltip } from 'naive-ui'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
 import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
+import { t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import { presentAccountBalances } from '@/utils/balances'
 import { localDateTimeLabel } from '@/utils/date'
@@ -61,57 +63,57 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
 
 <template>
   <div class="view-grid">
-    <Panel title="账户概览" class="span-4">
-      <AccountBalanceList :account="store.account" class="large" empty-text="暂无持仓" />
+    <Panel :title="t('ui.accountOverview')" class="span-4">
+      <AccountBalanceList :account="store.account" class="large" :empty-text="t('ui.noPositions')" />
     </Panel>
 
-    <Panel title="义务仓概览" class="span-4">
+    <Panel :title="t('ui.shortOptionObligations')" class="span-4">
       <div class="obligation-list">
         <article>
-          <strong>卖出看跌义务仓</strong>
-          <span>{{ store.portfolio?.putCount ?? 0 }} 个 · {{ store.portfolio ? decimal(store.portfolio.putQuantity) : '--' }} BTC</span>
-          <em>已成交名义本金 {{ store.portfolio ? money(store.portfolio.putNotional) : '--' }}</em>
+          <strong> {{ t('ui.shortPutPositions') }} </strong>
+          <span>{{ store.portfolio?.putCount ?? 0 }} {{ t('ui.positions') }} {{ store.portfolio ? decimal(store.portfolio.putQuantity) : '--' }} BTC</span>
+          <em> {{ t('ui.filledNotionalPrincipal') }} {{ store.portfolio ? money(store.portfolio.putNotional) : '--' }}</em>
         </article>
         <article>
-          <strong>卖出看涨义务仓</strong>
-          <span>{{ store.portfolio?.callCount ?? 0 }} 个</span>
-          <em>已成交数量 {{ store.portfolio ? decimal(store.portfolio.callQuantity) : '--' }} BTC</em>
+          <strong> {{ t('ui.shortCallPositions') }} </strong>
+          <span>{{ store.portfolio?.callCount ?? 0 }} {{ t('ui.positions2') }} </span>
+          <em> {{ t('ui.filledQuantity2') }} {{ store.portfolio ? decimal(store.portfolio.callQuantity) : '--' }} BTC</em>
         </article>
       </div>
     </Panel>
 
-    <Panel title="资金与保证金" class="span-4">
+    <Panel :title="t('ui.fundsMargin')" class="span-4">
       <DonutChart
         :items="balanceBreakdown"
         :total-value="store.account?.updatedAt ? store.account.totalUsdtValue : null"
-        center-label="资产估值"
-        empty-text="暂无可估值资产"
+        :center-label="t('ui.assetValuation')"
+        :empty-text="t('ui.noValuedAssets')"
       />
     </Panel>
 
-    <Panel title="持仓明细" class="span-8">
+    <Panel :title="t('ui.positionDetails')" class="span-8">
       <div class="table-wrap">
         <table class="data-table">
           <thead>
             <tr>
-              <th>标的</th>
-              <th>持仓类型</th>
-              <th>数量</th>
-              <th>均价/执行价</th>
-              <th>到期日</th>
-              <th>已收权利金</th>
-              <th>状态</th>
+              <th> {{ t('ui.underlying') }} </th>
+              <th> {{ t('ui.positionType') }} </th>
+              <th> {{ t('ui.quantity') }} </th>
+              <th> {{ t('ui.averageStrikePrice') }} </th>
+              <th> {{ t('ui.expiryDate') }} </th>
+              <th> {{ t('ui.premiumReceived') }} </th>
+              <th> {{ t('ui.status') }} </th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="order in obligationOrders" :key="order.id">
               <td>BTC</td>
-              <td>{{ order.direction === 'sellPut' ? '卖出看跌（义务）' : '卖出看涨（义务）' }}</td>
+              <td>{{ order.direction === 'sellPut' ? t('ui.shortPutObligation') : t('ui.shortCallObligation') }}</td>
               <td>{{ decimal(order.filledQuantity) }} BTC</td>
               <td>{{ money(order.strike, 'USDT', 0) }}</td>
               <td>{{ localDateTimeLabel(order.expiryAt) }}</td>
               <td class="positive">{{ money(order.premium) }}</td>
-              <td>{{ order.status === 'partiallyFilled' ? '部分成交' : '运行中' }}</td>
+              <td>{{ order.status === 'partiallyFilled' ? t('ui.partiallyFilled') : t('ui.running') }}</td>
             </tr>
             <tr
               v-for="balance in balances"
@@ -128,13 +130,11 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
                   <div class="balance-tooltip">
                     <div v-for="detail in balance.details" :key="detail.key" class="balance-tooltip-row">
                       <strong>{{ detail.source }} {{ detail.asset }}</strong>
-                      <span>
-                        数量 {{ decimal(detail.free) }}
-                        <template v-if="decimalStringHasValue(detail.locked)">
-                          / 锁定 {{ decimal(detail.locked) }}
+                      <span> {{ t('ui.quantity') }} {{ decimal(detail.free) }}
+                        <template v-if="decimalStringHasValue(detail.locked)"> {{ t('ui.locked') }} {{ decimal(detail.locked) }}
                         </template>
                       </span>
-                      <em>估值 {{ detail.usdtValueKnown ? money(detail.usdtValue) : '暂无估值' }}</em>
+                      <em> {{ t('ui.value') }} {{ detail.usdtValueKnown ? money(detail.usdtValue) : t('ui.noValuation') }}</em>
                     </div>
                   </div>
                 </NTooltip>
@@ -142,27 +142,26 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
               </td>
               <td>
                 {{ decimal(balance.free) }}
-                <span v-if="decimalStringHasValue(balance.locked)" class="locked-quantity">
-                  / 锁定 {{ decimal(balance.locked) }}
+                <span v-if="decimalStringHasValue(balance.locked)" class="locked-quantity"> {{ t('ui.locked') }} {{ decimal(balance.locked) }}
                 </span>
               </td>
               <td>--</td>
               <td>--</td>
               <td>--</td>
-              <td>持有中</td>
+              <td> {{ t('ui.holding') }} </td>
             </tr>
           </tbody>
         </table>
-        <p v-if="obligationOrders.length === 0 && balances.length === 0" class="empty-state">暂无持仓明细</p>
+        <p v-if="obligationOrders.length === 0 && balances.length === 0" class="empty-state"> {{ t('ui.noPositionDetails') }} </p>
       </div>
     </Panel>
 
-    <Panel title="到期日历" class="span-4">
+    <Panel :title="t('ui.expiryCalendar')" class="span-4">
       <div class="calendar-list">
-        <p v-if="upcomingExpiryOrders.length === 0" class="empty-state">暂无未到期订单</p>
+        <p v-if="upcomingExpiryOrders.length === 0" class="empty-state"> {{ t('ui.noUnexpiredOrders') }} </p>
         <article v-for="order in upcomingExpiryOrders" :key="order.id">
           <strong>{{ localDateTimeLabel(order.expiryAt) }}</strong>
-          <span>{{ order.direction === 'sellPut' ? '卖出看跌' : '卖出看涨' }}</span>
+          <span>{{ order.direction === 'sellPut' ? t('ui.sellPut2') : t('ui.sellCall2') }}</span>
           <em>{{ order.filledQuantity }} BTC</em>
         </article>
       </div>

@@ -5,9 +5,11 @@
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
+
 import BarList from '@/components/common/BarList.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
+import { t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import { relativeBarWidth } from '@/utils/bars'
 import { localDateKey } from '@/utils/date'
@@ -33,28 +35,28 @@ const strategyPerformance = computed(() => {
 
 <template>
   <div class="view-grid">
-    <Panel title="收益汇总" class="span-6">
+    <Panel :title="t('ui.returnsSummary')" class="span-6">
       <div v-if="store.pnl" class="summary-cards pnl-summary-cards">
-        <article><span>累计收益</span><strong>{{ money(store.pnl.cumulative) }}</strong></article>
-        <article><span>累计权利金</span><strong>{{ money(store.pnl.optionPremium) }}</strong></article>
-        <article><span>补齐 BTC 浮动盈亏</span><strong>{{ money(store.pnl.floatingSpot) }}</strong></article>
+        <article><span> {{ t('ui.cumulativeReturns') }} </span><strong>{{ money(store.pnl.cumulative) }}</strong></article>
+        <article><span> {{ t('ui.totalPremium') }} </span><strong>{{ money(store.pnl.optionPremium) }}</strong></article>
+        <article><span> {{ t('ui.unrealizedPLOnRebalancedBtc') }} </span><strong>{{ money(store.pnl.floatingSpot) }}</strong></article>
       </div>
     </Panel>
 
-    <Panel title="策略绩效对比" class="span-6">
+    <Panel :title="t('ui.strategyPerformance')" class="span-6">
       <BarList :items="strategyPerformance" />
     </Panel>
 
-    <Panel title="收益明细" class="span-12">
+    <Panel :title="t('ui.returnsDetails')" class="span-12">
       <div class="table-wrap">
         <table class="data-table">
           <thead>
             <tr>
-              <th>日期</th>
-              <th>策略</th>
-              <th>收益金额</th>
-              <th>年化</th>
-              <th>备注</th>
+              <th> {{ t('ui.date') }} </th>
+              <th> {{ t('ui.strategy') }} </th>
+              <th> {{ t('ui.returnAmount') }} </th>
+              <th> {{ t('ui.annualizedReturn') }} </th>
+              <th> {{ t('ui.notes') }} </th>
             </tr>
           </thead>
           <tbody>
@@ -63,11 +65,11 @@ const strategyPerformance = computed(() => {
               <td>{{ directionText(order.direction) }}</td>
               <td class="positive">{{ money(order.premium) }}</td>
               <td>{{ percent(order.annualized) }}</td>
-              <td>{{ order.optionSymbol }} 收取权利金</td>
+              <td>{{ order.optionSymbol }} {{ t('ui.premiumReceived2') }} </td>
             </tr>
           </tbody>
         </table>
-        <p v-if="store.orders.length === 0" class="empty-state">暂无收益明细</p>
+        <p v-if="store.orders.length === 0" class="empty-state"> {{ t('ui.noReturnsToDisplay') }} </p>
       </div>
     </Panel>
   </div>

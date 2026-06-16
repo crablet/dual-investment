@@ -3,6 +3,7 @@
 // 这些函数只用于 UI 格式化；金额、数量和收益计算都由 Rust Decimal 完成。
 
 import type { StrategyDirection, StrategyStatus } from '@/types/domain'
+import { formatLocale } from '@/i18n'
 import { decimalStringToDisplayNumber } from '@/utils/decimal'
 import {
   directionTextMap,
@@ -11,39 +12,43 @@ import {
   statusToneMap,
 } from '@/utils/labels'
 
-const decimalFormatter = new Intl.NumberFormat('zh-CN', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
+function decimalFormatter() {
+  return new Intl.NumberFormat(formatLocale(), {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
 
-const moneyFormatters = new Map<number, Intl.NumberFormat>()
-const percentFormatters = new Map<number, Intl.NumberFormat>()
+const moneyFormatters = new Map<string, Intl.NumberFormat>()
+const percentFormatters = new Map<string, Intl.NumberFormat>()
 
 /** 按小数位数缓存金额 formatter，候选当前价格可按合约价格步长展示为整数。 */
 function moneyFormatter(digits: number) {
-  const cached = moneyFormatters.get(digits)
+  const key = `${formatLocale()}:${digits}`
+  const cached = moneyFormatters.get(key)
   if (cached) {
     return cached
   }
-  const formatter = new Intl.NumberFormat('zh-CN', {
+  const formatter = new Intl.NumberFormat(formatLocale(), {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   })
-  moneyFormatters.set(digits, formatter)
+  moneyFormatters.set(key, formatter)
   return formatter
 }
 
 /** 按小数位数缓存百分比 formatter，避免组件重复创建 Intl 对象。 */
 function percentFormatter(digits: number) {
-  const cached = percentFormatters.get(digits)
+  const key = `${formatLocale()}:${digits}`
+  const cached = percentFormatters.get(key)
   if (cached) {
     return cached
   }
-  const formatter = new Intl.NumberFormat('zh-CN', {
+  const formatter = new Intl.NumberFormat(formatLocale(), {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   })
-  percentFormatters.set(digits, formatter)
+  percentFormatters.set(key, formatter)
   return formatter
 }
 
@@ -54,7 +59,7 @@ export function useFormat() {
     `${moneyFormatter(digits).format(toDisplayNumber(value))} ${currency}`
 
   const decimal = (value: string | number) =>
-    decimalFormatter.format(toDisplayNumber(value))
+    decimalFormatter().format(toDisplayNumber(value))
 
   const percent = (value: string | number, digits = 2) =>
     `${percentFormatter(digits).format(toDisplayNumber(value))}%`

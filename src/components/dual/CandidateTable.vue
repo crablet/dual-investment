@@ -8,6 +8,7 @@ import type {
   CandidateSortDirection,
   CandidateSortKey,
 } from '@/composables/useDualInvestmentCandidates'
+
 import type { StrategyCandidate } from '@/types/domain'
 import {
   ArrowUpDown,
@@ -20,6 +21,7 @@ import {
   daysUntil,
 } from '@/composables/useDualInvestmentCandidates'
 import { useFormat } from '@/composables/useFormat'
+import { t } from '@/i18n'
 import { localDateTimeLabel } from '@/utils/date'
 
 const props = defineProps<{
@@ -74,19 +76,16 @@ const { money, percent, signedPercent } = useFormat()
             size="small"
             type="warning"
             :bordered="false"
-            title="该合约已有进行中的策略持仓"
-          >
-            持仓
-          </NTag>
+            :title="t('ui.thisContractAlreadyHasAnActiveStrategy')"
+          > {{ t('ui.position') }} </NTag>
         </span>
-        <em>
-          距现货 {{ signedPercent(candidate.strikeDistancePercent) }}
+        <em> {{ t('ui.fromSpot') }} {{ signedPercent(candidate.strikeDistancePercent) }}
         </em>
       </span>
       <span class="positive">{{ percent(candidate.annualized) }}</span>
       <span>
         <strong>{{ localDateTimeLabel(candidate.expiryAt) }}</strong>
-        <em>{{ daysUntil(candidate.expiryAt) }} 天</em>
+        <em>{{ daysUntil(candidate.expiryAt) }} {{ t('ui.days') }} </em>
       </span>
       <span>{{ money(candidate.limitPrice, 'USDT', 0) }}</span>
       <span>{{ percent(candidate.exerciseProbability) }}</span>

@@ -2,6 +2,8 @@
 //!
 //! 事件只用于前端交互反馈，内容必须是脱敏摘要，不能作为订单或资金事实来源。
 
+use crate::messages::Message;
+
 use tauri::{AppHandle, Emitter};
 
 use crate::domain::{OrderProgressEvent, OrderProgressStage, OrderProgressStatus, StrategyRequest};
@@ -27,7 +29,7 @@ impl OrderProgressEmitter {
         &self,
         stage: OrderProgressStage,
         status: OrderProgressStatus,
-        message: impl Into<String>,
+        message: Message,
         option_symbol: Option<&str>,
         exchange_order_id: Option<&str>,
     ) {
@@ -35,7 +37,7 @@ impl OrderProgressEmitter {
             flow_id: self.flow_id.clone(),
             stage,
             status,
-            message: message.into(),
+            message,
             option_symbol: option_symbol.map(str::to_string),
             exchange_order_id: exchange_order_id.map(str::to_string),
         };

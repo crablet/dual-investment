@@ -9,6 +9,7 @@ mod commands;
 mod domain;
 mod errors;
 mod logs;
+mod messages;
 mod persistence;
 mod secrets;
 mod strategy;

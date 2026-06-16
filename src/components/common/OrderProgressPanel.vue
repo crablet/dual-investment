@@ -5,6 +5,7 @@
 -->
 <script setup lang="ts">
 import type { OrderProgressStepView, OrderProgressView } from '@/types/view'
+
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,6 +17,7 @@ import {
 import { NButton, NIcon, NTag } from 'naive-ui'
 import { computed } from 'vue'
 import { useFormat } from '@/composables/useFormat'
+import { messageText, t } from '@/i18n'
 
 const props = defineProps<{
   progress?: OrderProgressView
@@ -30,12 +32,12 @@ const { money } = useFormat()
 
 const statusText = computed(() => {
   if (!props.progress)
-    return '待下单'
+    return t('ui.readyToSubmit')
   if (props.progress.status === 'success')
-    return '已完成'
+    return t('ui.completed')
   if (props.progress.status === 'error')
-    return '失败'
-  return '进行中'
+    return t('ui.failed')
+  return t('ui.inProgress')
 })
 
 const statusTone = computed(() => {
@@ -61,12 +63,12 @@ function stepIcon(step: OrderProgressStepView) {
   <section v-if="progress" class="order-progress-panel" role="status" aria-live="polite">
     <header>
       <div>
-        <span>下单进度</span>
-        <strong>{{ progress.optionSymbol ?? '等待合约' }}</strong>
+        <span> {{ t('ui.orderProgress') }} </span>
+        <strong>{{ progress.optionSymbol ?? t('ui.waitingForContract') }}</strong>
       </div>
       <div class="order-progress-actions">
         <NTag :type="statusTone" size="small">{{ statusText }}</NTag>
-        <NButton size="tiny" quaternary circle title="关闭进度" @click="emit('close')">
+        <NButton size="tiny" quaternary circle :title="t('ui.closeProgress')" @click="emit('close')">
           <template #icon><NIcon :component="X" /></template>
         </NButton>
       </div>
@@ -80,28 +82,26 @@ function stepIcon(step: OrderProgressStepView) {
       >
         <NIcon :component="stepIcon(step)" />
         <div>
-          <strong>{{ step.label }}</strong>
-          <span>{{ step.message ?? '等待执行' }}</span>
+          <strong>{{ messageText(step.label) }}</strong>
+          <span>{{ messageText(step.message) || t('ui.waiting') }}</span>
         </div>
       </li>
     </ol>
 
     <div v-if="progress.status === 'success' && progress.order" class="order-progress-result success">
-      <strong>订单已创建</strong>
-      <span>
-        成交 {{ progress.order.filledQuantity }} / {{ progress.order.quantity }} 张，
-        均价 {{ money(progress.order.avgPrice) }}，权利金 {{ money(progress.order.premium) }}
+      <strong> {{ t('ui.orderCreated') }} </strong>
+      <span> {{ t('ui.filled') }} {{ progress.order.filledQuantity }} / {{ progress.order.quantity }} {{ t('ui.contractsAveragePrice') }} {{ money(progress.order.avgPrice) }} {{ t('ui.premium') }} {{ money(progress.order.premium) }}
       </span>
     </div>
 
     <div v-else-if="progress.status === 'error'" class="order-progress-result error">
       <NIcon :component="AlertTriangle" />
-      <span>{{ progress.error ?? '下单失败，请查看错误提示和恢复记录。' }}</span>
+      <span>{{ messageText(progress.error) || t('ui.orderFailedCheckTheErrorAndRecovery') }}</span>
     </div>
 
     <div class="order-progress-footer">
-      <span v-if="progress.exchangeOrderId">交易所订单号 {{ progress.exchangeOrderId }}</span>
-      <NButton size="small" secondary @click="emit('viewOrders')">查看策略订单</NButton>
+      <span v-if="progress.exchangeOrderId"> {{ t('ui.exchangeOrderId') }} {{ progress.exchangeOrderId }}</span>
+      <NButton size="small" secondary @click="emit('viewOrders')"> {{ t('ui.viewStrategyOrders') }} </NButton>
     </div>
   </section>
 </template>

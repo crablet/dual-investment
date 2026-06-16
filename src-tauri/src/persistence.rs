@@ -3,6 +3,8 @@
 //! 这里只保存业务事件、订单快照和恢复记录；API Key/Secret 永远不进入
 //! SQLite。订单和审计以追加/替换业务事实的方式保存，便于应用重启后从真实交易所状态恢复。
 
+use crate::messages::Message;
+
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
@@ -29,9 +31,9 @@ impl Persistence {
     /// 打开应用数据目录中的 `SQLite` 数据库。
     pub fn open_app_data(data_dir: impl AsRef<Path>) -> AppResult<Self> {
         std::fs::create_dir_all(data_dir.as_ref())
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let connection = Connection::open(data_dir.as_ref().join("dual-investment.db"))
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let store = Self { connection };
         store.init()?;
         Ok(store)
@@ -107,7 +109,7 @@ impl Persistence {
 
                 ",
             )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         Ok(())
     }
 
@@ -115,14 +117,14 @@ impl Persistence {
     ///
     /// 订单必须来自本机下单、恢复查询，或 Binance 当前持仓接管；不能由前端凭空创建。
     pub fn save_order(&self, order: &StrategyOrder) -> AppResult<()> {
-        let payload =
-            serde_json::to_string(order).map_err(|error| AppError::Storage(error.to_string()))?;
+        let payload = serde_json::to_string(order)
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         self.connection
             .execute(
                 "INSERT OR REPLACE INTO strategy_orders (id, payload, updated_at) VALUES (?1, ?2, ?3)",
                 params![order.id, payload, order.updated_at.to_rfc3339()],
             )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         Ok(())
     }
 
@@ -144,7 +146,7 @@ impl Persistence {
                     attempt.updated_at.to_rfc3339(),
                 ],
             )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         Ok(())
     }
 
@@ -177,18 +179,18 @@ impl Persistence {
                     attempt.updated_at.to_rfc3339(),
                 ],
             )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         Ok(())
     }
 
     pub fn save_settlement_batch(&self, batch: &SettlementBatch) -> AppResult<()> {
-        let payload =
-            serde_json::to_string(batch).map_err(|error| AppError::Storage(error.to_string()))?;
+        let payload = serde_json::to_string(batch)
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         self.connection.execute(
             "INSERT INTO settlement_batches (id, payload, updated_at) VALUES (?1, ?2, ?3)
              ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
             params![batch.id, payload, batch.updated_at.to_rfc3339()],
-        ).map_err(|error| AppError::Storage(error.to_string()))?;
+        ).map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         Ok(())
     }
 
@@ -201,12 +203,12 @@ impl Persistence {
         let transaction = self
             .connection
             .unchecked_transaction()
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         self.save_order(order)?;
         self.save_order_attempt(attempt)?;
         transaction
             .commit()
-            .map_err(|error| AppError::Storage(error.to_string()))
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
     }
 
     /// 最后一笔状态和收尾计划一起保存；已有批次记录也可从成交事实重建该步骤。
@@ -218,14 +220,14 @@ impl Persistence {
         let transaction = self
             .connection
             .unchecked_transaction()
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         for order in orders {
             self.save_order(order)?;
         }
         self.save_settlement_batch(batch)?;
         transaction
             .commit()
-            .map_err(|error| AppError::Storage(error.to_string()))
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
     }
 
     /// 删除本地策略订单快照。
@@ -235,7 +237,7 @@ impl Persistence {
                 "DELETE FROM strategy_orders WHERE id = ?1",
                 params![order_id],
             )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         Ok(())
     }
 
@@ -244,15 +246,16 @@ impl Persistence {
         let mut statement = self
             .connection
             .prepare("SELECT payload FROM strategy_orders ORDER BY updated_at DESC")
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let mapped = statement
             .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let mut orders = Vec::new();
         for row in mapped {
-            let payload = row.map_err(|error| AppError::Storage(error.to_string()))?;
+            let payload =
+                row.map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
             let mut order = serde_json::from_str::<StrategyOrder>(&payload)
-                .map_err(|error| AppError::Storage(error.to_string()))?;
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
             crate::strategy::refresh_order_metrics(&mut order);
             orders.push(order);
         }
@@ -264,12 +267,14 @@ impl Persistence {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut statement = self.connection.prepare(&format!(
             "SELECT {ORDER_ATTEMPT_COLUMNS} FROM order_attempts ORDER BY updated_at DESC LIMIT ?1"
-        )).map_err(|error| AppError::Storage(error.to_string()))?;
+        )).map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let rows = statement
             .query_map([limit], read_order_attempt)
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-        rows.map(|row| row.map_err(|error| AppError::Storage(error.to_string())))
-            .collect()
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        rows.map(|row| {
+            row.map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
+        })
+        .collect()
     }
 
     pub fn get_order_attempt(&self, id: &str) -> AppResult<Option<OrderAttempt>> {
@@ -280,7 +285,7 @@ impl Persistence {
                 read_order_attempt,
             )
             .optional()
-            .map_err(|error| AppError::Storage(error.to_string()))
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
     }
 
     pub fn get_funding_attempt(&self, id: &str) -> AppResult<Option<FundingAttempt>> {
@@ -291,7 +296,7 @@ impl Persistence {
                 FundingAttemptRow::read,
             )
             .optional()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .map(FundingAttemptRow::into_attempt)
             .transpose()
     }
@@ -304,14 +309,15 @@ impl Persistence {
             .prepare(
                 &format!("SELECT {FUNDING_ATTEMPT_COLUMNS} FROM funding_attempts ORDER BY updated_at DESC LIMIT ?1"),
             )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let mapped = statement
             .query_map([limit], FundingAttemptRow::read)
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
 
         let mut attempts = Vec::new();
         for row in mapped {
-            let row = row.map_err(|error| AppError::Storage(error.to_string()))?;
+            let row =
+                row.map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
             attempts.push(row.into_attempt()?);
         }
         Ok(attempts)
@@ -324,13 +330,14 @@ impl Persistence {
             .prepare(
                 &format!("SELECT {FUNDING_ATTEMPT_COLUMNS} FROM funding_attempts WHERE chain_id = ?1 ORDER BY created_at ASC"),
             )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let mapped = statement
             .query_map([chain_id], FundingAttemptRow::read)
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let mut attempts = Vec::new();
         for row in mapped {
-            let row = row.map_err(|error| AppError::Storage(error.to_string()))?;
+            let row =
+                row.map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
             attempts.push(row.into_attempt()?);
         }
         Ok(attempts)
@@ -340,13 +347,15 @@ impl Persistence {
         let mut statement = self
             .connection
             .prepare("SELECT payload FROM settlement_batches ORDER BY updated_at DESC")
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let rows = statement
             .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         rows.map(|row| {
-            let payload = row.map_err(|error| AppError::Storage(error.to_string()))?;
-            serde_json::from_str(&payload).map_err(|error| AppError::Storage(error.to_string()))
+            let payload =
+                row.map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+            serde_json::from_str(&payload)
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
         })
         .collect()
     }
@@ -362,8 +371,9 @@ impl Persistence {
                 [],
                 |row| row.get::<_, i64>(0),
             )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-        usize::try_from(count).map_err(|error| AppError::Storage(error.to_string()))
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        usize::try_from(count)
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
     }
 
     /// 统计仍需要自动恢复或人工处理的资金动作记录。
@@ -377,8 +387,9 @@ impl Persistence {
                 [],
                 |row| row.get::<_, i64>(0),
             )
-            .map_err(|error| AppError::Storage(error.to_string()))?;
-        usize::try_from(count).map_err(|error| AppError::Storage(error.to_string()))
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        usize::try_from(count)
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
     }
 }
 
@@ -405,14 +416,14 @@ struct FundingAttemptRow {
     id: String,
     chain_id: String,
     kind: String,
-    purpose: String,
+    purpose: Message,
     asset: String,
     amount: String,
     transfer_type: Option<String>,
     product_id: Option<String>,
     exchange_ref: Option<String>,
     status: String,
-    message: String,
+    message: Message,
     query_after_at: Option<String>,
     query_count: i64,
     effective_query_count: i64,
@@ -495,7 +506,7 @@ impl FundingAttemptRow {
 
 fn parse_time(value: &str) -> AppResult<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
-        .map_err(|error| AppError::Storage(error.to_string()))
+        .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
         .map(|time| time.with_timezone(&Utc))
 }
 
@@ -509,20 +520,29 @@ fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
         "persist_failed" => Ok(OrderAttemptStatus::PersistFailed),
         "spot_attempted" => Ok(OrderAttemptStatus::SpotAttempted),
         "spot_persisted" => Ok(OrderAttemptStatus::SpotPersisted),
-        _ => Err(AppError::Storage(format!("未知订单尝试状态：{value}"))),
+        _ => Err(AppError::Storage(crate::msg!(
+            "backend.unknownOrderAttemptStatus",
+            p0 = value
+        ))),
     }
 }
 
 fn parse_decimal(value: &str) -> AppResult<Decimal> {
     // 恢复记录里的金额必须保持 Decimal 可解析；解析失败说明本地事实表已损坏。
-    Decimal::from_str(value)
-        .map_err(|error| AppError::Storage(format!("恢复记录金额无法解析：{error}")))
+    Decimal::from_str(value).map_err(|error| {
+        AppError::Storage(crate::msg!("backend.cannotParseRecoveryAmount", p0 = error))
+    })
 }
 
 fn parse_nonnegative_u32(value: i64, field: &str) -> AppResult<u32> {
     // 查询计数只允许非负值，避免损坏数据绕过恢复重试上限。
-    u32::try_from(value)
-        .map_err(|error| AppError::Storage(format!("资金恢复记录 {field} 无法解析：{error}")))
+    u32::try_from(value).map_err(|error| {
+        AppError::Storage(crate::msg!(
+            "backend.cannotParseFundingRecoveryField",
+            p0 = field,
+            p1 = error
+        ))
+    })
 }
 
 /// 解析 `SQLite` 中持久化的资金动作类型。
@@ -531,7 +551,10 @@ fn parse_funding_kind(value: &str) -> AppResult<FundingAttemptKind> {
         "universal_transfer" => Ok(FundingAttemptKind::UniversalTransfer),
         "simple_earn_redeem" => Ok(FundingAttemptKind::SimpleEarnRedeem),
         "simple_earn_subscribe" => Ok(FundingAttemptKind::SimpleEarnSubscribe),
-        _ => Err(AppError::Storage(format!("未知资金动作类型：{value}"))),
+        _ => Err(AppError::Storage(crate::msg!(
+            "backend.unknownFundingActionType",
+            p0 = value
+        ))),
     }
 }
 
@@ -545,6 +568,9 @@ fn parse_funding_status(value: &str) -> AppResult<FundingAttemptStatus> {
         "confirmed" => Ok(FundingAttemptStatus::Confirmed),
         "failed" => Ok(FundingAttemptStatus::Failed),
         "blocked" => Ok(FundingAttemptStatus::Blocked),
-        _ => Err(AppError::Storage(format!("未知资金恢复状态：{value}"))),
+        _ => Err(AppError::Storage(crate::msg!(
+            "backend.unknownFundingRecoveryStatus",
+            p0 = value
+        ))),
     }
 }

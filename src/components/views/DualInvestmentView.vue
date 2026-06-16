@@ -5,6 +5,7 @@
 -->
 <script setup lang="ts">
 import type { StrategyCandidate } from '@/types/domain'
+
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -27,6 +28,7 @@ import {
   useDualInvestmentCandidates,
 } from '@/composables/useDualInvestmentCandidates'
 import { useFormat } from '@/composables/useFormat'
+import { messageText, t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import { localDateTimeLabel } from '@/utils/date'
 import { isPositiveDecimalString } from '@/utils/decimal'
@@ -123,19 +125,19 @@ function confirmOrderReview() {
       <section class="direction-switch">
         <button :class="{ active: form.direction === 'sellPut' }" type="button" @click="selectDirection('sellPut')">
           <NIcon :component="ArrowDownCircle" />
-          <span>低买</span>
-          <strong>卖 Put 抄底</strong>
+          <span> {{ t('ui.buyLow') }} </span>
+          <strong> {{ t('ui.sellPut') }} </strong>
         </button>
         <button :class="{ active: form.direction === 'sellCall' }" type="button" @click="selectDirection('sellCall')">
           <NIcon :component="ArrowUpCircle" />
-          <span>高卖</span>
-          <strong>卖 Call 止盈</strong>
+          <span> {{ t('ui.sellHigh') }} </span>
+          <strong> {{ t('ui.sellCall') }} </strong>
         </button>
       </section>
 
       <section class="candidate-board">
         <div class="candidate-toolbar">
-          <div class="expiry-tabs" aria-label="到期日筛选">
+          <div class="expiry-tabs" :aria-label="t('ui.filterByExpiry')">
             <button
               v-for="filter in expiryFilters"
               :key="filter.id"
@@ -148,13 +150,13 @@ function confirmOrderReview() {
           </div>
 
           <div class="candidate-toolbar-actions">
-            <span v-if="referenceSpotPrice" class="spot-price">BTC 现货 {{ money(referenceSpotPrice) }}</span>
+            <span v-if="referenceSpotPrice" class="spot-price"> {{ t('ui.btcSpot') }} {{ money(referenceSpotPrice) }}</span>
             <NButton
               circle
               secondary
               size="small"
-              title="刷新候选"
-              aria-label="刷新候选"
+              :title="t('ui.refreshCandidates')"
+              :aria-label="t('ui.refreshCandidates')"
               :loading="store.isLoading('scan')"
               @click="store.scan()"
             >
@@ -163,39 +165,33 @@ function confirmOrderReview() {
           </div>
         </div>
 
-        <div class="candidate-filter-bar" aria-label="候选筛选">
-          <label>
-            年化 ≥
-            <NInputNumber
-              v-model:value="candidateFilter.minAnnualized"
-              clearable
-              placeholder="不限"
-              :min="0"
-              :step="1"
-            />
+        <div class="candidate-filter-bar" :aria-label="t('ui.candidateFilters')">
+          <label> {{ t('ui.annualized') }} <NInputNumber
+            v-model:value="candidateFilter.minAnnualized"
+            clearable
+            :placeholder="t('ui.any')"
+            :min="0"
+            :step="1"
+          />
           </label>
-          <label>
-            被行权概率 ≤
-            <NInputNumber
-              v-model:value="candidateFilter.maxExerciseProbability"
-              clearable
-              placeholder="不限"
-              :min="0"
-              :max="100"
-              :step="1"
-            />
+          <label> {{ t('ui.exerciseProbability2') }} <NInputNumber
+            v-model:value="candidateFilter.maxExerciseProbability"
+            clearable
+            :placeholder="t('ui.any')"
+            :min="0"
+            :max="100"
+            :step="1"
+          />
           </label>
-          <label>
-            距现货 ≤
-            <NInputNumber
-              v-model:value="candidateFilter.maxDistanceAbs"
-              clearable
-              placeholder="不限"
-              :min="0"
-              :step="0.5"
-            />
+          <label> {{ t('ui.distanceFromSpot') }} <NInputNumber
+            v-model:value="candidateFilter.maxDistanceAbs"
+            clearable
+            :placeholder="t('ui.any')"
+            :min="0"
+            :step="0.5"
+          />
           </label>
-          <NButton secondary @click="resetCandidateFilters">重置</NButton>
+          <NButton secondary @click="resetCandidateFilters"> {{ t('ui.reset') }} </NButton>
         </div>
 
         <CandidateTable
@@ -211,7 +207,7 @@ function confirmOrderReview() {
         <div v-if="filteredCandidates.length === 0" class="empty-state opportunity-empty">
           <strong>{{ emptyCandidateTitle }}</strong>
           <span>{{ emptyCandidateHint }}</span>
-          <NButton size="small" secondary :loading="store.isLoading('scan')" @click="store.scan()">重新扫描</NButton>
+          <NButton size="small" secondary :loading="store.isLoading('scan')" @click="store.scan()"> {{ t('ui.scanAgain') }} </NButton>
         </div>
       </section>
     </div>
@@ -220,7 +216,7 @@ function confirmOrderReview() {
       <section class="order-card">
         <header>
           <div>
-            <span class="order-eyebrow">下单</span>
+            <span class="order-eyebrow"> {{ t('ui.placeOrder') }} </span>
             <h3>{{ panelTitle }}</h3>
           </div>
           <NIcon :component="Zap" />
@@ -228,41 +224,37 @@ function confirmOrderReview() {
 
         <div class="deal-summary">
           <article>
-            <span>年化</span>
+            <span> {{ t('ui.annualizedReturn') }} </span>
             <strong :class="{ positive: selectedCandidate }">
               {{ selectedCandidate ? percent(selectedCandidate.annualized) : '--' }}
             </strong>
-            <em v-if="selectedCandidate && isPositiveDecimalString(selectedCandidate.spotPrice)">
-              距现货 {{ signedPercent(selectedCandidate.strikeDistancePercent) }}
+            <em v-if="selectedCandidate && isPositiveDecimalString(selectedCandidate.spotPrice)"> {{ t('ui.fromSpot') }} {{ signedPercent(selectedCandidate.strikeDistancePercent) }}
             </em>
           </article>
           <article>
-            <span>到期日</span>
+            <span> {{ t('ui.expiryDate') }} </span>
             <strong>{{ selectedCandidate ? localDateTimeLabel(selectedCandidate.expiryAt) : '--' }}</strong>
-            <em v-if="selectedCandidate">{{ daysUntil(selectedCandidate.expiryAt) }} 天</em>
+            <em v-if="selectedCandidate">{{ daysUntil(selectedCandidate.expiryAt) }} {{ t('ui.days') }} </em>
           </article>
           <article>
-            <span>预计权利金</span>
-            <strong>{{ strategyPreview ? money(strategyPreview.premium) : previewLoading ? '计算中' : '--' }}</strong>
+            <span> {{ t('ui.estimatedPremium') }} </span>
+            <strong>{{ strategyPreview ? money(strategyPreview.premium) : previewLoading ? t('ui.calculating') : '--' }}</strong>
           </article>
           <article>
-            <span>保本价</span>
-            <strong>{{ strategyPreview ? money(strategyPreview.breakeven, 'USDT', 0) : previewLoading ? '计算中' : '--' }}</strong>
+            <span> {{ t('ui.breakevenPrice') }} </span>
+            <strong>{{ strategyPreview ? money(strategyPreview.breakeven, 'USDT', 0) : previewLoading ? t('ui.calculating') : '--' }}</strong>
           </article>
         </div>
 
         <div class="order-form">
-          <label>
-            下单数量（张）
-            <NInput v-model:value="form.quantity" :input-props="{ inputmode: 'decimal' }" placeholder="至少 0.01" />
+          <label> {{ t('ui.quantityContracts') }} <NInput v-model:value="form.quantity" :input-props="{ inputmode: 'decimal' }" :placeholder="t('ui.atLeast')" />
           </label>
         </div>
 
-        <NAlert v-if="previewError" type="error">{{ previewError }}</NAlert>
+        <NAlert v-if="previewError" type="error">{{ messageText(previewError) }}</NAlert>
 
         <NButton type="primary" size="large" block :disabled="!canSubmit" :loading="store.isLoading('order')" @click="submit">
-          <template #icon><NIcon :component="Zap" /></template>
-          发送订单
+          <template #icon><NIcon :component="Zap" /></template> {{ t('ui.submitOrder') }}
         </NButton>
 
         <OrderProgressPanel

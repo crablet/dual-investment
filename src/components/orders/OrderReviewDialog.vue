@@ -6,6 +6,7 @@
 -->
 <script setup lang="ts">
 import type { StrategyCandidate } from '@/types/domain'
+
 import { X } from '@lucide/vue'
 import {
   NButton,
@@ -14,6 +15,7 @@ import {
 } from 'naive-ui'
 import { computed } from 'vue'
 import { useFormat } from '@/composables/useFormat'
+import { t } from '@/i18n'
 import { localDateTimeLabel } from '@/utils/date'
 
 interface Props {
@@ -41,27 +43,27 @@ const emit = defineEmits<{
 const { money, percent, signedPercent } = useFormat()
 
 const isSellPut = computed(() => props.candidate?.direction === 'sellPut')
-const productType = computed(() => isSellPut.value ? '低买 · 卖 Put 抄底' : '高卖 · 卖 Call 止盈')
-const tradingPair = computed(() => isSellPut.value ? '以 USDT 低买 BTC' : '以 BTC 高卖 BTC')
+const productType = computed(() => isSellPut.value ? t('ui.buyLowSellPut') : t('ui.sellHighSellCall'))
+const tradingPair = computed(() => isSellPut.value ? t('ui.buyBtcLowWithUsdt') : t('ui.sellBtcHigh'))
 const reviewFacts = computed<ReviewFact[]>(() => {
   if (!props.candidate) {
     return []
   }
   return [
-    { label: '产品类型', value: productType.value, tone: 'gold' },
-    { label: '交易对', value: tradingPair.value },
-    { label: '年化', value: percent(props.candidate.annualized), tone: 'green' },
+    { label: t('ui.productType'), value: productType.value, tone: 'gold' },
+    { label: t('ui.tradingPair'), value: tradingPair.value },
+    { label: t('ui.annualizedReturn'), value: percent(props.candidate.annualized), tone: 'green' },
     {
-      label: '到期日',
-      value: `${localDateTimeLabel(props.candidate.expiryAt)}（${props.daysToExpiry} 天）`,
+      label: t('ui.expiryDate'),
+      value: t('ui.days2', { p0: localDateTimeLabel(props.candidate.expiryAt), p1: props.daysToExpiry }),
     },
-    { label: '下单数量', value: `${props.quantity} 张` },
-    { label: '预计权利金', value: money(props.projectedPremium) },
-    { label: '执行价', value: money(props.candidate.strike, 'USDT', 0) },
-    { label: '保本价', value: money(props.projectedBreakeven, 'USDT', 0) },
-    { label: '当前价格', value: money(props.candidate.limitPrice, 'USDT', 0) },
-    { label: '被行权概率', value: percent(props.candidate.exerciseProbability) },
-    { label: '距现货', value: signedPercent(props.candidate.strikeDistancePercent) },
+    { label: t('ui.orderQuantity'), value: t('ui.contracts', { p0: props.quantity }) },
+    { label: t('ui.estimatedPremium'), value: money(props.projectedPremium) },
+    { label: t('ui.strikePrice'), value: money(props.candidate.strike, 'USDT', 0) },
+    { label: t('ui.breakevenPrice'), value: money(props.projectedBreakeven, 'USDT', 0) },
+    { label: t('ui.currentPrice'), value: money(props.candidate.limitPrice, 'USDT', 0) },
+    { label: t('ui.exerciseProbability'), value: percent(props.candidate.exerciseProbability) },
+    { label: t('ui.fromSpot'), value: signedPercent(props.candidate.strikeDistancePercent) },
   ]
 })
 
@@ -84,14 +86,12 @@ function confirm() {
       aria-modal="true"
       aria-labelledby="order-review-title"
     >
-      <button class="order-review-close" type="button" aria-label="关闭订单复核" @click="emit('close')">
+      <button class="order-review-close" type="button" :aria-label="t('ui.closeOrderReview')" @click="emit('close')">
         <NIcon :component="X" />
       </button>
 
       <header class="order-review-header">
-        <h2 id="order-review-title">
-          订单确认
-        </h2>
+        <h2 id="order-review-title"> {{ t('ui.confirmOrder') }} </h2>
       </header>
 
       <dl class="order-review-facts">
@@ -102,12 +102,8 @@ function confirm() {
       </dl>
 
       <footer class="order-review-actions">
-        <NButton size="large" secondary class="order-review-back" @click="emit('close')">
-          返回修改
-        </NButton>
-        <NButton size="large" type="primary" class="order-review-confirm" @click="confirm">
-          确认发送
-        </NButton>
+        <NButton size="large" secondary class="order-review-back" @click="emit('close')"> {{ t('ui.backToEdit') }} </NButton>
+        <NButton size="large" type="primary" class="order-review-confirm" @click="confirm"> {{ t('ui.confirmSubmission') }} </NButton>
       </footer>
     </section>
   </NModal>

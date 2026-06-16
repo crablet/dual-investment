@@ -6,6 +6,7 @@
 -->
 <script setup lang="ts">
 import type { CalendarEvent, CalendarEventTone, CalendarEventType } from '@/composables/useCalendarEvents'
+
 import {
   ChevronLeft,
   ChevronRight,
@@ -18,6 +19,7 @@ import {
   useCalendarEvents,
 } from '@/composables/useCalendarEvents'
 import { useLocalToday } from '@/composables/useLocalToday'
+import { formatLocale, t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import {
   addDays,
@@ -38,7 +40,7 @@ interface CalendarDay {
 }
 
 const store = useAppStore()
-const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+const weekDays = computed(() => [t('ui.sun'), t('ui.mon'), t('ui.tue'), t('ui.wed'), t('ui.thu'), t('ui.fri'), t('ui.sat')])
 const { today, todayKey } = useLocalToday()
 
 // 月历状态只控制可见窗口和选中日期，不会创建或修改任何真实待办。
@@ -100,13 +102,11 @@ const selectedDayEvents = computed(() =>
   eventsByDate.value.get(selectedDate.value) ?? [],
 )
 
-const monthTitle = computed(() =>
-  `${currentMonth.value.getFullYear()}年${currentMonth.value.getMonth() + 1}月`,
-)
+const monthTitle = computed(() => new Intl.DateTimeFormat(formatLocale(), { year: 'numeric', month: 'long', calendar: 'gregory' }).format(currentMonth.value))
 
 const selectedDateTitle = computed(() => {
   const date = parseDateKey(selectedDate.value)
-  return date.toLocaleDateString('zh-CN', {
+  return date.toLocaleDateString(formatLocale(), {
     month: 'long',
     day: 'numeric',
     weekday: 'long',
@@ -139,7 +139,7 @@ function setCurrentMonth(date: Date) {
 }
 
 function typeLabel(type: CalendarEventType) {
-  return calendarEventTypes.find(item => item.id === type)?.label ?? '事件'
+  return calendarEventTypes.find(item => item.id === type)?.label ?? t('ui.events')
 }
 
 function toneClass(tone: CalendarEventTone) {
@@ -157,13 +157,11 @@ function toneClass(tone: CalendarEventTone) {
       </div>
 
       <div class="event-calendar-controls">
-        <NButton circle secondary size="small" title="上一月" aria-label="上一月" @click="previousMonth">
+        <NButton circle secondary size="small" :title="t('ui.previousMonth')" :aria-label="t('ui.previousMonth')" @click="previousMonth">
           <template #icon><NIcon :component="ChevronLeft" /></template>
         </NButton>
-        <NButton size="small" secondary @click="selectToday">
-          今天
-        </NButton>
-        <NButton circle secondary size="small" title="下一月" aria-label="下一月" @click="nextMonth">
+        <NButton size="small" secondary @click="selectToday"> {{ t('ui.today') }} </NButton>
+        <NButton circle secondary size="small" :title="t('ui.nextMonth')" :aria-label="t('ui.nextMonth')" @click="nextMonth">
           <template #icon><NIcon :component="ChevronRight" /></template>
         </NButton>
       </div>
@@ -201,7 +199,7 @@ function toneClass(tone: CalendarEventTone) {
           </button>
         </div>
 
-        <div class="event-calendar-filters" aria-label="事件筛选">
+        <div class="event-calendar-filters" :aria-label="t('ui.filterEvents')">
           <button
             v-for="type in calendarEventTypes"
             :key="type.id"
@@ -219,14 +217,12 @@ function toneClass(tone: CalendarEventTone) {
       <aside class="event-calendar-detail">
         <header class="event-detail-header">
           <div>
-            <span>事件详情</span>
+            <span> {{ t('ui.eventDetails') }} </span>
             <strong>{{ selectedDateTitle }}</strong>
           </div>
         </header>
 
-        <p v-if="selectedDayEvents.length === 0" class="empty-state">
-          当前筛选下暂无事件
-        </p>
+        <p v-if="selectedDayEvents.length === 0" class="empty-state"> {{ t('ui.noEventsMatchThisFilter') }} </p>
 
         <div v-else class="event-detail-list">
           <article
@@ -239,14 +235,12 @@ function toneClass(tone: CalendarEventTone) {
               <span>{{ typeLabel(event.type) }}</span>
               <em>
                 <NIcon :component="Clock3" />
-                {{ event.timeLabel ?? '全天' }}
+                {{ event.timeLabel ?? t('ui.allDay') }}
               </em>
             </div>
             <strong>{{ event.title }}</strong>
             <p>{{ event.detail }}</p>
-            <NButton size="small" secondary @click="store.openView(event.targetView)">
-              查看
-            </NButton>
+            <NButton size="small" secondary @click="store.openView(event.targetView)"> {{ t('ui.view') }} </NButton>
           </article>
         </div>
       </aside>

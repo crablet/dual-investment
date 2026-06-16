@@ -3,6 +3,7 @@
 // Rust 通过脱敏事件上报当前阶段，Pinia store 用这些纯函数合成右侧下单进度面板。
 // 进度只服务交互反馈，不作为订单事实来源；订单事实仍以后端快照和恢复记录为准。
 
+import type { LocalizedMessage } from '@/i18n'
 import type {
   OrderProgressStage,
   OrderProgressStatus,
@@ -12,22 +13,23 @@ import type {
   OrderProgressStepView,
   OrderProgressView,
 } from '@/types/view'
+import { message as localized } from '@/i18n'
 
-const orderProgressStages: Array<{ id: OrderProgressStage, label: string }> = [
-  { id: 'validate', label: '校验' },
-  { id: 'funding', label: '资金准备' },
-  { id: 'risk', label: '风控' },
-  { id: 'submit', label: '发送 Binance' },
-  { id: 'persist', label: '保存订单' },
+const orderProgressStages: Array<{ id: OrderProgressStage, label: LocalizedMessage }> = [
+  { id: 'validate', label: localized('ui.validation') },
+  { id: 'funding', label: localized('ui.funding') },
+  { id: 'risk', label: localized('ui.riskChecks') },
+  { id: 'submit', label: localized('ui.submitToBinance') },
+  { id: 'persist', label: localized('ui.saveOrder') },
 ]
 
 /** 每个阶段成功时展示的默认摘要；后端事件可用更具体的脱敏消息覆盖。 */
-export const orderProgressSuccessMessages: Record<OrderProgressStage, string> = {
-  validate: '下单参数已通过校验',
-  funding: '资金准备已完成',
-  risk: '本地下单风控已通过',
-  submit: 'Binance 已返回订单状态',
-  persist: '订单已保存',
+export const orderProgressSuccessMessages: Record<OrderProgressStage, LocalizedMessage> = {
+  validate: localized('ui.orderParametersValidated'),
+  funding: localized('ui.fundingReady'),
+  risk: localized('ui.localPreTradeChecksPassed'),
+  submit: localized('ui.binanceReturnedTheOrderStatus'),
+  persist: localized('ui.orderSaved'),
 }
 
 /** 创建一次手动下单的初始进度；此时真实订单还没有发送到 Binance。 */
@@ -39,7 +41,7 @@ export function createInitialOrderProgress(
     flowId,
     status: 'running',
     optionSymbol,
-    steps: createOrderProgressSteps('validate', 'running', '正在提交下单请求'),
+    steps: createOrderProgressSteps('validate', 'running', localized('ui.submittingOrderRequest')),
   }
 }
 
@@ -47,7 +49,7 @@ export function createInitialOrderProgress(
 export function createOrderProgressSteps(
   activeStage?: OrderProgressStage,
   status: OrderProgressStepStatus = 'pending',
-  message?: string,
+  message?: LocalizedMessage,
 ): OrderProgressStepView[] {
   return orderProgressStages.map(stage => ({
     id: stage.id,
@@ -76,7 +78,7 @@ export function progressStatusFromSteps(steps: OrderProgressStepView[]): OrderPr
  */
 export function markCurrentOrderStepError(
   steps: OrderProgressStepView[],
-  message: string,
+  message: LocalizedMessage,
 ) {
   const runningIndex = steps.findIndex(step => step.status === 'running')
   const pendingIndex = steps.findIndex(step => step.status === 'pending')

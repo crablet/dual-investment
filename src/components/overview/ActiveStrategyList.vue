@@ -6,8 +6,10 @@
 -->
 <script setup lang="ts">
 import type { StrategyDirection, StrategyOrder } from '@/types/domain'
+
 import { NTag } from 'naive-ui'
 import { useFormat } from '@/composables/useFormat'
+import { t } from '@/i18n'
 import { localDateTimeLabel } from '@/utils/date'
 
 const props = defineProps<{
@@ -17,7 +19,7 @@ const props = defineProps<{
 const { money, percent } = useFormat()
 
 function strategyLabel(direction: StrategyDirection) {
-  return direction === 'sellPut' ? '低买 BTC' : '高卖 BTC'
+  return direction === 'sellPut' ? t('ui.buyBtcLow') : t('ui.sellBtcHigh2')
 }
 
 function quantityLabel(value: string) {
@@ -34,7 +36,7 @@ function quantityLabel(value: string) {
     v-if="props.orders.length > 0"
     class="active-strategy-list"
     role="region"
-    aria-label="活跃策略列表"
+    :aria-label="t('ui.activeStrategies')"
     tabindex="0"
   >
     <article v-for="order in props.orders" :key="order.id" class="active-strategy-row">
@@ -52,33 +54,33 @@ function quantityLabel(value: string) {
             type="warning"
             :bordered="false"
           >
-            部分成交
+            {{ t('ui.partiallyFilled') }}
           </NTag>
         </div>
-        <time :datetime="order.expiryAt">{{ localDateTimeLabel(order.expiryAt) }} 到期</time>
+        <time :datetime="order.expiryAt">{{ localDateTimeLabel(order.expiryAt) }} {{ t('ui.expiry') }} </time>
       </header>
 
       <dl class="active-strategy-fact">
-        <dt>目标价</dt>
+        <dt> {{ t('ui.targetPrice') }} </dt>
         <dd>{{ money(order.strike, 'USDT', 0) }}</dd>
       </dl>
 
       <dl class="active-strategy-fact">
-        <dt>实际持仓</dt>
+        <dt> {{ t('ui.actualPosition') }} </dt>
         <dd>{{ quantityLabel(order.filledQuantity) }}</dd>
       </dl>
 
       <dl class="active-strategy-fact active-strategy-return">
-        <dt>已收权利金</dt>
+        <dt> {{ t('ui.premiumReceived') }} </dt>
         <dd>{{ money(order.premium) }}</dd>
-        <dd class="active-strategy-annualized">年化 {{ percent(order.annualized) }}</dd>
+        <dd class="active-strategy-annualized"> {{ t('ui.annualizedReturn') }} {{ percent(order.annualized) }}</dd>
       </dl>
     </article>
   </div>
 
   <div v-else class="active-strategy-empty">
-    <strong>当前没有活跃策略</strong>
-    <span>订单成交后，这里会显示目标价、到期时间和持仓收益。</span>
+    <strong> {{ t('ui.noActiveStrategies') }} </strong>
+    <span> {{ t('ui.onceAnOrderIsFilledItsTarget') }} </span>
   </div>
 </template>
 

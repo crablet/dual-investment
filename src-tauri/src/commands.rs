@@ -4,6 +4,8 @@
 //! 脱敏摘要与连接重试资格；前端不从提示文案推断控制行为。
 #![allow(clippy::needless_pass_by_value)]
 
+use crate::messages::Message;
+
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
@@ -182,8 +184,9 @@ pub fn open_current_log_file(
     app.opener()
         .open_path(path, None::<String>)
         .map_err(|error| {
-            to_command_error(crate::domain::AppError::Storage(format!(
-                "无法打开日志文件：{error}"
+            to_command_error(crate::domain::AppError::Storage(crate::msg!(
+                "backend.cannotOpenLogFile",
+                p0 = error.to_string()
             )))
         })
 }
@@ -199,8 +202,9 @@ pub fn open_log_folder(app: AppHandle, state: State<'_, AppState>) -> Result<(),
     app.opener()
         .open_path(path, None::<String>)
         .map_err(|error| {
-            to_command_error(crate::domain::AppError::Storage(format!(
-                "无法打开日志目录：{error}"
+            to_command_error(crate::domain::AppError::Storage(crate::msg!(
+                "backend.cannotOpenLogFolder",
+                p0 = error.to_string()
             )))
         })
 }
@@ -220,13 +224,13 @@ pub fn preview_strategy(request: StrategyPreviewRequest) -> Result<StrategyPrevi
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandError {
-    message: String,
+    message: Message,
     can_auto_reconnect: bool,
 }
 
 fn to_command_error(error: crate::domain::AppError) -> CommandError {
     CommandError {
-        message: error.to_string(),
+        message: error.message(),
         can_auto_reconnect: error.can_auto_reconnect(),
     }
 }

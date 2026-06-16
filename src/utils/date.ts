@@ -3,6 +3,7 @@
 // 所有函数都按浏览器本地时区处理日期键，避免 `toISOString()` 在跨时区时把日历日期
 // 推到前一天或后一天。
 
+import { formatLocale } from '@/i18n'
 /** 按本地时区格式化 YYYY-MM-DD。 */
 export function formatDateKey(date: Date) {
   const year = date.getFullYear()
@@ -64,7 +65,7 @@ export function localTimeLabel(value: string) {
   if (Number.isNaN(date.getTime())) {
     return undefined
   }
-  return date.toLocaleTimeString('zh-CN', {
+  return date.toLocaleTimeString(formatLocale(), {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -77,7 +78,7 @@ export function localDateTimeLabel(value: string) {
   if (Number.isNaN(date.getTime())) {
     return value
   }
-  return `${formatDateKey(date)} ${date.toLocaleTimeString('zh-CN', {
+  return `${formatDateKey(date)} ${date.toLocaleTimeString(formatLocale(), {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',

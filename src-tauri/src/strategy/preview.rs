@@ -10,15 +10,19 @@ use crate::domain::{
 /// 预览只校验输入的基本合法性，真实下单仍须核对 Binance 合约和账户约束。
 pub fn preview_strategy(request: &StrategyPreviewRequest) -> AppResult<StrategyPreview> {
     if request.quantity < dec!(0.01) {
-        return Err(AppError::RiskRejected(
-            "预览数量不能小于 0.01 张".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.previewQuantityMustBeAtLeastContracts"
+        )));
     }
     if request.strike <= Decimal::ZERO {
-        return Err(AppError::RiskRejected("执行价必须大于 0".to_string()));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.strikePriceMustBeGreaterThanZero"
+        )));
     }
     if request.limit_price <= Decimal::ZERO {
-        return Err(AppError::RiskRejected("限价必须大于 0".to_string()));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.limitPriceMustBeGreaterThanZero"
+        )));
     }
     let premium = request
         .limit_price
@@ -35,5 +39,7 @@ pub fn preview_strategy(request: &StrategyPreviewRequest) -> AppResult<StrategyP
 }
 
 fn preview_overflow() -> AppError {
-    AppError::RiskRejected("预览金额超出可计算范围".to_string())
+    AppError::RiskRejected(crate::msg!(
+        "backend.previewAmountExceedsTheSupportedCalculationRange"
+    ))
 }

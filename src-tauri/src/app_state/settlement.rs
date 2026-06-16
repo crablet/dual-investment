@@ -1,6 +1,8 @@
 //! 到期批次编排。批次先备齐资金，逐笔确认成交，最后执行持久化收尾计划。
 //! 等待期间释放运行锁；下一轮必须重新读取记录，已发送的步骤只查询原请求。
 
+use crate::messages::Message;
+
 use std::collections::BTreeMap;
 
 use super::funding::{settlement_required_assets, spot_has_settlement_assets};
@@ -40,7 +42,7 @@ impl AppState {
     pub(super) fn settlement_batches(&self) -> AppResult<Vec<SettlementBatch>> {
         self.persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .list_settlement_batches()
     }
 
@@ -48,7 +50,7 @@ impl AppState {
         batch.updated_at = Utc::now();
         self.persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .save_settlement_batch(batch)
     }
 
@@ -56,14 +58,17 @@ impl AppState {
         &self,
         batch: &mut SettlementBatch,
         stage: SettlementStage,
-        message: &str,
+        message: &Message,
     ) -> AppResult<()> {
-        let changed = batch.stage != stage || batch.message != message;
+        let changed = batch.stage != stage || batch.message != *message;
         batch.stage = stage;
-        batch.message = message.to_string();
+        batch.message = message.clone();
         self.save_batch(batch)?;
         if changed {
-            self.record_log("settlement.batch", &format!("{} {}", batch.id, message));
+            self.record_log(
+                "settlement.batch",
+                &crate::msg!("ui.join", p0 = batch.id, p1 = message),
+            );
         }
         Ok(())
     }
@@ -114,7 +119,7 @@ impl AppState {
                         self.update_batch(
                             &mut batch,
                             SettlementStage::Blocked,
-                            "批次开始后出现未登记订单，需要人工核对成员",
+                            &crate::msg!("backend.unregisteredOrdersAppearedAfterThisBatchStarted"),
                         )?;
                     }
                 }
@@ -127,7 +132,7 @@ impl AppState {
                 expiry_at,
                 order_ids: ids,
                 stage: SettlementStage::WaitingExercise,
-                message: "等待到期及 Binance 行权记录".to_string(),
+                message: crate::msg!("backend.waitingForExpiryAndBinanceExerciseRecords"),
                 required: SettlementAssets::default(),
                 shortfall: SettlementAssets::default(),
                 redemption: None,
@@ -152,7 +157,11 @@ impl AppState {
                     .iter()
                     .find(|order| &order.id == id)
                     .cloned()
-                    .ok_or_else(|| AppError::Storage("结算批次成员订单缺失，停止执行".to_string()))
+                    .ok_or_else(|| {
+                        AppError::Storage(crate::msg!(
+                            "backend.aSettlementBatchMemberOrderIsMissing"
+                        ))
+                    })
             })
             .collect()
     }
@@ -162,7 +171,7 @@ impl AppState {
         let attempts = self
             .persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .list_order_attempts(usize::MAX)?;
         for attempt in attempts
             .into_iter()
@@ -171,7 +180,7 @@ impl AppState {
             if let Err(error) = self.recover_spot_attempt(attempt).await {
                 self.record_warning(
                     "settlement.order.confirming",
-                    &format!("现货补齐等待原订单确认：{error}"),
+                    &crate::msg!("backend.spotRebalancingAwaitsTheOriginalOrder", p0 = error),
                 );
             }
         }
@@ -200,7 +209,7 @@ impl AppState {
                 self.update_batch(
                     &mut batch,
                     stage,
-                    "存在待确认恢复记录，等待确认后再继续资金动作",
+                    &crate::msg!("backend.recoveryRecordsAwaitConfirmationFundingActionsWill"),
                 )?;
                 break;
             }
@@ -211,7 +220,11 @@ impl AppState {
                 } else {
                     SettlementStage::Blocked
                 };
-                self.update_batch(&mut batch, stage, &format!("结算暂停：{error}"))?;
+                self.update_batch(
+                    &mut batch,
+                    stage,
+                    &crate::msg!("backend.settlementPaused", p0 = error),
+                )?;
             }
             if self.pending_recovery_count()? > 0
                 || (batch.stage == SettlementStage::PendingSweep && sweep_started(&batch))
@@ -236,7 +249,7 @@ impl AppState {
             return self.update_batch(
                 batch,
                 SettlementStage::Blocked,
-                "存在终态补齐失败或异常成交数量，请先核对原订单",
+                &crate::msg!("backend.terminalRebalancingFailureOrAbnormalFilledQuantity"),
             );
         }
         // 即使上轮在保存最后一笔成交后退出，也能从持久化成员事实恢复收尾。
@@ -254,7 +267,7 @@ impl AppState {
             return self.update_batch(
                 batch,
                 SettlementStage::WaitingExercise,
-                "等待同批 Binance 行权记录齐全",
+                &crate::msg!("backend.waitingForAllBinanceExerciseRecordsIn"),
             );
         }
         // 先查询已发送的原单。不能用尚未确认的成交数量重新计算赎回缺口。
@@ -268,7 +281,7 @@ impl AppState {
                 return self.update_batch(
                     batch,
                     SettlementStage::ConfirmingOrders,
-                    "等待原现货订单足额成交，不发送下一笔",
+                    &crate::msg!("backend.waitingForTheOriginalSpotOrderTo"),
                 );
             }
         }
@@ -280,7 +293,7 @@ impl AppState {
         self.update_batch(
             batch,
             SettlementStage::Executing,
-            "整批资金已到账，逐笔确认现货补齐",
+            &crate::msg!("backend.batchFundingReceivedConfirmingEachSpotRebalance"),
         )?;
         for order in orders
             .into_iter()
@@ -295,7 +308,7 @@ impl AppState {
                 return self.update_batch(
                     batch,
                     SettlementStage::WaitingFunds,
-                    "实际成交或外部资金变化导致预留不足，等待补足剩余接货资金",
+                    &crate::msg!("backend.actualFillsOrExternalBalanceChangesLeft"),
                 );
             }
             let updated = self.rebalance_settlement_order(client, order).await?;
@@ -303,7 +316,7 @@ impl AppState {
                 return self.update_batch(
                     batch,
                     SettlementStage::ConfirmingOrders,
-                    "现货补齐尚未完成，等待原单确认后再继续",
+                    &crate::msg!("backend.spotRebalancingIsIncompleteWaitingForThe"),
                 );
             }
         }
@@ -337,7 +350,8 @@ impl AppState {
                 if !is_in_the_money(order, price) {
                     order.status = StrategyStatus::Settled;
                     order.settled_at = Some(Utc::now());
-                    order.rebalance_message = "Binance 行权记录确认价外，无需现货补齐".to_string();
+                    order.rebalance_message =
+                        crate::msg!("backend.binanceExerciseRecordsConfirmOutOfThe");
                 }
                 self.save_order(order).await?;
             }
@@ -357,11 +371,11 @@ impl AppState {
         batch.required = SettlementAssets::default();
         batch.shortfall = SettlementAssets::default();
         batch.sweep_after_at = Some(Utc::now() + Duration::minutes(SETTLEMENT_SWEEP_DELAY_MINUTES));
-        batch.message = "整批结算完成，等待五分钟后统一归集".to_string();
+        batch.message = crate::msg!("backend.batchSettlementCompletedWaitingFiveMinutesBefore");
         batch.updated_at = Utc::now();
         self.persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .save_batch_and_orders(batch, orders)
     }
 
@@ -385,9 +399,9 @@ impl AppState {
             .map(|record| record.settlement_price);
         let first = prices.next();
         if prices.any(|price| Some(price) != first) {
-            return Err(AppError::response(
-                "行权记录结算价不一致，需要人工核对".to_string(),
-            ));
+            return Err(AppError::response(crate::msg!(
+                "backend.exerciseRecordsHaveInconsistentSettlementPricesManual"
+            )));
         }
         Ok(first)
     }
@@ -399,13 +413,15 @@ impl AppState {
     ) -> AppResult<()> {
         self.persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .save_order_and_attempt(order, attempt)?;
         let mut orders = self.orders.write().await;
         let stored = orders
             .iter_mut()
             .find(|stored| stored.id == order.id)
-            .ok_or_else(|| AppError::Storage("现货补齐对应策略订单不存在".to_string()))?;
+            .ok_or_else(|| {
+                AppError::Storage(crate::msg!("backend.theStrategyOrderForThisSpotRebalance"))
+            })?;
         *stored = order.clone();
         Ok(())
     }
@@ -426,11 +442,15 @@ impl AppState {
             let mut attempt = self
                 .persistence
                 .lock()
-                .map_err(|error| AppError::Storage(error.to_string()))?
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
                 .list_order_attempts(usize::MAX)?
                 .into_iter()
                 .find(|attempt| attempt.client_order_id == order.spot_client_order_id)
-                .ok_or_else(|| AppError::Storage("原现货补齐恢复记录缺失，不能重发".to_string()))?;
+                .ok_or_else(|| {
+                    AppError::Storage(crate::msg!(
+                        "backend.theOriginalSpotRecoveryRecordIsMissing"
+                    ))
+                })?;
             order.spot_order_id = Some(ack.order_id.clone());
             apply_spot_ack(&mut order, &ack);
             attempt.status = OrderAttemptStatus::SpotPersisted;
@@ -447,14 +467,14 @@ impl AppState {
             || order.settlement_price <= Decimal::ZERO
             || !is_in_the_money(&order, order.settlement_price)
         {
-            return Err(AppError::RiskRejected(
-                "只有已登记、到期且价内的 BTCUSDT 订单可以现货补齐".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.onlyRegisteredBtcusdtOrdersThatExpiredIn"
+            )));
         }
         if self.pending_recovery_count()? > 0 {
-            return Err(AppError::RiskRejected(
-                "存在待确认记录，禁止发送下一笔现货订单".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.unconfirmedRecordsExistSendingTheNextSpot"
+            )));
         }
         validate_spot_rebalance(&order, &client.spot_account().await?)?;
         order.spot_client_order_id = make_spot_client_order_id();
@@ -466,7 +486,7 @@ impl AppState {
             option_symbol: order.option_symbol.clone(),
             status: OrderAttemptStatus::SpotAttempted,
             exchange_order_id: None,
-            message: "现货补齐意图已登记，发送前关联策略订单".to_string(),
+            message: crate::msg!("backend.spotRebalancingIntentRecordedLinkingTheStrategy"),
             updated_at: Utc::now(),
         };
         self.save_settlement_order(&order, &attempt).await?;
@@ -492,7 +512,10 @@ impl AppState {
                     order.status = StrategyStatus::RebalanceFailed;
                     attempt.status = OrderAttemptStatus::Failed;
                 }
-                attempt.message = format!("现货补齐暂停，需确认原请求：{error}");
+                attempt.message = crate::msg!(
+                    "backend.spotRebalancingPausedConfirmTheOriginalRequest",
+                    p0 = error
+                );
                 order.rebalance_message.clone_from(&attempt.message);
             }
         }
@@ -500,7 +523,11 @@ impl AppState {
         self.save_settlement_order(&order, &attempt).await?;
         self.record_log(
             "settlement.spot",
-            &format!("{} {}", order.option_symbol, order.rebalance_message),
+            &crate::msg!(
+                "ui.join",
+                p0 = order.option_symbol,
+                p1 = order.rebalance_message
+            ),
         );
         Ok(order)
     }
@@ -528,7 +555,7 @@ impl AppState {
             return self.update_batch(
                 batch,
                 SettlementStage::PendingSweep,
-                "其它到期订单尚未完成，继续保留资金，延后归集",
+                &crate::msg!("backend.otherExpiringOrdersAreUnfinishedRetainingFunds"),
             );
         }
         if self.pending_recovery_count()? > 0 {
@@ -544,7 +571,7 @@ impl AppState {
         let amounts = batch
             .spot_sweep
             .clone()
-            .ok_or_else(|| AppError::Storage("归集计划缺失".to_string()))?;
+            .ok_or_else(|| AppError::Storage(crate::msg!("backend.fundSweepPlanIsMissing")))?;
         for (asset, amount) in [("USDT", amounts.usdt), ("BTC", amounts.btc)] {
             if self.pending_recovery_count()? > 0 {
                 return Ok(());
@@ -553,7 +580,7 @@ impl AppState {
                 client,
                 asset,
                 amount,
-                "整批现货补齐后归集",
+                &crate::msg!("backend.fundSweepAfterBatchSpotRebalancing"),
                 &format!("{}-subscribe-{asset}", batch.id),
             )
             .await?;
@@ -561,7 +588,7 @@ impl AppState {
         self.update_batch(
             batch,
             SettlementStage::Completed,
-            "整批成交与资金归集均已完成",
+            &crate::msg!("backend.allBatchFillsAndFundSweepsAre"),
         )
     }
 
@@ -598,7 +625,7 @@ impl AppState {
                 self.update_batch(
                     batch,
                     SettlementStage::PendingSweep,
-                    "保证金需求变化，重新评估可归集金额",
+                    &crate::msg!("backend.marginRequirementsChangedReassessingTheAmountAvailable"),
                 )?;
                 return Ok(false);
             }
@@ -606,7 +633,7 @@ impl AppState {
         self.execute_universal_transfer(
             client,
             &chain_id,
-            "整批结算后归集",
+            &crate::msg!("backend.fundSweepAfterBatchSettlement"),
             "OPTION_MAIN",
             "USDT",
             amount,
@@ -619,7 +646,7 @@ impl AppState {
             self.update_batch(
                 batch,
                 SettlementStage::PendingSweep,
-                "期权划转已确认，等待现货到账后统一申购",
+                &crate::msg!("backend.optionsTransferConfirmedWaitingForSpotFunds"),
             )?;
             return Ok(false);
         }

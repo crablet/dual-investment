@@ -2,6 +2,7 @@
 //
 // 日志读取和文件操作都通过 Tauri command 进入 Rust，不提供浏览器 fallback。
 
+import type { LocalizedMessage } from '@/i18n'
 import type { LogSnapshot } from '@/types/domain'
 import { computed, onMounted, shallowRef } from 'vue'
 import { api, commandError } from '@/services/api'
@@ -11,7 +12,7 @@ type LogAction = 'refresh' | 'openFile' | 'openFolder' | 'clear'
 export function useLogSnapshot() {
   const snapshot = shallowRef<LogSnapshot>()
   const pendingAction = shallowRef<LogAction>()
-  const error = shallowRef<string>()
+  const error = shallowRef<LocalizedMessage>()
 
   const hasFiles = computed(() => snapshot.value?.hasFiles ?? false)
   const recentEntries = computed(() => snapshot.value?.recentEntries ?? [])

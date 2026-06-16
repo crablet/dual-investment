@@ -4,13 +4,19 @@
 业务状态全部放在 Pinia store，视图组件只消费当前快照和触发显式操作。
 -->
 <script setup lang="ts">
-import { darkTheme, dateZhCN, NConfigProvider, NMessageProvider, zhCN } from 'naive-ui'
-import { computed, defineAsyncComponent } from 'vue'
+import { darkTheme, dateEnUS, dateEsAR, dateIdID, dateJaJP, dateKoKR, datePtBR, dateThTH, dateTrTR, dateViVN, dateZhCN, dateZhTW, enUS, esAR, idID, jaJP, koKR, NConfigProvider, NMessageProvider, ptBR, thTH, trTR, viVN, zhCN, zhTW } from 'naive-ui'
+import { computed, defineAsyncComponent, onMounted, onUnmounted } from 'vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import { useBackgroundSync } from '@/composables/useBackgroundSync'
 import { useAppStore } from '@/stores/app'
+import { usePreferencesStore } from '@/stores/preferences'
 import { themeOverrides } from '@/theme/naive'
 
+const preferences = usePreferencesStore()
+const locales = { 'zh-CN': zhCN, 'zh-TW': zhTW, 'en': enUS, 'pt-BR': ptBR, 'es': esAR, 'vi': viVN, 'tr': trTR, 'id': idID, 'ja': jaJP, 'ko': koKR, 'th': thTH }
+const dates = { 'zh-CN': dateZhCN, 'zh-TW': dateZhTW, 'en': dateEnUS, 'pt-BR': datePtBR, 'es': dateEsAR, 'vi': dateViVN, 'tr': dateTrTR, 'id': dateIdID, 'ja': dateJaJP, 'ko': dateKoKR, 'th': dateThTH }
+onMounted(() => window.addEventListener('languagechange', preferences.refreshSystemLocale))
+onUnmounted(() => window.removeEventListener('languagechange', preferences.refreshSystemLocale))
 const store = useAppStore()
 useBackgroundSync()
 
@@ -30,7 +36,7 @@ const currentView = computed(() => views[store.activeView] ?? OverviewView)
 </script>
 
 <template>
-  <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
+  <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides" :locale="locales[preferences.locale]" :date-locale="dates[preferences.locale]">
     <NMessageProvider>
       <AppShell>
         <component :is="currentView" />

@@ -7,6 +7,8 @@
 mod http;
 mod parsing;
 
+use crate::messages::Message;
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -60,7 +62,7 @@ impl BinanceClient {
         let http = Client::builder()
             .timeout(Duration::from_secs(12))
             .build()
-            .map_err(|error| AppError::Config(error.to_string()))?;
+            .map_err(|error| AppError::Config(Message::diagnostic(error.to_string())))?;
 
         Ok(Self {
             http,
@@ -76,9 +78,9 @@ impl BinanceClient {
     pub async fn verify_account(&self) -> AppResult<()> {
         let account = self.option_account().await?;
         if !account.can_trade {
-            return Err(AppError::Config(
-                "Binance 期权账户当前不可交易，请检查 API 权限和账户状态".to_string(),
-            ));
+            return Err(AppError::Config(crate::msg!(
+                "backend.binanceOptionsAccountCannotTradeCheckApi"
+            )));
         }
         Ok(())
     }
@@ -193,7 +195,7 @@ impl BinanceClient {
         let mut balances = self
             .simple_earn_positions(
                 "/sapi/v1/simple-earn/flexible/position",
-                "活期理财",
+                "flexibleEarn",
                 "totalAmount",
                 true,
                 None,
@@ -202,7 +204,7 @@ impl BinanceClient {
         balances.extend(
             self.simple_earn_positions(
                 "/sapi/v1/simple-earn/locked/position",
-                "定期理财",
+                "lockedEarn",
                 "amount",
                 false,
                 None,
@@ -218,12 +220,14 @@ impl BinanceClient {
         asset: &str,
     ) -> AppResult<SimpleEarnSnapshot> {
         if asset.trim().is_empty() {
-            return Err(AppError::Config("活期持仓查询资产不能为空".to_string()));
+            return Err(AppError::Config(crate::msg!(
+                "backend.assetForTheFlexiblePositionQueryCannot"
+            )));
         }
         let balances = self
             .simple_earn_positions(
                 "/sapi/v1/simple-earn/flexible/position",
-                "活期理财",
+                "flexibleEarn",
                 "totalAmount",
                 true,
                 Some(asset),
@@ -257,7 +261,10 @@ impl BinanceClient {
         product_id: &str,
         amount: Decimal,
     ) -> AppResult<String> {
-        let amount = Self::funding_amount_param("Simple Earn 活期赎回", amount)?;
+        let amount = Self::funding_amount_param(
+            &crate::msg!("backend.simpleEarnFlexibleRedemption"),
+            amount,
+        )?;
         let response = self
             .signed_post_value(
                 SPOT_BASE,
@@ -270,8 +277,15 @@ impl BinanceClient {
                 ],
             )
             .await?;
-        ensure_success_response(&response, "Simple Earn 活期赎回")?;
-        response_id(&response, "redeemId", "Simple Earn 活期赎回")
+        ensure_success_response(
+            &response,
+            &crate::msg!("backend.simpleEarnFlexibleRedemption"),
+        )?;
+        response_id(
+            &response,
+            "redeemId",
+            &crate::msg!("backend.simpleEarnFlexibleRedemption"),
+        )
     }
 
     /// 从现货账户申购 Simple Earn 活期。
@@ -280,7 +294,10 @@ impl BinanceClient {
         product_id: &str,
         amount: Decimal,
     ) -> AppResult<String> {
-        let amount = Self::funding_amount_param("Simple Earn 活期申购", amount)?;
+        let amount = Self::funding_amount_param(
+            &crate::msg!("backend.simpleEarnFlexibleSubscription"),
+            amount,
+        )?;
         let response = self
             .signed_post_value(
                 SPOT_BASE,
@@ -293,8 +310,15 @@ impl BinanceClient {
                 ],
             )
             .await?;
-        ensure_success_response(&response, "Simple Earn 活期申购")?;
-        response_id(&response, "purchaseId", "Simple Earn 活期申购")
+        ensure_success_response(
+            &response,
+            &crate::msg!("backend.simpleEarnFlexibleSubscription"),
+        )?;
+        response_id(
+            &response,
+            "purchaseId",
+            &crate::msg!("backend.simpleEarnFlexibleSubscription"),
+        )
     }
 
     /// 在现货账户和期权账户之间划转资金。
@@ -304,7 +328,8 @@ impl BinanceClient {
         asset: &str,
         amount: Decimal,
     ) -> AppResult<String> {
-        let amount = Self::funding_amount_param("Binance 账户划转", amount)?;
+        let amount =
+            Self::funding_amount_param(&crate::msg!("backend.binanceAccountTransfer"), amount)?;
         let response = self
             .signed_post_value(
                 SPOT_BASE,
@@ -316,7 +341,11 @@ impl BinanceClient {
                 ],
             )
             .await?;
-        response_id(&response, "tranId", "Binance 账户划转")
+        response_id(
+            &response,
+            "tranId",
+            &crate::msg!("backend.binanceAccountTransfer"),
+        )
     }
 
     /// 查询 Binance 账户划转历史，用于资金动作恢复。
@@ -626,7 +655,7 @@ impl BinanceClient {
         let server_time = response
             .get("serverTime")
             .and_then(Value::as_i64)
-            .ok_or_else(|| AppError::response("Binance serverTime 字段缺失"))?;
+            .ok_or_else(|| AppError::response(crate::msg!("backend.binanceServertimeIsMissing")))?;
         let offset = server_time - Utc::now().timestamp_millis();
         self.timestamp_offset_ms.store(offset, Ordering::SeqCst);
         Ok(())
@@ -698,24 +727,27 @@ impl BinanceClient {
         params.push(("recvWindow".to_string(), "5000".to_string()));
         let query = encode_query(&params);
         let mut mac = <HmacSha256 as KeyInit>::new_from_slice(self.api_secret.as_bytes())
-            .map_err(|error| AppError::Config(error.to_string()))?;
+            .map_err(|error| AppError::Config(Message::diagnostic(error.to_string())))?;
         mac.update(query.as_bytes());
         let signature = hex::encode(mac.finalize().into_bytes());
         params.push(("signature".to_string(), signature));
         Ok(params)
     }
 
-    fn funding_amount_param(action: &str, amount: Decimal) -> AppResult<String> {
+    fn funding_amount_param(action: &Message, amount: Decimal) -> AppResult<String> {
         // Binance 资金接口对小数位更敏感，调用方必须先按动作方向完成取整。
         let normalized = amount.normalize();
         if normalized <= Decimal::ZERO {
-            return Err(AppError::Config(format!(
-                "{action} amount 必须大于 0，已阻止发送 Binance 资金请求"
+            return Err(AppError::Config(crate::msg!(
+                "backend.amountMustBePositiveBinanceFundingRequest",
+                p0 = action
             )));
         }
         if normalized.scale() > BINANCE_FUNDING_AMOUNT_SCALE {
-            return Err(AppError::Config(format!(
-                "{action} amount 小数位超过 {BINANCE_FUNDING_AMOUNT_SCALE} 位，已阻止发送 Binance 资金请求"
+            return Err(AppError::Config(crate::msg!(
+                "backend.amountExceedsDecimalPlacesBinanceFundingRequest",
+                p0 = action,
+                p1 = BINANCE_FUNDING_AMOUNT_SCALE
             )));
         }
         Ok(normalized.to_string())
@@ -747,13 +779,19 @@ impl BinanceClient {
     }
 }
 
-fn response_id(value: &Value, key: &str, operation: &str) -> AppResult<String> {
+fn response_id(value: &Value, key: &str, operation: &Message) -> AppResult<String> {
     // 资金接口成功后必须拿到交易所引用，后续恢复只能靠它或脱敏匹配条件查询历史。
     value
         .get(key)
         .map(value_to_string)
         .filter(|text| !text.trim().is_empty())
-        .ok_or_else(|| AppError::response(format!("{operation}响应缺少 {key} 字段")))
+        .ok_or_else(|| {
+            AppError::response(crate::msg!(
+                "backend.responseIsMissingField",
+                p0 = operation,
+                p1 = key
+            ))
+        })
 }
 
 /// 根据双币赢方向决定现货补齐方向。

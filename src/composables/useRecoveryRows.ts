@@ -13,6 +13,7 @@ import type {
   SettlementStage,
 } from '@/types/domain'
 import { computed } from 'vue'
+import { messageText, t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import { localDateTimeLabel } from '@/utils/date'
 import { attemptStatusText, recoveryStatusTone as attemptStatusTone, fundingAttemptStatusText } from '@/utils/labels'
@@ -77,7 +78,7 @@ export function useRecoveryRows() {
   }
 
   function recoverActionLabel(row: RecoveryRow) {
-    return row.status === 'blocked' ? '重查' : '恢复'
+    return row.status === 'blocked' ? t('ui.queryAgain') : t('ui.recovery')
   }
 
   async function recoverRow(row: RecoveryRow) {
@@ -92,9 +93,9 @@ export function useRecoveryRows() {
 
   async function resolveFundingRow(row: RecoveryRow, resolution: FundingAttemptManualResolution) {
     const label = resolution === 'confirmed'
-      ? '已在 Binance 核实该资金动作成功'
-      : '已在 Binance 核实该资金动作失败或未发生'
-    if (!window.confirm(`确认${label}？该操作只解除恢复阻断，不会重新发送资金请求。`)) {
+      ? t('ui.verifiedOnBinanceThatThisFundingAction')
+      : t('ui.verifiedOnBinanceThatThisFundingAction2')
+    if (!window.confirm(t('ui.confirmYouHaveThisOnlyRemovesThe', { p0: label }))) {
       return
     }
     await store.resolveFundingAttempt(row.id, resolution)
@@ -104,7 +105,7 @@ export function useRecoveryRows() {
     if (row.source !== 'settlement' || !row.canFinish) {
       return
     }
-    if (!window.confirm(`结束 ${row.target} 的理财收尾？\n未申购资金留在现货，已完成的资金动作保留。此操作只解除本批次限制，其他交易风控继续生效。`)) {
+    if (!window.confirm(t('ui.endEarnFinalizationForUnsubscribedFundsStay', { p0: row.target }))) {
       return
     }
     await store.finishSettlementSweep(row.id)
@@ -128,16 +129,16 @@ function settlementRecoveryRow(recovery: SettlementRecoveryView): RecoveryRow {
     id: recovery.id,
     source: 'settlement',
     updatedAt: recovery.updatedAt,
-    type: '结算收尾',
+    type: t('ui.settlementFinalization'),
     target: `${recovery.symbol} · ${localDateTimeLabel(recovery.expiryAt)}`,
     amount: recovery.symbol,
     exchangeRef: '--',
     status: recovery.status,
-    statusLabel: recovery.statusLabel,
+    statusLabel: messageText(recovery.statusLabel),
     canFinish: recovery.canFinish,
-    factSource: recovery.factSource,
-    nextAction: recovery.nextAction,
-    message: recovery.message,
+    factSource: messageText(recovery.factSource),
+    nextAction: messageText(recovery.nextAction),
+    message: messageText(recovery.message),
     diagnostics: '',
   }
 }
@@ -147,18 +148,18 @@ function orderAttemptRecoveryRow(attempt: OrderAttempt): RecoveryRow {
     id: attempt.id,
     source: 'order',
     updatedAt: attempt.updatedAt,
-    type: attempt.status.startsWith('spot_') ? '现货补齐' : '期权订单',
+    type: attempt.status.startsWith('spot_') ? t('ui.spotRebalancing') : t('ui.optionOrder'),
     target: attempt.optionSymbol,
     amount: attempt.symbol,
     exchangeRef: attempt.exchangeOrderId ?? attempt.clientOrderId,
     status: attempt.status,
     factSource: attempt.exchangeOrderId
-      ? `Binance 订单 ${attempt.exchangeOrderId}`
-      : `客户端订单 ${attempt.clientOrderId}`,
+      ? t('ui.binanceOrder', { p0: attempt.exchangeOrderId })
+      : t('ui.clientOrder', { p0: attempt.clientOrderId }),
     nextAction: attempt.status === 'persisted' || attempt.status === 'spot_persisted'
-      ? '无需处理'
-      : '重新查询 Binance 订单',
-    message: attempt.message,
+      ? t('ui.noActionNeeded')
+      : t('ui.queryBinanceOrderAgain'),
+    message: messageText(attempt.message),
     diagnostics: '',
   }
 }
@@ -169,37 +170,37 @@ function fundingAttemptRecoveryRow(attempt: FundingAttemptView): RecoveryRow {
     id: attempt.id,
     source: 'funding',
     updatedAt: attempt.updatedAt,
-    type: attempt.kindLabel,
+    type: messageText(attempt.kindLabel),
     target: attempt.transferType ?? attempt.productId ?? attempt.asset,
     amount: `${attempt.amount} ${attempt.asset}`,
     exchangeRef: attempt.exchangeRef ?? '--',
     status: attempt.status,
-    factSource: attempt.factSource,
-    nextAction: attempt.nextAction,
-    message: attempt.message,
+    factSource: messageText(attempt.factSource),
+    nextAction: messageText(attempt.nextAction),
+    message: messageText(attempt.message),
     diagnostics: fundingAttemptDiagnostics(attempt),
   }
 }
 
 function fundingAttemptDiagnostics(attempt: FundingAttemptView) {
   const parts = [
-    `查询 ${attempt.queryCount} 次`,
-    `有效 ${attempt.effectiveQueryCount} 次`,
-    `临时错误 ${attempt.transportErrorCount} 次`,
+    t('ui.queries', { p0: attempt.queryCount }),
+    t('ui.effectiveQueries', { p0: attempt.effectiveQueryCount }),
+    t('ui.temporaryErrors', { p0: attempt.transportErrorCount }),
   ]
   if (attempt.queryAfterAt) {
-    parts.push(`下次 ${localDateTimeLabel(attempt.queryAfterAt)}`)
+    parts.push(t('ui.next', { p0: localDateTimeLabel(attempt.queryAfterAt) }))
   }
   if (attempt.submitErrorKind) {
-    parts.push(`发送错误 ${attempt.submitErrorKind}`)
+    parts.push(t('ui.submissionError', { p0: attempt.submitErrorKind }))
   }
   if (attempt.historyErrorKind) {
-    parts.push(`历史错误 ${attempt.historyErrorKind}`)
+    parts.push(t('ui.historyError', { p0: attempt.historyErrorKind }))
   }
   if (attempt.historyWindowStartAt && attempt.historyWindowEndAt) {
     parts.push(
-      `窗口 ${localDateTimeLabel(attempt.historyWindowStartAt)} - ${localDateTimeLabel(attempt.historyWindowEndAt)}`,
+      t('ui.window', { p0: localDateTimeLabel(attempt.historyWindowStartAt), p1: localDateTimeLabel(attempt.historyWindowEndAt) }),
     )
   }
-  return parts.join('；')
+  return parts.join(' · ')
 }

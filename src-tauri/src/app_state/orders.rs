@@ -25,7 +25,11 @@ pub(super) fn apply_settlement_progress(orders: &mut [StrategyOrder], batches: &
             if order.rebalance_message.is_empty() {
                 order.rebalance_message.clone_from(&batch.message);
             } else {
-                order.rebalance_message = format!("{}；{}", order.rebalance_message, batch.message);
+                order.rebalance_message = crate::msg!(
+                    "ui.joinSentence",
+                    p0 = order.rebalance_message,
+                    p1 = batch.message
+                );
             }
         }
     }
@@ -41,8 +45,9 @@ pub(super) fn request_from_option_attempt(
         "PUT" => StrategyDirection::SellPut,
         "CALL" => StrategyDirection::SellCall,
         side => {
-            return Err(AppError::Storage(format!(
-                "恢复记录对应的 Binance 合约方向无效：{side}"
+            return Err(AppError::Storage(crate::msg!(
+                "backend.invalidBinanceContractSideInRecoveryRecord",
+                p0 = side
             )));
         }
     };
@@ -119,9 +124,11 @@ pub(super) fn apply_spot_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) 
     if ack.status == "FILLED" && ack.executed_qty == expected {
         order.status = StrategyStatus::Settled;
         order.settled_at = Some(Utc::now());
-        order.rebalance_message = format!(
-            "现货补齐已足额成交，数量 {}，均价 {}，状态 {}",
-            ack.executed_qty, ack.avg_price, ack.status
+        order.rebalance_message = crate::msg!(
+            "backend.spotRebalancingFullyFilledQuantityAverageStatus",
+            p0 = ack.executed_qty,
+            p1 = ack.avg_price,
+            p2 = ack.status
         );
     } else if matches!(
         ack.status.as_str(),
@@ -129,24 +136,29 @@ pub(super) fn apply_spot_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) 
     ) && ack.executed_qty < expected
     {
         order.status = StrategyStatus::Running;
-        order.rebalance_message = format!(
-            "现货订单仍在成交，已成交 {} / {}，等待原单确认",
-            ack.executed_qty, expected
+        order.rebalance_message = crate::msg!(
+            "backend.spotOrderIsStillFillingAwaitingThe",
+            p0 = ack.executed_qty,
+            p1 = expected
         );
     } else if matches!(
         ack.status.as_str(),
         "REJECTED" | "EXPIRED" | "CANCELED" | "CANCELLED"
     ) {
         order.status = StrategyStatus::RebalanceFailed;
-        order.rebalance_message = format!(
-            "现货补齐未完成，成交 {} / {}，状态 {}",
-            ack.executed_qty, expected, ack.status
+        order.rebalance_message = crate::msg!(
+            "backend.spotRebalancingIncompleteFilledStatus",
+            p0 = ack.executed_qty,
+            p1 = expected,
+            p2 = ack.status
         );
     } else {
         order.status = StrategyStatus::RebalanceFailed;
-        order.rebalance_message = format!(
-            "现货补齐尚未足额成交，成交 {} / {}，状态 {}",
-            ack.executed_qty, expected, ack.status
+        order.rebalance_message = crate::msg!(
+            "backend.spotRebalancingNotFullyFilledStatus",
+            p0 = ack.executed_qty,
+            p1 = expected,
+            p2 = ack.status
         );
     }
 }

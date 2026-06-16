@@ -18,28 +18,34 @@ use crate::strategy;
 /// 校验下单请求的基础业务边界。
 pub(super) fn validate_request(request: &StrategyRequest) -> AppResult<()> {
     if request.client_flow_id.trim().is_empty() {
-        return Err(AppError::Config("手动下单请求缺少流程 ID".to_string()));
+        return Err(AppError::Config(crate::msg!(
+            "backend.manualOrderRequestIsMissingAFlow"
+        )));
     }
     if request.option_symbol.trim().is_empty() {
-        return Err(AppError::RiskRejected(
-            "手动下单必须指定 Binance 期权合约".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.aManualOrderMustSpecifyABinance"
+        )));
     }
     if request.symbol != "BTCUSDT" {
-        return Err(AppError::RiskRejected(
-            "v1 仅支持 BTC/USDT 策略".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.onlyBtcUsdtStrategiesAreSupportedIn"
+        )));
     }
     if request.quantity < dec!(0.01) {
-        return Err(AppError::RiskRejected(
-            "币安期权最小交易单位按 0.01 张处理".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.theBinanceOptionsMinimumIsTreatedAs"
+        )));
     }
     if request.strike <= Decimal::ZERO {
-        return Err(AppError::RiskRejected("执行价必须大于 0".to_string()));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.strikePriceMustBeGreaterThanZero"
+        )));
     }
     if request.limit_price <= Decimal::ZERO {
-        return Err(AppError::RiskRejected("限价必须大于 0".to_string()));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.limitPriceMustBeGreaterThanZero"
+        )));
     }
     Ok(())
 }
@@ -52,7 +58,11 @@ pub(super) fn resolve_contract<'a>(
     let contract = contracts
         .iter()
         .find(|contract| contract.symbol == request.option_symbol.trim())
-        .ok_or_else(|| AppError::RiskRejected("未找到指定的 Binance 期权合约".to_string()))?;
+        .ok_or_else(|| {
+            AppError::RiskRejected(crate::msg!(
+                "backend.specifiedBinanceOptionContractNotFound"
+            ))
+        })?;
     ensure_contract_matches_request(request, contract)?;
     Ok(contract)
 }
@@ -63,24 +73,24 @@ pub(super) fn ensure_contract_matches_request(
     contract: &OptionContract,
 ) -> AppResult<()> {
     if contract.underlying != request.symbol {
-        return Err(AppError::RiskRejected(
-            "期权合约标的与下单标的不一致".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.optionUnderlyingDoesNotMatchTheOrder"
+        )));
     }
     if contract.expiry_at != request.expiry_at {
-        return Err(AppError::RiskRejected(
-            "期权合约精确到期时间与复核快照不一致，请重新扫描并复核".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.exactContractExpiryDiffersFromTheReview"
+        )));
     }
     if contract.strike_price != request.strike {
-        return Err(AppError::RiskRejected(
-            "期权合约执行价与下单执行价不一致".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.contractStrikePriceDoesNotMatchThe"
+        )));
     }
     if contract.side != request.direction.option_type() {
-        return Err(AppError::RiskRejected(
-            "期权合约方向与下单方向不一致".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.contractSideDoesNotMatchTheOrder"
+        )));
     }
     Ok(())
 }
@@ -96,10 +106,10 @@ pub(super) fn validate_option_margin(
         .map_or(Decimal::ZERO, |asset| asset.available);
     let required = strategy::required_margin(contract, request.direction, request.quantity);
     if available < required {
-        return Err(AppError::RiskRejected(format!(
-            "可用 USDT 保证金不足，预计至少需要 {}，当前可用 {}",
-            required.round_dp(2),
-            available.round_dp(2)
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.insufficientUsdtMarginAtLeastRequiredAvailable",
+            p0 = required.round_dp(2),
+            p1 = available.round_dp(2)
         )));
     }
     Ok(())
@@ -112,70 +122,71 @@ pub(super) fn validate_contract_terms(
     marks: &[OptionMarkPrice],
 ) -> AppResult<()> {
     if contract.status != "TRADING" {
-        return Err(AppError::RiskRejected(format!(
-            "期权合约当前不可交易，状态 {}",
-            contract.status
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.optionContractIsNotTradableStatus",
+            p0 = contract.status
         )));
     }
     if contract.underlying != "BTCUSDT" || contract.quote_asset != "USDT" {
-        return Err(AppError::RiskRejected(
-            "v1 仅允许 BTCUSDT/USDT 期权合约".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.onlyBtcusdtUsdtOptionContractsAreAllowed"
+        )));
     }
     if request.quantity < contract.min_qty || request.quantity > contract.max_qty {
-        return Err(AppError::RiskRejected(format!(
-            "下单数量必须在 Binance 合约范围 {} - {} 内",
-            contract.min_qty, contract.max_qty
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.orderQuantityMustBeWithinBinanceContract",
+            p0 = contract.min_qty,
+            p1 = contract.max_qty
         )));
     }
     if decimal_scale(request.quantity) > contract.quantity_scale {
-        return Err(AppError::RiskRejected(format!(
-            "下单数量精度超过 Binance 合约限制 {} 位",
-            contract.quantity_scale
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.orderQuantityExceedsTheBinancePrecisionLimit",
+            p0 = contract.quantity_scale
         )));
     }
     if !strategy::decimal_matches_step(request.quantity, contract.quantity_step_size) {
-        return Err(AppError::RiskRejected(format!(
-            "下单数量必须按 Binance step size {} 递增",
-            contract.quantity_step_size
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.orderQuantityMustFollowBinanceStepSize",
+            p0 = contract.quantity_step_size
         )));
     }
     if contract.min_price > Decimal::ZERO && request.limit_price < contract.min_price {
-        return Err(AppError::RiskRejected(format!(
-            "限价低于 Binance 合约最小价格 {}",
-            contract.min_price
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.limitPriceIsBelowTheBinanceContract",
+            p0 = contract.min_price
         )));
     }
     if contract.max_price > Decimal::ZERO && request.limit_price > contract.max_price {
-        return Err(AppError::RiskRejected(format!(
-            "限价高于 Binance 合约最大价格 {}",
-            contract.max_price
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.limitPriceExceedsTheBinanceContractMaximum",
+            p0 = contract.max_price
         )));
     }
     if decimal_scale(request.limit_price) > contract.price_scale {
-        return Err(AppError::RiskRejected(format!(
-            "限价精度超过 Binance 合约限制 {} 位",
-            contract.price_scale
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.limitPriceExceedsTheBinancePrecisionLimit",
+            p0 = contract.price_scale
         )));
     }
     if !strategy::decimal_matches_step(request.limit_price, contract.price_tick_size) {
-        return Err(AppError::RiskRejected(format!(
-            "限价必须按 Binance tick size {} 递增",
-            contract.price_tick_size
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.limitPriceMustFollowBinanceTickSize",
+            p0 = contract.price_tick_size
         )));
     }
 
     if let Some(mark) = marks.iter().find(|mark| mark.symbol == contract.symbol) {
         if mark.low_price_limit > Decimal::ZERO && request.limit_price < mark.low_price_limit {
-            return Err(AppError::RiskRejected(format!(
-                "限价低于 Binance 当前价格下限 {}",
-                mark.low_price_limit
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.limitPriceIsBelowTheCurrentBinance",
+                p0 = mark.low_price_limit
             )));
         }
         if mark.high_price_limit > Decimal::ZERO && request.limit_price > mark.high_price_limit {
-            return Err(AppError::RiskRejected(format!(
-                "限价高于 Binance 当前价格上限 {}",
-                mark.high_price_limit
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.limitPriceExceedsTheCurrentBinanceUpper",
+                p0 = mark.high_price_limit
             )));
         }
     }
@@ -202,8 +213,12 @@ pub(super) fn enforce_risk_rules(
         if equity > Decimal::ZERO {
             let next_usage = ((usdt.initial_margin + required) / equity * dec!(100)).round_dp(2);
             if next_usage > margin_usage_hard_limit {
-                return Err(AppError::RiskRejected(format!(
-                    "下单后保证金占用预计 {next_usage}%，超过风控硬上限 {margin_usage_hard_limit}%（配置上限 {max_margin_usage}% + 容差 {margin_usage_tolerance} 个百分点）"
+                return Err(AppError::RiskRejected(crate::msg!(
+                    "backend.estimatedPostOrderMarginUsageExceedsHard",
+                    p0 = next_usage,
+                    p1 = margin_usage_hard_limit,
+                    p2 = max_margin_usage,
+                    p3 = margin_usage_tolerance
                 )));
             }
         }
@@ -218,17 +233,18 @@ pub(super) fn validate_spot_rebalance(
     account: &SpotAccountSnapshot,
 ) -> AppResult<()> {
     if !account.can_trade {
-        return Err(AppError::RiskRejected(
-            "现货账户不可交易，停止到期补齐".to_string(),
-        ));
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.spotAccountCannotTradeExpiryRebalancingStopped"
+        )));
     }
     let (asset, required) = spot_rebalance_required_asset(order);
     let available = spot_asset_free(account, asset);
     if available < required {
-        return Err(AppError::RiskRejected(format!(
-            "现货补齐 {asset} 不足，预计需要 {}，当前可用 {}",
-            required.round_dp(2),
-            available.round_dp(2)
+        return Err(AppError::RiskRejected(crate::msg!(
+            "backend.insufficientForSpotRebalancingRequiredAvailable",
+            p0 = asset,
+            p1 = required.round_dp(2),
+            p2 = available.round_dp(2)
         )));
     }
     Ok(())

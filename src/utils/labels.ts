@@ -1,6 +1,6 @@
 // 前端展示文案映射。
 //
-// 这里只维护 UI 标签和组件 tone。Rust 侧仍保留日志与错误提示所需的业务文案。
+// 这里只维护 UI 标签和组件 tone。Rust 侧返回日志与错误提示的消息代码和参数。
 
 import type {
   FundingAttemptStatus,
@@ -9,12 +9,13 @@ import type {
   StrategyDirection,
   StrategyStatus,
 } from '@/types/domain'
+import { t } from '@/i18n'
 
 type RecoveryStatus = FundingAttemptStatus | OrderAttemptStatus
 
 export const directionTextMap: Record<StrategyDirection, string> = {
-  sellPut: '卖 Put 抄底',
-  sellCall: '卖 Call 止盈',
+  get sellPut() { return t('ui.sellPut') },
+  get sellCall() { return t('ui.sellCall') },
 }
 
 export const directionToneMap: Record<StrategyDirection, 'success' | 'error'> = {
@@ -23,14 +24,14 @@ export const directionToneMap: Record<StrategyDirection, 'success' | 'error'> = 
 }
 
 export const statusTextMap: Record<StrategyStatus, string> = {
-  pending: '待成交',
-  running: '进行中',
-  settled: '已结算',
-  cancelled: '已取消',
-  rejected: '已拒绝',
-  expired: '已过期',
-  partiallyFilled: '部分成交',
-  rebalanceFailed: '补齐失败',
+  get pending() { return t('ui.pendingFill') },
+  get running() { return t('ui.inProgress') },
+  get settled() { return t('ui.settled') },
+  get cancelled() { return t('ui.cancelled') },
+  get rejected() { return t('ui.rejected') },
+  get expired() { return t('ui.expired') },
+  get partiallyFilled() { return t('ui.partiallyFilled') },
+  get rebalanceFailed() { return t('ui.rebalancingFailed') },
 }
 
 export const statusToneMap: Record<StrategyStatus, 'default' | 'error' | 'info' | 'success' | 'warning'> = {
@@ -45,13 +46,13 @@ export const statusToneMap: Record<StrategyStatus, 'default' | 'error' | 'info' 
 }
 
 export const attemptStatusTextMap: Record<OrderAttemptStatus, string> = {
-  attempted: '准备发送期权订单',
-  exchange_ack: '交易所已接单',
-  persisted: '订单已保存',
-  failed: '下单失败',
-  persist_failed: '订单保存失败',
-  spot_attempted: '准备发送现货补齐',
-  spot_persisted: '现货补齐已保存',
+  get attempted() { return t('ui.preparingOptionOrder') },
+  get exchange_ack() { return t('ui.exchangeAcceptedOrder') },
+  get persisted() { return t('ui.orderSaved') },
+  get failed() { return t('ui.orderFailed') },
+  get persist_failed() { return t('ui.orderSaveFailed') },
+  get spot_attempted() { return t('ui.preparingSpotRebalancing') },
+  get spot_persisted() { return t('ui.spotRebalancingSaved') },
 }
 
 export const recoveryStatusToneMap: Record<RecoveryStatus, 'error' | 'info' | 'success' | 'warning'> = {
@@ -69,13 +70,13 @@ export const recoveryStatusToneMap: Record<RecoveryStatus, 'error' | 'info' | 's
 }
 
 export const fundingAttemptStatusTextMap: Record<FundingAttemptStatus, string> = {
-  attempted: '准备发送资金请求',
-  exchange_ack: '交易所已返回引用',
-  uncertain: '结果待确认',
-  pending: '处理中',
-  confirmed: '已确认',
-  failed: '资金动作失败',
-  blocked: '已阻断',
+  get attempted() { return t('ui.preparingFundingRequest') },
+  get exchange_ack() { return t('ui.exchangeReturnedAReference') },
+  get uncertain() { return t('ui.awaitingConfirmation') },
+  get pending() { return t('ui.processing') },
+  get confirmed() { return t('ui.confirmed') },
+  get failed() { return t('ui.fundingActionFailed') },
+  get blocked() { return t('ui.blocked') },
 }
 
 export const logLevelToneMap: Record<LogLevel, 'default' | 'error' | 'info' | 'success' | 'warning'> = {
@@ -84,12 +85,12 @@ export const logLevelToneMap: Record<LogLevel, 'default' | 'error' | 'info' | 's
   error: 'error',
 }
 
-/** 策略状态中文文案。 */
+/** 策略状态本地化文案。 */
 export function strategyStatusText(status: StrategyStatus) {
   return statusTextMap[status]
 }
 
-/** 恢复记录状态中文文案。 */
+/** 恢复记录状态本地化文案。 */
 export function attemptStatusText(status: OrderAttemptStatus) {
   return attemptStatusTextMap[status]
 }
@@ -99,7 +100,7 @@ export function recoveryStatusTone(status: RecoveryStatus) {
   return recoveryStatusToneMap[status]
 }
 
-/** 资金恢复记录状态中文文案。 */
+/** 资金恢复记录状态本地化文案。 */
 export function fundingAttemptStatusText(status: FundingAttemptStatus) {
   return fundingAttemptStatusTextMap[status]
 }

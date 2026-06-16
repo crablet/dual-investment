@@ -3,6 +3,8 @@
 //! 日志按本机日期写入应用数据目录下的 `logs/YYYY-MM-DD.log`，每行一条 JSON。
 //! 写入内容必须是脱敏摘要，不能包含 API Secret、签名 query 或 Binance 原始响应。
 
+use crate::messages::Message;
+
 use std::{
     ffi::OsStr,
     fs::{self, File, OpenOptions},
@@ -21,7 +23,7 @@ const MAX_LINE_BYTES: usize = 64 * 1024;
 
 pub struct LogStore {
     directory: PathBuf,
-    write_error: Mutex<Option<String>>,
+    write_error: Mutex<Option<Message>>,
 }
 
 impl LogStore {
@@ -34,7 +36,7 @@ impl LogStore {
     }
 
     /// 写入失败只更新日志面板的错误状态，不改变交易操作的返回结果。
-    pub fn append(&self, level: LogLevel, event: &str, message: &str) {
+    pub fn append(&self, level: LogLevel, event: &str, message: &Message) {
         let mut write_error = self
             .write_error
             .lock()
@@ -42,17 +44,17 @@ impl LogStore {
         *write_error = self
             .write_entry(level, event, message)
             .err()
-            .map(|error| error.to_string());
+            .map(|error| error.message());
     }
 
-    fn write_entry(&self, level: LogLevel, event: &str, message: &str) -> AppResult<()> {
+    fn write_entry(&self, level: LogLevel, event: &str, message: &Message) -> AppResult<()> {
         fs::create_dir_all(&self.directory).map_err(storage_error)?;
         let entry = LogEntry {
             id: Uuid::new_v4().to_string(),
             timestamp: Utc::now(),
             level,
             event: event.to_string(),
-            message: message.to_string(),
+            message: message.clone(),
         };
         let mut file = OpenOptions::new()
             .create(true)
@@ -60,7 +62,7 @@ impl LogStore {
             .open(self.current_file_path())
             .map_err(storage_error)?;
         serde_json::to_writer(&mut file, &entry)
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         file.write_all(b"\n").map_err(storage_error)?;
         Ok(())
     }
@@ -86,7 +88,7 @@ impl LogStore {
         let _guard = self
             .write_error
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         fs::create_dir_all(&self.directory).map_err(storage_error)?;
         let path = self.current_file_path();
         OpenOptions::new()
@@ -108,7 +110,7 @@ impl LogStore {
         let _guard = self
             .write_error
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         fs::create_dir_all(&self.directory).map_err(storage_error)?;
         for path in self.log_file_paths()? {
             fs::remove_file(path).map_err(storage_error)?;
@@ -156,7 +158,7 @@ fn read_recent_entries(path: &Path, limit: usize) -> AppResult<Vec<LogEntry>> {
     let mut oversized = false;
     while position > 0 && entries.len() < limit {
         let length = usize::try_from(position.min(chunk.len() as u64))
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         position -= length as u64;
         file.seek(SeekFrom::Start(position))
             .map_err(storage_error)?;
@@ -196,5 +198,5 @@ fn read_recent_entries(path: &Path, limit: usize) -> AppResult<Vec<LogEntry>> {
 
 #[allow(clippy::needless_pass_by_value)]
 fn storage_error(error: std::io::Error) -> AppError {
-    AppError::Storage(error.to_string())
+    AppError::Storage(Message::diagnostic(error.to_string()))
 }

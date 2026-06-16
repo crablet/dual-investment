@@ -3,6 +3,7 @@
 // 前端所有后端调用都集中在这里。普通浏览器环境没有 Tauri runtime 时直接抛出明确错误，
 // 不提供 mock 数据或浏览器 fallback，避免把实盘路径和演示路径混在一起。
 
+import type { LocalizedMessage } from '@/i18n'
 import type {
   AdoptableOptionPositionView,
   AdoptOptionPositionsRequest,
@@ -24,22 +25,43 @@ import type {
 } from '@/types/domain'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { message as localized } from '@/i18n'
+
+class ClientCommandError extends Error {
+  constructor(readonly payload: CommandErrorPayload) {
+    super(payload.message.code)
+    this.name = 'ClientCommandError'
+  }
+}
 
 function isTauriRuntime() {
   return typeof window !== 'undefined' && Reflect.has(window, '__TAURI_INTERNALS__')
 }
 
+/** 校验嵌套的消息参数，避免损坏的 IPC 数据获得业务重试资格。 */
+function isLocalizedMessage(value: unknown, depth = 0): value is LocalizedMessage {
+  if (depth > 20 || typeof value !== 'object' || value === null
+    || !('code' in value) || typeof value.code !== 'string'
+    || !('params' in value) || typeof value.params !== 'object' || value.params === null || Array.isArray(value.params)) {
+    return false
+  }
+  return Object.values(value.params).every(param => typeof param === 'string' || isLocalizedMessage(param, depth + 1))
+}
+
 /** Tauri 自身的传输错误没有业务重试许可，仍须向用户显示错误。 */
 export function commandError(caught: unknown): CommandErrorPayload {
+  if (caught instanceof ClientCommandError)
+    return caught.payload
   if (typeof caught === 'object' && caught !== null
-    && 'message' in caught && typeof caught.message === 'string'
+    && 'message' in caught && isLocalizedMessage(caught.message)
     && 'canAutoReconnect' in caught && typeof caught.canAutoReconnect === 'boolean') {
     return { message: caught.message, canAutoReconnect: caught.canAutoReconnect }
   }
-  const message = caught instanceof Error
-    ? caught.message
-    : typeof caught === 'string' ? caught : '客户端请求失败，请检查错误记录'
-  return { message, canAutoReconnect: false }
+  const detail = caught instanceof Error ? caught.message : typeof caught === 'string' ? caught : undefined
+  return {
+    message: detail ? localized('ui.transportError', { detail }) : localized('ui.clientRequestFailedCheckTheErrorRecords'),
+    canAutoReconnect: false,
+  }
 }
 
 /**
@@ -51,7 +73,7 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
   if (isTauriRuntime()) {
     return invoke<T>(command, args)
   }
-  throw new Error(`命令 ${command} 只能在 Tauri 客户端中执行`)
+  throw new ClientCommandError({ message: localized('ui.commandRequiresTheTauriDesktopClient', { p0: command }), canAutoReconnect: false })
 }
 
 export const api = {

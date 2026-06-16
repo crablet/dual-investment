@@ -20,9 +20,9 @@ impl AppState {
         batch: &mut SettlementBatch,
     ) -> AppResult<bool> {
         if batch.option_funding.is_some() && batch.redemption.is_some() {
-            return Err(AppError::Storage(
-                "批次存在并行备资计划，停止执行".to_string(),
-            ));
+            return Err(AppError::Storage(crate::msg!(
+                "backend.concurrentFundingPlansExistForThisBatch"
+            )));
         }
         if !self.confirm_batch_option_funding(client, batch).await?
             || !self.confirm_batch_redemption(client, batch).await?
@@ -34,9 +34,9 @@ impl AppState {
         loop {
             let spot = client.spot_account().await?;
             if !spot.can_trade {
-                return Err(AppError::RiskRejected(
-                    "现货账户不可交易，停止批次结算".to_string(),
-                ));
+                return Err(AppError::RiskRejected(crate::msg!(
+                    "backend.spotAccountCannotTradeBatchSettlementStopped"
+                )));
             }
             if spot_has_settlement_assets(&spot, &batch.required) {
                 batch.shortfall = SettlementAssets::default();
@@ -75,9 +75,10 @@ impl AppState {
                 self.update_batch(
                     batch,
                     SettlementStage::WaitingFunds,
-                    &format!(
-                        "现货、期权可用余款及活期理财仍不足，尚缺 {} USDT / {} BTC；后续自动重新核对",
-                        batch.shortfall.usdt, batch.shortfall.btc
+                    &crate::msg!(
+                        "backend.spotAvailableOptionsFundsAndFlexibleEarn",
+                        p0 = batch.shortfall.usdt,
+                        p1 = batch.shortfall.btc
                     ),
                 )?;
                 return Ok(false);
@@ -91,7 +92,7 @@ impl AppState {
                 self.update_batch(
                     batch,
                     SettlementStage::ConfirmingFunds,
-                    "已登记期权余款划转计划，等待确认及现货到账",
+                    &crate::msg!("backend.optionsSurplusTransferPlanRecordedWaitingFor"),
                 )?;
                 if !self.confirm_batch_option_funding(client, batch).await? {
                     return Ok(false);
@@ -119,16 +120,16 @@ impl AppState {
             let account = client.option_account().await?;
             let spot = client.spot_account().await?;
             if !spot.can_trade {
-                return Err(AppError::RiskRejected(
-                    "现货账户不可交易，停止期权接货备资划转".to_string(),
-                ));
+                return Err(AppError::RiskRejected(crate::msg!(
+                    "backend.spotAccountCannotTradeOptionsSettlementFunding"
+                )));
             }
             if settlement_option_funding_amount(&account, &spot, &batch.required) < plan.amount {
                 batch.option_funding = None;
                 self.update_batch(
                     batch,
                     SettlementStage::ConfirmingFunds,
-                    "账户余额或保证金需求变化，重新计算尚未发送的期权划转计划",
+                    &crate::msg!("backend.balancesOrMarginRequirementsChangedRecalculatingThe"),
                 )?;
                 return Ok(false);
             }
@@ -140,14 +141,14 @@ impl AppState {
                     || attempt.amount != plan.amount
             })
         {
-            return Err(AppError::Storage(
-                "期权接货备资计划与资金恢复记录不一致，停止执行".to_string(),
-            ));
+            return Err(AppError::Storage(crate::msg!(
+                "backend.optionsSettlementFundingPlanConflictsWithRecovery"
+            )));
         }
         self.execute_universal_transfer(
             client,
             &plan.chain_id,
-            "整批到期接货备资",
+            &crate::msg!("backend.fundingForBatchExpirySettlement"),
             "OPTION_MAIN",
             "USDT",
             plan.amount,
@@ -156,7 +157,7 @@ impl AppState {
         self.update_batch(
             batch,
             SettlementStage::ConfirmingFunds,
-            "期权余款划转已确认，等待现货到账后继续接货备资",
+            &crate::msg!("backend.optionsSurplusTransferConfirmedWaitingForSpot"),
         )?;
         if !self
             .wait_for_spot_asset_available(client, "USDT", plan.expected_spot)
@@ -180,7 +181,7 @@ impl AppState {
         self.execute_simple_earn_redeem(
             client,
             &plan.chain_id,
-            "整批到期现货补齐",
+            &crate::msg!("backend.spotRebalancingForBatchExpiry"),
             &plan.product_id,
             &plan.asset,
             plan.amount,
@@ -189,7 +190,7 @@ impl AppState {
         self.update_batch(
             batch,
             SettlementStage::ConfirmingFunds,
-            "活期赎回已确认，等待现货到账后继续接货备资",
+            &crate::msg!("backend.flexibleEarnRedemptionConfirmedWaitingForSpot"),
         )?;
         if !self
             .wait_for_spot_asset_available(client, &plan.asset, plan.expected_spot)
@@ -223,9 +224,10 @@ impl AppState {
             self.update_batch(
                 batch,
                 SettlementStage::WaitingFunds,
-                &format!(
-                    "已登记的赎回不能重复发送，现货仍需补入 {} USDT / {} BTC",
-                    batch.shortfall.usdt, batch.shortfall.btc
+                &crate::msg!(
+                    "backend.aRecordedRedemptionCannotBeResentSpot",
+                    p0 = batch.shortfall.usdt,
+                    p1 = batch.shortfall.btc
                 ),
             )?;
             return Ok(false);
@@ -234,7 +236,7 @@ impl AppState {
         self.update_batch(
             batch,
             SettlementStage::ConfirmingFunds,
-            "已登记活期赎回计划，等待资金确认及现货到账",
+            &crate::msg!("backend.flexibleEarnRedemptionPlanRecordedWaitingFor"),
         )?;
         if !self.confirm_batch_redemption(client, batch).await? {
             return Ok(false);

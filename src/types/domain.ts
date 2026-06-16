@@ -4,6 +4,8 @@
 // 权利金和收益率都以字符串承接，前端只在展示层临时格式化，不能把这些字段
 // 当作 JavaScript number 再回传为交易事实。
 
+import type { LocalizedMessage } from '@/i18n'
+
 /** Decimal 通过 IPC 以字符串传输，避免金融精度被 JS number 截断。 */
 export type DecimalString = string
 
@@ -54,7 +56,7 @@ export interface AppSettings {
 
 /** 后端提供重连资格，前端不从错误文案推断业务类别。 */
 export interface CommandErrorPayload {
-  message: string
+  message: LocalizedMessage
   canAutoReconnect: boolean
 }
 
@@ -85,7 +87,7 @@ export interface AccountSnapshot {
   availableMargin: DecimalString
   unpricedAssetCount: number
   updatedAt: string | null
-  error: string | null
+  error: LocalizedMessage | null
 }
 
 /** Binance 实盘合约、买一价和 mark greeks 派生出的候选机会。 */
@@ -124,13 +126,13 @@ export interface StrategyOrder {
   exchangeStatus: string
   createdAt: string
   updatedAt: string
-  settlementAction: string
+  settlementAction: LocalizedMessage
   settlementPrice: DecimalString
   settledAt: string | null
   spotOrderId: string | null
   spotClientOrderId: string
   spotOrderStatus: string
-  rebalanceMessage: string
+  rebalanceMessage: LocalizedMessage
   spotFilledQuantity: DecimalString
   spotAvgPrice: DecimalString
 }
@@ -147,7 +149,7 @@ export interface AdoptableOptionPositionView {
   premium: DecimalString
   alreadyTracked: boolean
   adoptable: boolean
-  reason: string
+  reason: LocalizedMessage
 }
 
 /** 接管 Binance 当前期权持仓请求。 */
@@ -181,14 +183,14 @@ export interface LogEntry {
   timestamp: string
   level: LogLevel
   event: string
-  message: string
+  message: LocalizedMessage
 }
 
 /** 设置页日志状态快照，只包含脱敏日志摘要和最小文件状态。 */
 export interface LogSnapshot {
   hasFiles: boolean
   recentEntries: LogEntry[]
-  writeError: string | null
+  writeError: LocalizedMessage | null
 }
 
 /** 下单/补齐恢复记录视图。 */
@@ -199,23 +201,23 @@ export interface OrderAttempt {
   optionSymbol: string
   status: OrderAttemptStatus
   exchangeOrderId: string | null
-  message: string
+  message: LocalizedMessage
   updatedAt: string
 }
 
 /** 资金动作恢复记录视图。 */
 export interface FundingAttemptView {
   id: string
-  kindLabel: string
+  kindLabel: LocalizedMessage
   asset: string
   amount: DecimalString
   transferType: string | null
   productId: string | null
   exchangeRef: string | null
   status: FundingAttemptStatus
-  message: string
-  factSource: string
-  nextAction: string
+  message: LocalizedMessage
+  factSource: LocalizedMessage
+  nextAction: LocalizedMessage
   queryAfterAt: string | null
   queryCount: number
   effectiveQueryCount: number
@@ -246,11 +248,11 @@ export interface SettlementRecoveryView {
   symbol: string
   expiryAt: string
   status: SettlementStage
-  statusLabel: string
+  statusLabel: LocalizedMessage
   canFinish: boolean
-  factSource: string
-  nextAction: string
-  message: string
+  factSource: LocalizedMessage
+  nextAction: LocalizedMessage
+  message: LocalizedMessage
   updatedAt: string
 }
 
@@ -271,7 +273,7 @@ export interface OrderProgressEvent {
   flowId: string
   stage: OrderProgressStage
   status: OrderProgressStatus
-  message: string
+  message: LocalizedMessage
   optionSymbol: string | null
   exchangeOrderId: string | null
 }

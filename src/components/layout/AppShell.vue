@@ -5,8 +5,10 @@
 -->
 <script setup lang="ts">
 import { NAlert, NSpin, useMessage } from 'naive-ui'
+
 import { watch } from 'vue'
 import SidebarNav from '@/components/layout/SidebarNav.vue'
+import { messageText } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
@@ -18,10 +20,10 @@ watch(
     if (!notice)
       return
     if (notice.type === 'success') {
-      message.success(notice.message)
+      message.success(messageText(notice.message))
       return
     }
-    message.error(notice.message)
+    message.error(messageText(notice.message))
   },
 )
 </script>
@@ -31,7 +33,7 @@ watch(
     <SidebarNav />
     <main class="workspace">
       <NAlert v-if="store.error" type="error" closable class="shell-alert">
-        {{ store.error }}
+        {{ messageText(store.error) }}
       </NAlert>
 
       <NSpin :show="store.loading && !store.snapshot">

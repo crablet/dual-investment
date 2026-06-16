@@ -5,6 +5,8 @@
 //! [`Decimal`]，序列化给前端时统一走字符串，避免 JavaScript `number`
 //! 在金融数据上产生隐式精度损失。
 
+use crate::messages::Message;
+
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -30,11 +32,11 @@ impl StrategyDirection {
         }
     }
 
-    /// 返回面向 UI 和审计日志的中文策略名称。
-    pub const fn display(self) -> &'static str {
+    /// 返回面向 UI 和审计日志的策略名称消息。
+    pub fn display(self) -> Message {
         match self {
-            Self::SellPut => "卖 Put 抄底",
-            Self::SellCall => "卖 Call 止盈",
+            Self::SellPut => crate::msg!("backend.sellPut"),
+            Self::SellCall => crate::msg!("backend.sellCall"),
         }
     }
 }
@@ -94,7 +96,7 @@ pub struct LogEntry {
     pub timestamp: DateTime<Utc>,
     pub level: LogLevel,
     pub event: String,
-    pub message: String,
+    pub message: Message,
 }
 
 /// 设置页日志面板需要的日志快照。
@@ -105,7 +107,7 @@ pub struct LogEntry {
 pub struct LogSnapshot {
     pub has_files: bool,
     pub recent_entries: Vec<LogEntry>,
-    pub write_error: Option<String>,
+    pub write_error: Option<Message>,
 }
 
 /// 账户资产行。
@@ -151,7 +153,7 @@ pub struct AccountSnapshot {
     pub available_margin: Decimal,
     pub unpriced_asset_count: usize,
     pub updated_at: Option<DateTime<Utc>>,
-    pub error: Option<String>,
+    pub error: Option<Message>,
 }
 
 /// 已成交且仍在运行的期权义务。名义本金不代表 Binance 实际保证金占用。
@@ -227,14 +229,14 @@ pub struct StrategyOrder {
     pub exchange_status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    pub settlement_action: String,
+    pub settlement_action: Message,
     #[serde(with = "rust_decimal::serde::str")]
     pub settlement_price: Decimal,
     pub settled_at: Option<DateTime<Utc>>,
     pub spot_order_id: Option<String>,
     pub spot_client_order_id: String,
     pub spot_order_status: String,
-    pub rebalance_message: String,
+    pub rebalance_message: Message,
     #[serde(with = "rust_decimal::serde::str")]
     pub spot_filled_quantity: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
@@ -304,7 +306,7 @@ pub struct OrderAttempt {
     pub option_symbol: String,
     pub status: OrderAttemptStatus,
     pub exchange_order_id: Option<String>,
-    pub message: String,
+    pub message: Message,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -326,12 +328,12 @@ impl FundingAttemptKind {
         }
     }
 
-    /// 返回前端展示用的中文类型名称。
-    pub const fn display(self) -> &'static str {
+    /// 返回前端展示用的类型名称消息。
+    pub fn display(self) -> Message {
         match self {
-            Self::UniversalTransfer => "账户划转",
-            Self::SimpleEarnRedeem => "活期赎回",
-            Self::SimpleEarnSubscribe => "活期申购",
+            Self::UniversalTransfer => crate::msg!("backend.accountTransfer"),
+            Self::SimpleEarnRedeem => crate::msg!("backend.flexibleRedemption"),
+            Self::SimpleEarnSubscribe => crate::msg!("backend.flexibleSubscription"),
         }
     }
 }
@@ -379,10 +381,10 @@ pub enum FundingAttemptManualResolution {
 
 impl FundingAttemptManualResolution {
     /// 返回用户可读的处置结果。
-    pub const fn display(self) -> &'static str {
+    pub fn display(self) -> Message {
         match self {
-            Self::Confirmed => "已确认",
-            Self::Failed => "已失败",
+            Self::Confirmed => crate::msg!("backend.confirmed"),
+            Self::Failed => crate::msg!("backend.failed2"),
         }
     }
 }
@@ -395,14 +397,14 @@ pub struct FundingAttempt {
     pub id: String,
     pub chain_id: String,
     pub kind: FundingAttemptKind,
-    pub purpose: String,
+    pub purpose: Message,
     pub asset: String,
     pub amount: Decimal,
     pub transfer_type: Option<String>,
     pub product_id: Option<String>,
     pub exchange_ref: Option<String>,
     pub status: FundingAttemptStatus,
-    pub message: String,
+    pub message: Message,
     pub query_after_at: Option<DateTime<Utc>>,
     pub query_count: u32,
     pub effective_query_count: u32,
@@ -477,7 +479,7 @@ pub struct SettlementBatch {
     pub expiry_at: DateTime<Utc>,
     pub order_ids: Vec<String>,
     pub stage: SettlementStage,
-    pub message: String,
+    pub message: Message,
     pub required: SettlementAssets,
     pub shortfall: SettlementAssets,
     pub redemption: Option<SettlementRedemption>,
@@ -499,11 +501,11 @@ pub struct SettlementRecoveryView {
     pub symbol: String,
     pub expiry_at: DateTime<Utc>,
     pub status: SettlementStage,
-    pub status_label: String,
+    pub status_label: Message,
     pub can_finish: bool,
-    pub fact_source: String,
-    pub next_action: String,
-    pub message: String,
+    pub fact_source: Message,
+    pub next_action: Message,
+    pub message: Message,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -529,7 +531,7 @@ pub struct ResolveFundingAttemptRequest {
 #[serde(rename_all = "camelCase")]
 pub struct FundingAttemptView {
     pub id: String,
-    pub kind_label: String,
+    pub kind_label: Message,
     pub asset: String,
     #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
@@ -537,9 +539,9 @@ pub struct FundingAttemptView {
     pub product_id: Option<String>,
     pub exchange_ref: Option<String>,
     pub status: FundingAttemptStatus,
-    pub message: String,
-    pub fact_source: String,
-    pub next_action: String,
+    pub message: Message,
+    pub fact_source: Message,
+    pub next_action: Message,
     pub query_after_at: Option<DateTime<Utc>>,
     pub query_count: u32,
     pub effective_query_count: u32,
@@ -555,31 +557,41 @@ impl From<FundingAttempt> for FundingAttemptView {
     fn from(attempt: FundingAttempt) -> Self {
         let fact_source = match (&attempt.exchange_ref, attempt.status) {
             (Some(exchange_ref), FundingAttemptStatus::Confirmed) => {
-                format!("Binance 历史记录 {exchange_ref}")
+                crate::msg!("backend.binanceHistoryRecord", p0 = exchange_ref)
             }
             (
                 Some(exchange_ref),
                 FundingAttemptStatus::ExchangeAck | FundingAttemptStatus::Pending,
             ) => {
-                format!("Binance 已返回引用 {exchange_ref}")
+                crate::msg!("backend.binanceReturnedReference", p0 = exchange_ref)
             }
-            (Some(exchange_ref), _) => format!("Binance 引用 {exchange_ref}"),
-            (None, FundingAttemptStatus::Confirmed) => "人工核对 Binance 事实已确认".to_string(),
-            (None, FundingAttemptStatus::Failed) => "Binance 明确拒绝或人工核对失败".to_string(),
-            (None, _) => "按 Binance 历史与账户事实待确认".to_string(),
+            (Some(exchange_ref), _) => crate::msg!("backend.binanceReference", p0 = exchange_ref),
+            (None, FundingAttemptStatus::Confirmed) => {
+                crate::msg!("backend.confirmedByManualReviewOfBinanceFacts")
+            }
+            (None, FundingAttemptStatus::Failed) => {
+                crate::msg!("backend.explicitBinanceRejectionOrFailedManualReview")
+            }
+            (None, _) => crate::msg!("backend.awaitingConfirmationFromBinanceHistoryAndAccount"),
         };
         let next_action = match attempt.status {
             FundingAttemptStatus::Attempted
             | FundingAttemptStatus::ExchangeAck
             | FundingAttemptStatus::Uncertain
-            | FundingAttemptStatus::Pending => "自动查询 Binance 历史确认".to_string(),
-            FundingAttemptStatus::Confirmed => "无需处理".to_string(),
-            FundingAttemptStatus::Failed => "已失败，检查原因后重新触发业务流程".to_string(),
-            FundingAttemptStatus::Blocked => "需要人工核对 Binance 事实".to_string(),
+            | FundingAttemptStatus::Pending => {
+                crate::msg!("backend.automaticallyQueryBinanceHistoryForConfirmation")
+            }
+            FundingAttemptStatus::Confirmed => crate::msg!("backend.noActionNeeded"),
+            FundingAttemptStatus::Failed => {
+                crate::msg!("backend.failedCheckTheCauseBeforeStartingThe")
+            }
+            FundingAttemptStatus::Blocked => {
+                crate::msg!("backend.manualReviewOfBinanceFactsRequired")
+            }
         };
         Self {
             id: attempt.id,
-            kind_label: attempt.kind.display().to_string(),
+            kind_label: attempt.kind.display(),
             asset: attempt.asset,
             amount: attempt.amount,
             transfer_type: attempt.transfer_type,
@@ -633,7 +645,7 @@ pub struct OrderProgressEvent {
     pub flow_id: String,
     pub stage: OrderProgressStage,
     pub status: OrderProgressStatus,
-    pub message: String,
+    pub message: Message,
     pub option_symbol: Option<String>,
     pub exchange_order_id: Option<String>,
 }
@@ -859,7 +871,7 @@ pub struct AdoptableOptionPositionView {
     pub premium: Decimal,
     pub already_tracked: bool,
     pub adoptable: bool,
-    pub reason: String,
+    pub reason: Message,
 }
 
 /// 期权行权记录中的结算价格。

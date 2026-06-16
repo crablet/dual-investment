@@ -14,9 +14,9 @@ pub(super) async fn verify_binance_access(client: &BinanceClient) -> AppResult<(
     option_account?;
     let spot_account = spot_account?;
     if !spot_account.can_trade {
-        return Err(AppError::Config(
-            "Binance 现货账户当前不可交易，无法执行到期补齐".to_string(),
-        ));
+        return Err(AppError::Config(crate::msg!(
+            "backend.binanceSpotAccountCannotTradeExpiryRebalancing"
+        )));
     }
     Ok(())
 }

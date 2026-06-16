@@ -6,9 +6,11 @@ API Secret 只在提交时短暂存在于表单状态，随后交给 Rust 写入
 -->
 <script setup lang="ts">
 import { KeyRound } from '@lucide/vue'
+
 import { NAlert, NButton, NIcon, NInput } from 'naive-ui'
 import { computed, reactive } from 'vue'
 import Panel from '@/components/common/Panel.vue'
+import { t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
@@ -19,9 +21,9 @@ const form = reactive({
 })
 
 const canConnect = computed(() => form.apiKey.trim().length > 0 && form.apiSecret.length > 0)
-const backendStatus = computed(() => store.settings?.connected ? '已连接' : '等待连接')
+const backendStatus = computed(() => store.settings?.connected ? t('ui.connected') : t('ui.awaitingConnection'))
 const backendStatusClass = computed(() => store.settings?.connected ? 'positive' : 'warning')
-const credentialStatus = computed(() => store.settings?.savedCredentials ? '已保存' : '未保存')
+const credentialStatus = computed(() => store.settings?.savedCredentials ? t('ui.saved') : t('ui.notSaved'))
 const credentialStatusClass = computed(() => store.settings?.savedCredentials ? 'positive' : 'warning')
 const reconnectAlertType = computed(() => store.autoReconnectPaused ? 'warning' : 'info')
 
@@ -44,7 +46,7 @@ async function connectSaved() {
 }
 
 async function forgetCredentials() {
-  if (!window.confirm('确认从系统 keyring 删除 Binance API 凭据？这会断开当前连接。')) {
+  if (!window.confirm(t('ui.deleteBinanceApiCredentialsFromTheSystem'))) {
     return
   }
   await store.forgetCredentials()
@@ -52,16 +54,16 @@ async function forgetCredentials() {
 </script>
 
 <template>
-  <Panel title="Binance 连接" class="settings-main">
+  <Panel :title="t('ui.binanceConnection')" class="settings-main">
     <div class="settings-connection">
       <div class="settings-primary">
-        <div class="settings-connection-status" aria-label="Binance 连接状态">
+        <div class="settings-connection-status" :aria-label="t('ui.binanceConnectionStatus')">
           <div>
-            <span>连接</span>
+            <span> {{ t('ui.connection') }} </span>
             <strong :class="backendStatusClass">{{ backendStatus }}</strong>
           </div>
           <div>
-            <span>凭据</span>
+            <span> {{ t('ui.credentials') }} </span>
             <div class="settings-status-actions">
               <strong :class="credentialStatusClass">{{ credentialStatus }}</strong>
               <NButton
@@ -71,7 +73,7 @@ async function forgetCredentials() {
                 :loading="store.isLoading('credentials')"
                 @click="forgetCredentials"
               >
-                删除
+                {{ t('ui.delete') }}
               </NButton>
             </div>
           </div>
@@ -82,8 +84,7 @@ async function forgetCredentials() {
           <NInput v-model:value="form.apiSecret" type="password" placeholder="API Secret" show-password-on="click" />
           <div class="settings-connect-actions">
             <NButton type="primary" :disabled="!canConnect" :loading="store.isLoading('connect')" @click="connect">
-              <template #icon><NIcon :component="KeyRound" /></template>
-              连接 Binance
+              <template #icon><NIcon :component="KeyRound" /></template> {{ t('ui.connectBinance') }}
             </NButton>
             <NButton
               secondary
@@ -91,8 +92,7 @@ async function forgetCredentials() {
               :loading="store.isLoading('connect')"
               @click="connectSaved"
             >
-              <template #icon><NIcon :component="KeyRound" /></template>
-              使用已保存凭据连接
+              <template #icon><NIcon :component="KeyRound" /></template> {{ t('ui.connectWithSavedCredentials') }}
             </NButton>
           </div>
           <NAlert v-if="store.autoReconnectMessage" :type="reconnectAlertType" class="settings-reconnect-alert">
@@ -101,14 +101,14 @@ async function forgetCredentials() {
         </div>
       </div>
 
-      <section class="settings-permissions" aria-label="API 权限">
-        <h3>权限</h3>
+      <section class="settings-permissions" :aria-label="t('ui.apiPermissions')">
+        <h3> {{ t('ui.permission') }} </h3>
         <ul>
-          <li><span>读取账户</span><strong>需要</strong></li>
-          <li><span>读取行情</span><strong>需要</strong></li>
-          <li><span>现货交易</span><strong>需要</strong></li>
-          <li><span>期权交易</span><strong>需要</strong></li>
-          <li><span>提现</span><strong class="warning">禁止</strong></li>
+          <li><span> {{ t('ui.readAccount') }} </span><strong> {{ t('ui.required') }} </strong></li>
+          <li><span> {{ t('ui.readMarketData') }} </span><strong> {{ t('ui.required') }} </strong></li>
+          <li><span> {{ t('ui.spotTrading') }} </span><strong> {{ t('ui.required') }} </strong></li>
+          <li><span> {{ t('ui.optionsTrading') }} </span><strong> {{ t('ui.required') }} </strong></li>
+          <li><span> {{ t('ui.withdrawals') }} </span><strong class="warning"> {{ t('ui.prohibited') }} </strong></li>
         </ul>
       </section>
     </div>
@@ -116,6 +116,10 @@ async function forgetCredentials() {
 </template>
 
 <style scoped>
+.settings-main {
+  container-type: inline-size;
+}
+
 .settings-connection {
   display: grid;
   grid-template-columns: minmax(300px, 1fr) minmax(190px, 0.68fr);
@@ -186,6 +190,14 @@ async function forgetCredentials() {
 
 .settings-connect-actions :deep(.n-button) {
   width: 100%;
+  min-height: 34px;
+  height: auto;
+  padding-block: 6px;
+}
+
+.settings-connect-actions :deep(.n-button__content) {
+  white-space: normal;
+  line-height: 1.5;
 }
 
 .settings-reconnect-alert {
@@ -245,7 +257,14 @@ async function forgetCredentials() {
   color: var(--gold);
 }
 
-@media (max-width: 1180px) {
+@container (max-width: 760px) {
+  .settings-connection-status,
+  .settings-connect-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container (max-width: 540px) {
   .settings-connection {
     grid-template-columns: 1fr;
   }

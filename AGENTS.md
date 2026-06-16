@@ -11,6 +11,8 @@
 - 不引入手续费解析、计算或账务。
 - 凭据仅经 src-tauri/src/secrets.rs 写入系统 keyring；密钥、签名请求及 Binance 原始响应不得进入日志、SQLite、前端或导出文件。
 - 开发期不保留旧 IPC、DTO、SQLite 兼容或迁移分支；契约变更同步 Rust、TypeScript 和 Pinia。
+- 界面文案统一经 `src/i18n.ts` 与 `src/locales/` 管理，消息键与插值参数同步全部语言；保留词典按需加载，语言偏好独立于交易状态。
+- 可翻译业务消息以 `{ code, params }` 跨 IPC、SQLite 和日志保存，在展示时翻译；不得根据翻译文案判断交易、恢复或重试行为。
 - 不保留测试、夹具或快照；交付前清理临时验证代码及其依赖、配置。
 
 ## 验证

@@ -4,6 +4,8 @@
 //! 连接状态、脱敏 API Key 或内存中的客户端实例，不能把 Secret 写入 SQLite、审计日志、
 //! 前端 store 或导出文件。
 
+use crate::messages::Message;
+
 use std::sync::{Mutex, OnceLock};
 
 use keyring_core::{Entry, Error as KeyringError};
@@ -75,9 +77,12 @@ fn ensure_keyring_store() -> AppResult<()> {
     if KEYRING_STORE_READY.get().is_some() {
         return Ok(());
     }
-    let _guard = KEYRING_STORE_INIT_LOCK
-        .lock()
-        .map_err(|error| AppError::Config(format!("系统安全凭据存储初始化锁不可用：{error}")))?;
+    let _guard = KEYRING_STORE_INIT_LOCK.lock().map_err(|error| {
+        AppError::Config(crate::msg!(
+            "backend.secureCredentialStorageInitializationLockUnavailable",
+            p0 = error.to_string()
+        ))
+    })?;
     if KEYRING_STORE_READY.get().is_some() {
         return Ok(());
     }
@@ -89,38 +94,55 @@ fn ensure_keyring_store() -> AppResult<()> {
 
 /// Linux 使用 Secret Service / `DBus` keyring。
 #[cfg(target_os = "linux")]
-fn configure_keyring_store() -> Result<(), String> {
-    let store = dbus_secret_service_keyring_store::Store::new()
-        .map_err(|error| format!("系统安全凭据存储不可用：{error}"))?;
+fn configure_keyring_store() -> Result<(), Message> {
+    let store = dbus_secret_service_keyring_store::Store::new().map_err(|error| {
+        crate::msg!(
+            "backend.systemSecureCredentialStorageUnavailable",
+            p0 = error.to_string()
+        )
+    })?;
     keyring_core::set_default_store(store);
     Ok(())
 }
 
 /// macOS 使用系统 Keychain。
 #[cfg(target_os = "macos")]
-fn configure_keyring_store() -> Result<(), String> {
-    let store = apple_native_keyring_store::keychain::Store::new()
-        .map_err(|error| format!("系统安全凭据存储不可用：{error}"))?;
+fn configure_keyring_store() -> Result<(), Message> {
+    let store = apple_native_keyring_store::keychain::Store::new().map_err(|error| {
+        crate::msg!(
+            "backend.systemSecureCredentialStorageUnavailable",
+            p0 = error.to_string()
+        )
+    })?;
     keyring_core::set_default_store(store);
     Ok(())
 }
 
 /// Windows 使用系统凭据管理器。
 #[cfg(target_os = "windows")]
-fn configure_keyring_store() -> Result<(), String> {
-    let store = windows_native_keyring_store::Store::new()
-        .map_err(|error| format!("系统安全凭据存储不可用：{error}"))?;
+fn configure_keyring_store() -> Result<(), Message> {
+    let store = windows_native_keyring_store::Store::new().map_err(|error| {
+        crate::msg!(
+            "backend.systemSecureCredentialStorageUnavailable",
+            p0 = error.to_string()
+        )
+    })?;
     keyring_core::set_default_store(store);
     Ok(())
 }
 
 /// 未显式支持的平台不降级为明文文件存储。
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn configure_keyring_store() -> Result<(), String> {
-    Err("系统安全凭据存储不可用：当前平台没有配置 keyring-core store".to_string())
+fn configure_keyring_store() -> Result<(), Message> {
+    Err(crate::msg!(
+        "backend.systemSecureCredentialStorageUnavailableNoKeyring"
+    ))
 }
 
 /// 统一把 keyring 错误转成可展示的配置错误。
 fn to_error(error: &KeyringError) -> AppError {
-    AppError::Config(format!("系统安全凭据存储不可用：{error}"))
+    AppError::Config(crate::msg!(
+        "backend.systemSecureCredentialStorageUnavailable",
+        p0 = error.to_string()
+    ))
 }

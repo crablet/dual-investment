@@ -4,7 +4,11 @@
 
 ## 使用
 
-在“设置”连接 Binance，再到“双币赢”选择卖 Put 低买或卖 Call 高卖，复核后提交。已有未到期的 BTC/USDT 卖方义务仓可在“策略订单”接管。
+在“设置”连接 Binance，再到“双币赢”选择卖 Put 低买或卖 Call 高卖，复核后提交。已有未到期的 BTC/USDT 卖方义务仓可在“策略订单”接管。设置页上方左侧为“Binance 连接”，右侧为“通用设置”，日志位于下方。
+
+在“设置 → 通用设置”选择界面语言，支持简体中文、英语、繁体中文、巴西葡萄牙语、西班牙语、越南语、土耳其语、印尼语、日语、韩语和泰语。首次按系统语言优先列表选择支持的语言，均不支持时使用英语；手动选择在词典加载完成后生效并保存在当前设备。选择“跟随系统”可恢复自动选择。
+
+启动只加载当前语言和英语回退，其他词典在切换时加载并在当前会话缓存，均随安装包提供，可离线使用。快速切换以最后一次选择为准；加载失败时保留当前语言，启动时则回退到英语。切换语言保留当前表单和交易状态，日期仍使用系统本地时区和公历。
 
 启动时会尝试使用 keyring 中已保存的凭据连接。连接成功或点击“同步订单”会读取交易所状态；平时页面刷新读取本地快照，后台定期维护订单并刷新账户展示。账户查询失败时保留上次成功的数据，并显示错误提示。
 
@@ -53,13 +57,25 @@ TypeScript 暂保留在 6.0.x，以满足 [typescript-eslint 的版本要求](ht
 
 - [AppState](src-tauri/src/app_state.rs) 编排交易、恢复和后台维护。`get_app_snapshot` 只读取本地状态和账户缓存；`sync_live_state` 完成同步后不返回快照，由 Pinia 再读取完整状态。
 - [策略层](src-tauri/src/strategy.rs) 使用 Decimal 计算金额、数量和收益，前端以字符串接收。`preview_strategy` 只做本地预估；金融字段在前端的数值转换仅用于格式化和图形比例。
-- [错误分类](src-tauri/src/errors.rs) 决定查询重试、提交结果是否待确认和连接重试资格。[IPC](src-tauri/src/commands.rs) 的业务错误返回 `{ message, canAutoReconnect }`，前端不根据文案判断重连；Tauri 自身的传输或参数错误不授予自动重连资格。
+- [错误分类](src-tauri/src/errors.rs) 决定查询重试、提交结果是否待确认和连接重试资格。[IPC](src-tauri/src/commands.rs) 的业务错误返回 `{ message: { code, params }, canAutoReconnect }`，前端不根据文案判断重连；Tauri 自身的传输或参数错误不授予自动重连资格。
+- [消息结构](src-tauri/src/messages.rs) 在 IPC、SQLite 和日志中保存 `{ code, params }`；参数为字符串或嵌套消息，金融参数保留 Decimal 字符串。前端通过 `messageText()` 在展示时递归翻译；Rust 的 `Display` 使用简体中文词典，仅供进程诊断。开发期不兼容旧的纯文本消息记录，也不自动迁移或删除已有数据库与日志。
+- [本地日志](src-tauri/src/logs.rs) 按本机日期写入应用数据目录下的 `logs/YYYY-MM-DD.log`，每行一条 JSON。日志面板按当前语言翻译消息；日志级别与事件代码保持原值，切换语言不改写日志文件。
+
+### 多语言维护
+
+- [翻译入口](src/i18n.ts) 使用 Vue I18n，英语词典随主包提供，其余词典通过动态导入独立分包；保留按需加载，不改回一次性载入全部语言。已加载词典在当前会话复用，同一语言的并发加载共用请求。
+- [语言偏好](src/stores/preferences.ts) 由 Pinia 管理，保存在 `localStorage` 的 `dual-investment.locale` 键中。[应用入口](src/main.ts) 等待语言初始化后再挂载界面；切换成功后才更新当前语言和保存偏好，过期请求不能覆盖后续选择。存储不可用时仍允许本次会话切换。
+- 文案位于 [src/locales](src/locales/)，新增或删除消息时同步全部语言的消息键与插值参数。业务消息保留结构，展示时使用 `t()` 或 `messageText()`；合约代码、资产符号、状态值和日志事件代码保持稳定，翻译对应的展示标签。
+- 新增语言时同时更新 `src/i18n.ts` 的 `supportedLocales`、[语言选择器](src/components/settings/GeneralSettingsPanel.vue) 的原生语言名称，以及 [App.vue](src/App.vue) 中 Naive UI 的界面与日期语言映射；需要本地化的数字和日期展示通过 `formatLocale()` 选择格式，保持系统本地时区和公历约定。
+
+### 验证与打包
 
 按改动范围验证：
 
-- 前端：`pnpm lint`、`pnpm typecheck`；依赖、构建或工具配置变更加跑 `pnpm build`。
+- 前端：`pnpm lint`、`pnpm typecheck`；依赖、构建、工具配置、语言词典或加载逻辑变更加跑 `pnpm build`。
 - Rust：先通过 `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`，再运行 `cargo fmt --manifest-path src-tauri/Cargo.toml`。
-- UI：检查 1180px 最小宽度下的布局；Tauri 启动、图标或窗口变更须实际启动验证。
+- UI：检查 1180px 最小宽度和较宽窗口下的布局，包含较长的多语言文案；设置页的连接与通用设置保持并排，按钮文案不能被截断。Tauri 启动、图标或窗口变更须实际启动验证。
+- 多语言：词典变更核对全部语言的消息键与插值参数；加载逻辑变更核对首次系统语言、手动选择与重启记忆、快速切换、加载失败回退和缓存复用。构建产物应保留独立语言分包，启动仅加载英语回退和当前语言。
 
 `pnpm tauri:build` 生成 Linux `.deb`、`.rpm`；加 `--no-bundle` 仅生成 `src-tauri/target/release/dual-investment` 可执行文件。
 

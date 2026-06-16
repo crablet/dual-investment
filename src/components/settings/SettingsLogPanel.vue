@@ -6,16 +6,18 @@
 -->
 <script setup lang="ts">
 import { FileText, FolderOpen, RefreshCw, Trash2 } from '@lucide/vue'
+
 import { NAlert, NButton, NIcon, NTag } from 'naive-ui'
 import Panel from '@/components/common/Panel.vue'
 import { useLogSnapshot } from '@/composables/useLogSnapshot'
+import { messageText, t } from '@/i18n'
 import { localDateTimeLabel } from '@/utils/date'
 import { logLevelTone } from '@/utils/labels'
 
 const logs = useLogSnapshot()
 
 async function clearLogs() {
-  if (!window.confirm('确认删除全部本地日志文件？订单、恢复记录和 keyring 凭据不会被删除。')) {
+  if (!window.confirm(t('ui.deleteAllLocalLogFilesOrdersRecovery'))) {
     return
   }
   await logs.clear()
@@ -23,49 +25,41 @@ async function clearLogs() {
 </script>
 
 <template>
-  <Panel title="日志" class="settings-logs">
+  <Panel :title="t('ui.logs')" class="settings-logs">
     <template #action>
       <NButton size="small" secondary :loading="logs.pendingAction.value === 'refresh'" @click="logs.refresh">
-        <template #icon><NIcon :component="RefreshCw" /></template>
-        刷新
+        <template #icon><NIcon :component="RefreshCw" /></template> {{ t('ui.refresh') }}
       </NButton>
     </template>
 
     <NAlert v-if="logs.error.value" type="error" class="settings-log-error">
-      {{ logs.error.value }}
+      {{ messageText(logs.error.value) }}
     </NAlert>
 
-    <NAlert v-if="logs.writeError.value" type="warning" class="settings-log-error">
-      本地日志写入失败：{{ logs.writeError.value }}。交易与恢复状态仍以订单记录为准。
-    </NAlert>
+    <NAlert v-if="logs.writeError.value" type="warning" class="settings-log-error"> {{ t('ui.localLogWriteFailed') }} {{ messageText(logs.writeError.value) }} {{ t('ui.orderRecordsRemainTheSourceOfTrading') }} </NAlert>
 
     <div class="settings-log-actions">
       <NButton secondary :loading="logs.pendingAction.value === 'openFile'" @click="logs.openCurrentFile">
-        <template #icon><NIcon :component="FileText" /></template>
-        打开今日日志
+        <template #icon><NIcon :component="FileText" /></template> {{ t('ui.openTodaySLog') }}
       </NButton>
       <NButton secondary :loading="logs.pendingAction.value === 'openFolder'" @click="logs.openFolder">
-        <template #icon><NIcon :component="FolderOpen" /></template>
-        打开日志文件夹
+        <template #icon><NIcon :component="FolderOpen" /></template> {{ t('ui.openLogFolder') }}
       </NButton>
       <NButton secondary type="error" :loading="logs.pendingAction.value === 'clear'" :disabled="!logs.hasFiles.value" @click="clearLogs">
-        <template #icon><NIcon :component="Trash2" /></template>
-        删除日志
+        <template #icon><NIcon :component="Trash2" /></template> {{ t('ui.deleteLogs') }}
       </NButton>
     </div>
 
     <section class="settings-log-section">
-      <h3>最近日志</h3>
-      <div v-if="logs.recentEntries.value.length === 0" class="settings-empty-row">
-        暂无日志记录
-      </div>
+      <h3> {{ t('ui.recentLogs') }} </h3>
+      <div v-if="logs.recentEntries.value.length === 0" class="settings-empty-row"> {{ t('ui.noLogEntries') }} </div>
       <div v-for="entry in logs.recentEntries.value" :key="entry.id" class="settings-log-entry">
         <time>{{ localDateTimeLabel(entry.timestamp) }}</time>
         <NTag :type="logLevelTone(entry.level)" size="small" class="settings-log-level">
           {{ entry.level }}
         </NTag>
         <span class="settings-log-event">{{ entry.event }}</span>
-        <p>{{ entry.message }}</p>
+        <p>{{ messageText(entry.message) }}</p>
       </div>
     </section>
   </Panel>

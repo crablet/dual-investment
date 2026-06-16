@@ -14,6 +14,8 @@ mod settlement_funding;
 mod settlement_recovery;
 mod validation;
 
+use crate::messages::Message;
+
 use std::{
     collections::HashMap,
     path::Path,
@@ -90,7 +92,7 @@ struct OrderLiveInputs {
 struct FundingRequest {
     chain_id: String,
     kind: FundingAttemptKind,
-    purpose: String,
+    purpose: Message,
     asset: String,
     amount: Decimal,
     transfer_type: Option<String>,
@@ -110,9 +112,9 @@ enum FundingHistoryOutcome {
 
 /// 期权账户闲置 USDT 归集任务的执行结果。
 enum SweepExecutionOutcome {
-    Completed(String),
-    Skipped(String),
-    Waiting(String),
+    Completed(Message),
+    Skipped(Message),
+    Waiting(Message),
 }
 
 const FUNDING_HISTORY_LOOKBACK_MINUTES: i64 = 5;
@@ -361,7 +363,7 @@ impl RuntimeConfig {
                 Ok(())
             }
             Err(error) => {
-                self.account.error = Some(error.to_string());
+                self.account.error = Some(error.message());
                 Err(error)
             }
         }
@@ -415,7 +417,10 @@ impl AppState {
             trade_lock: Arc::new(AsyncMutex::new(())),
             account_refresh_lock: Arc::new(AsyncMutex::new(())),
         };
-        state.record_log("app.started", "应用已启动，等待 Binance API 连接");
+        state.record_log(
+            "app.started",
+            &crate::msg!("backend.applicationStartedWaitingForBinanceApiConnection"),
+        );
         Ok(state)
     }
 
@@ -438,7 +443,7 @@ impl AppState {
             let persistence = self
                 .persistence
                 .lock()
-                .map_err(|error| AppError::Storage(error.to_string()))?;
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
             let attempts = persistence.list_order_attempts(20)?;
             let funding_attempts = persistence
                 .list_funding_attempts(20)?
@@ -467,7 +472,7 @@ impl AppState {
     pub async fn connect_binance(&self, request: ConnectBinanceRequest) -> AppResult<AppSettings> {
         let result = self.connect_binance_inner(request).await;
         if let Err(error) = &result {
-            self.record_warning("account.connect_failed", &error.to_string());
+            self.record_warning("account.connect_failed", &error.message());
         }
         result
     }
@@ -479,7 +484,9 @@ impl AppState {
         let _maintenance_guard = self.maintenance_lock.lock().await;
         let _trade_guard = self.trade_lock.lock().await;
         if request.api_key.trim().is_empty() || request.api_secret.trim().is_empty() {
-            return Err(AppError::Config("API Key 和 Secret 不能为空".to_string()));
+            return Err(AppError::Config(crate::msg!(
+                "backend.apiKeyAndSecretCannotBeEmpty"
+            )));
         }
 
         let api_key = request.api_key.trim().to_string();
@@ -495,7 +502,10 @@ impl AppState {
         runtime.saved_credentials = true;
         let settings = runtime.settings();
         drop(runtime);
-        self.record_log("account.connected", "已连接 Binance 账户");
+        self.record_log(
+            "account.connected",
+            &crate::msg!("backend.connectedToBinanceAccount"),
+        );
         Ok(settings)
     }
 
@@ -505,7 +515,7 @@ impl AppState {
     pub async fn connect_saved_binance(&self) -> AppResult<AppSettings> {
         let result = self.connect_saved_binance_inner().await;
         if let Err(error) = &result {
-            self.record_warning("account.connect_saved_failed", &error.to_string());
+            self.record_warning("account.connect_saved_failed", &error.message());
         }
         result
     }
@@ -514,9 +524,9 @@ impl AppState {
         let _maintenance_guard = self.maintenance_lock.lock().await;
         let _trade_guard = self.trade_lock.lock().await;
         let Some((api_key, api_secret)) = secrets::load_binance_credentials()? else {
-            return Err(AppError::Config(
-                "系统 keyring 中没有已保存的 Binance API 凭据".to_string(),
-            ));
+            return Err(AppError::Config(crate::msg!(
+                "backend.noBinanceApiCredentialsSavedInThe"
+            )));
         };
         let client = BinanceClient::new(api_key, api_secret)?;
         verify_binance_access(&client).await?;
@@ -530,7 +540,7 @@ impl AppState {
         drop(runtime);
         self.record_log(
             "account.connected.saved",
-            "已使用系统 keyring 凭据连接 Binance 账户",
+            &crate::msg!("backend.connectedToBinanceUsingSystemKeyringCredentials"),
         );
         Ok(settings)
     }
@@ -553,7 +563,7 @@ impl AppState {
         }
         self.record_log(
             "account.credentials.deleted",
-            "已从系统 keyring 删除 Binance API 凭据",
+            &crate::msg!("backend.binanceApiCredentialsRemovedFromTheSystem"),
         );
         Ok(settings)
     }
@@ -600,28 +610,30 @@ impl AppState {
             progress.emit(
                 OrderProgressStage::Validate,
                 OrderProgressStatus::Error,
-                "手动下单需要显式确认",
+                crate::msg!("backend.manualOrdersRequireExplicitConfirmation"),
                 Some(request.option_symbol.as_str()),
                 None,
             );
-            return Err(AppError::RiskRejected("手动下单需要显式确认".to_string()));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.manualOrdersRequireExplicitConfirmation"
+            )));
         }
         if self.pending_recovery_count()? > 0 {
             progress.emit(
                 OrderProgressStage::Validate,
                 OrderProgressStatus::Error,
-                "存在待确认恢复记录，已暂停新的真实下单",
+                crate::msg!("backend.unconfirmedRecoveryRecordsExistNewLiveOrders"),
                 Some(request.option_symbol.as_str()),
                 None,
             );
-            return Err(AppError::RiskRejected(
-                "存在待确认恢复记录，已暂停新的真实下单".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.unconfirmedRecoveryRecordsExistNewLiveOrders"
+            )));
         }
         if self.settlement_reserves_assets().await? {
-            return Err(AppError::RiskRejected(
-                "存在未完成的到期结算，资金已预留，暂不能创建新策略".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.expirySettlementIsUnfinishedAndFundsAre"
+            )));
         }
         self.place_live_strategy(request, &progress).await
     }
@@ -634,9 +646,9 @@ impl AppState {
         let attempt = self
             .persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .get_order_attempt(&attempt_id)?
-            .ok_or_else(|| AppError::Storage("未找到指定恢复记录".to_string()))?;
+            .ok_or_else(|| AppError::Storage(crate::msg!("backend.recoveryRecordNotFound")))?;
 
         let linked_spot = self
             .orders
@@ -661,9 +673,11 @@ impl AppState {
         let attempt = self
             .persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .get_funding_attempt(&attempt_id)?
-            .ok_or_else(|| AppError::Storage("未找到指定资金恢复记录".to_string()))?;
+            .ok_or_else(|| {
+                AppError::Storage(crate::msg!("backend.fundingRecoveryRecordNotFound"))
+            })?;
 
         let recovered = self.recover_funding_attempt_inner(&client, attempt).await?;
         Ok(FundingAttemptView::from(recovered))
@@ -676,27 +690,29 @@ impl AppState {
     ) -> AppResult<FundingAttemptView> {
         let _trade_guard = self.trade_lock.lock().await;
         if !request.confirm_manual {
-            return Err(AppError::RiskRejected(
-                "人工解除资金阻断需要显式确认".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.manuallyClearingAFundingBlockRequiresExplicit"
+            )));
         }
         if request.attempt_id.trim().is_empty() {
-            return Err(AppError::RiskRejected(
-                "资金恢复记录 ID 不能为空".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.fundingRecoveryRecordIdCannotBeEmpty"
+            )));
         }
 
         let mut attempt = self
             .persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .get_funding_attempt(&request.attempt_id)?
-            .ok_or_else(|| AppError::Storage("未找到指定资金恢复记录".to_string()))?;
+            .ok_or_else(|| {
+                AppError::Storage(crate::msg!("backend.fundingRecoveryRecordNotFound"))
+            })?;
 
         if attempt.status != FundingAttemptStatus::Blocked {
-            return Err(AppError::RiskRejected(
-                "只有已阻断的资金恢复记录可以人工解除".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.onlyBlockedFundingRecoveryRecordsCanBe"
+            )));
         }
 
         attempt.status = match request.resolution {
@@ -705,20 +721,20 @@ impl AppState {
         };
         attempt.query_after_at = None;
         attempt.updated_at = Utc::now();
-        attempt.message = format!(
-            "人工核对 Binance 事实后标记为{}，未重新发送资金请求",
-            request.resolution.display()
+        attempt.message = crate::msg!(
+            "backend.markedAfterManuallyCheckingBinanceFactsFunding",
+            p0 = request.resolution.display()
         );
         self.save_funding_attempt(&attempt)?;
         self.record_warning(
             "funding.recovery.manual_resolved",
-            &format!(
-                "{} {} {} 已人工标记为{}，用于{}",
-                attempt.kind.display(),
-                attempt.amount,
-                attempt.asset,
-                request.resolution.display(),
-                attempt.purpose
+            &crate::msg!(
+                "backend.manuallyMarkedFor",
+                p0 = attempt.kind.display(),
+                p1 = attempt.amount,
+                p2 = attempt.asset,
+                p3 = request.resolution.display(),
+                p4 = attempt.purpose
             ),
         );
         Ok(FundingAttemptView::from(attempt))
@@ -757,9 +773,9 @@ impl AppState {
         request: AdoptOptionPositionsRequest,
     ) -> AppResult<Vec<StrategyOrder>> {
         if !request.confirm_live {
-            return Err(AppError::RiskRejected(
-                "接管期权持仓需要显式确认后续到期补齐风险".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.takingOverOptionsRequiresExplicitConfirmationOf"
+            )));
         }
         let symbols = normalized_unique_symbols(&request.symbols)?;
         let _maintenance_guard = self.maintenance_lock.lock().await;
@@ -773,16 +789,18 @@ impl AppState {
                 .iter()
                 .find(|position| position.symbol == symbol)
                 .ok_or_else(|| {
-                    AppError::RiskRejected(format!(
-                        "Binance 当前期权持仓中未找到 {symbol}，请刷新后重试"
+                    AppError::RiskRejected(crate::msg!(
+                        "backend.notFoundInCurrentBinanceOptionPositions",
+                        p0 = symbol
                     ))
                 })?;
             let contract = contracts
                 .iter()
                 .find(|contract| contract.symbol == symbol)
                 .ok_or_else(|| {
-                    AppError::RiskRejected(format!(
-                        "{symbol} 已不在 Binance exchangeInfo 中，无法接管"
+                    AppError::RiskRejected(crate::msg!(
+                        "backend.isNoLongerInBinanceExchangeinfoAnd",
+                        p0 = symbol
                     ))
                 })?;
             {
@@ -793,9 +811,10 @@ impl AppState {
             self.save_order(&order).await?;
             self.record_log(
                 "strategy.order.adopted",
-                &format!(
-                    "{} 已从 Binance 当前期权持仓接管，数量 {} 张",
-                    order.option_symbol, order.filled_quantity
+                &crate::msg!(
+                    "backend.tookOverFromCurrentBinanceOptionPositions",
+                    p0 = order.option_symbol,
+                    p1 = order.filled_quantity
                 ),
             );
             adopted.push(order);
@@ -871,7 +890,7 @@ impl AppState {
         progress.emit(
             OrderProgressStage::Validate,
             OrderProgressStatus::Running,
-            "正在校验下单参数",
+            crate::msg!("backend.validatingOrderParameters"),
             Some(request.option_symbol.as_str()),
             None,
         );
@@ -879,7 +898,7 @@ impl AppState {
             progress.emit(
                 OrderProgressStage::Validate,
                 OrderProgressStatus::Error,
-                error.to_string(),
+                error.message(),
                 Some(request.option_symbol.as_str()),
                 None,
             );
@@ -891,7 +910,7 @@ impl AppState {
                 progress.emit(
                     OrderProgressStage::Validate,
                     OrderProgressStatus::Error,
-                    error.to_string(),
+                    error.message(),
                     Some(request.option_symbol.as_str()),
                     None,
                 );
@@ -901,7 +920,7 @@ impl AppState {
         progress.emit(
             OrderProgressStage::Validate,
             OrderProgressStatus::Running,
-            "正在读取 Binance 账户、合约和行情",
+            crate::msg!("backend.readingBinanceAccountsContractsAndMarketData"),
             Some(request.option_symbol.as_str()),
             None,
         );
@@ -915,7 +934,7 @@ impl AppState {
                 progress.emit(
                     OrderProgressStage::Validate,
                     OrderProgressStatus::Error,
-                    error.to_string(),
+                    error.message(),
                     Some(request.option_symbol.as_str()),
                     None,
                 );
@@ -928,7 +947,7 @@ impl AppState {
                 progress.emit(
                     OrderProgressStage::Validate,
                     OrderProgressStatus::Error,
-                    error.to_string(),
+                    error.message(),
                     Some(request.option_symbol.as_str()),
                     None,
                 );
@@ -938,7 +957,7 @@ impl AppState {
         progress.emit(
             OrderProgressStage::Validate,
             OrderProgressStatus::Running,
-            "正在读取 Binance 当前买一价和买一量并计算主动成交限价",
+            crate::msg!("backend.readingBinanceBestBidAndSizeAnd"),
             Some(&contract.symbol),
             None,
         );
@@ -948,7 +967,7 @@ impl AppState {
                 progress.emit(
                     OrderProgressStage::Validate,
                     OrderProgressStatus::Error,
-                    error.to_string(),
+                    error.message(),
                     Some(&contract.symbol),
                     None,
                 );
@@ -960,14 +979,15 @@ impl AppState {
             request.quantity,
             contract,
         ) else {
-            let error = AppError::RiskRejected(format!(
-                "{} 当前买一量不足以一次成交 {} 张，已阻止真实期权卖单",
-                contract.symbol, request.quantity
+            let error = AppError::RiskRejected(crate::msg!(
+                "backend.bestBidSizeCannotFillContractsAt",
+                p0 = contract.symbol,
+                p1 = request.quantity
             ));
             progress.emit(
                 OrderProgressStage::Validate,
                 OrderProgressStatus::Error,
-                error.to_string(),
+                error.message(),
                 Some(&contract.symbol),
                 None,
             );
@@ -978,7 +998,7 @@ impl AppState {
             progress.emit(
                 OrderProgressStage::Validate,
                 OrderProgressStatus::Error,
-                error.to_string(),
+                error.message(),
                 Some(&contract.symbol),
                 None,
             );
@@ -987,7 +1007,7 @@ impl AppState {
         progress.emit(
             OrderProgressStage::Validate,
             OrderProgressStatus::Success,
-            "合约、数量和价格约束已通过",
+            crate::msg!("backend.contractQuantityAndPriceConstraintsPassed"),
             Some(&contract.symbol),
             None,
         );
@@ -995,7 +1015,7 @@ impl AppState {
         progress.emit(
             OrderProgressStage::Funding,
             OrderProgressStatus::Running,
-            "正在检查并准备期权保证金资金",
+            crate::msg!("backend.checkingAndPreparingOptionsMarginFunding"),
             Some(&contract.symbol),
             None,
         );
@@ -1007,7 +1027,7 @@ impl AppState {
                 progress.emit(
                     OrderProgressStage::Funding,
                     OrderProgressStatus::Success,
-                    "期权保证金资金已准备完成",
+                    crate::msg!("backend.optionsMarginFundingIsReady"),
                     Some(&contract.symbol),
                     None,
                 );
@@ -1017,7 +1037,7 @@ impl AppState {
                 progress.emit(
                     OrderProgressStage::Funding,
                     OrderProgressStatus::Error,
-                    error.to_string(),
+                    error.message(),
                     Some(&contract.symbol),
                     None,
                 );
@@ -1025,12 +1045,15 @@ impl AppState {
             }
         };
         if let Err(error) = validate_option_margin(&request, contract, &account) {
-            self.sweep_option_idle_usdt_best_effort(&client, "期权下单校验失败后归集")
-                .await;
+            self.sweep_option_idle_usdt_best_effort(
+                &client,
+                &crate::msg!("backend.fundSweepAfterOptionValidationFailure"),
+            )
+            .await;
             progress.emit(
                 OrderProgressStage::Funding,
                 OrderProgressStatus::Error,
-                error.to_string(),
+                error.message(),
                 Some(&contract.symbol),
                 None,
             );
@@ -1039,17 +1062,20 @@ impl AppState {
         progress.emit(
             OrderProgressStage::Risk,
             OrderProgressStatus::Running,
-            "正在执行本地下单风控",
+            crate::msg!("backend.runningLocalPreTradeChecks"),
             Some(&contract.symbol),
             None,
         );
         if let Err(error) = enforce_risk_rules(&request, contract, &account) {
-            self.sweep_option_idle_usdt_best_effort(&client, "期权风控拒绝后归集")
-                .await;
+            self.sweep_option_idle_usdt_best_effort(
+                &client,
+                &crate::msg!("backend.fundSweepAfterOptionRiskRejection"),
+            )
+            .await;
             progress.emit(
                 OrderProgressStage::Risk,
                 OrderProgressStatus::Error,
-                error.to_string(),
+                error.message(),
                 Some(&contract.symbol),
                 None,
             );
@@ -1058,7 +1084,7 @@ impl AppState {
         progress.emit(
             OrderProgressStage::Risk,
             OrderProgressStatus::Success,
-            "本地下单风控已通过",
+            crate::msg!("backend.localPreTradeChecksPassed"),
             Some(&contract.symbol),
             None,
         );
@@ -1073,13 +1099,13 @@ impl AppState {
             option_symbol: contract.symbol.clone(),
             status: OrderAttemptStatus::Attempted,
             exchange_order_id: None,
-            message: "已通过风控校验，准备发送 Binance 订单".to_string(),
+            message: crate::msg!("backend.riskChecksPassedPreparingBinanceOrderSubmission"),
             updated_at: now,
         };
         progress.emit(
             OrderProgressStage::Submit,
             OrderProgressStatus::Running,
-            "正在写入恢复记录并发送 Binance 订单",
+            crate::msg!("backend.writingRecoveryRecordAndSubmittingBinanceOrder"),
             Some(&contract.symbol),
             None,
         );
@@ -1087,7 +1113,7 @@ impl AppState {
             progress.emit(
                 OrderProgressStage::Submit,
                 OrderProgressStatus::Error,
-                error.to_string(),
+                error.message(),
                 Some(&contract.symbol),
                 None,
             );
@@ -1095,13 +1121,13 @@ impl AppState {
         }
         self.record_log(
             "strategy.order.manual.attempted",
-            &format!(
-                "{} {} {} 张，合约 {}，价格 {}",
-                request.symbol,
-                request.direction.display(),
-                request.quantity,
-                contract.symbol,
-                request.limit_price
+            &crate::msg!(
+                "backend.contractsContractPrice",
+                p0 = request.symbol,
+                p1 = request.direction.display(),
+                p2 = request.quantity,
+                p3 = contract.symbol,
+                p4 = request.limit_price
             ),
         );
 
@@ -1111,9 +1137,9 @@ impl AppState {
                 if error.is_uncertain_submit() {
                     self.record_warning(
                         "strategy.order.manual.submit_uncertain",
-                        &format!(
-                            "{} 下单请求结果不确定，正在按客户端订单号查询 Binance",
-                            contract.symbol
+                        &crate::msg!(
+                            "backend.submissionResultUncertainQueryingBinanceByClient",
+                            p0 = contract.symbol
                         ),
                     );
                     match client
@@ -1122,20 +1148,26 @@ impl AppState {
                     {
                         Ok(ack) => ack,
                         Err(query_error) => {
-                            attempt.message = format!(
-                                "Binance 下单结果不确定，按客户端订单号查询失败：{query_error}"
+                            attempt.message = crate::msg!(
+                                "backend.binanceOrderResultUncertainQueryByClient",
+                                p0 = query_error
                             );
                             attempt.updated_at = Utc::now();
                             self.save_order_attempt(&attempt)?;
                             progress.emit(
                                 OrderProgressStage::Submit,
                                 OrderProgressStatus::Error,
-                                "Binance 下单结果不确定，请查看恢复记录并按客户端订单号恢复",
+                                crate::msg!(
+                                    "backend.binanceOrderResultUncertainCheckRecoveryRecords"
+                                ),
                                 Some(&contract.symbol),
                                 None,
                             );
-                            return Err(AppError::response(format!(
-                                "Binance 下单结果不确定，clientOrderId={client_order_id}。请先查看恢复记录并重新查询 Binance。原始错误：{error}；查询错误：{query_error}"
+                            return Err(AppError::response(crate::msg!(
+                                "backend.binanceOrderResultUncertainClientorderidCheckRecovery",
+                                p0 = client_order_id,
+                                p1 = error,
+                                p2 = query_error
                             )));
                         }
                     }
@@ -1143,7 +1175,7 @@ impl AppState {
                     progress.emit(
                         OrderProgressStage::Submit,
                         OrderProgressStatus::Error,
-                        error.to_string(),
+                        error.message(),
                         Some(&contract.symbol),
                         None,
                     );
@@ -1154,18 +1186,18 @@ impl AppState {
         progress.emit(
             OrderProgressStage::Submit,
             OrderProgressStatus::Success,
-            format!("Binance 已返回订单号，状态 {}", ack.status),
+            crate::msg!("backend.binanceReturnedAnOrderIdStatus", p0 = ack.status),
             Some(&contract.symbol),
             Some(&ack.order_id),
         );
         attempt.status = OrderAttemptStatus::ExchangeAck;
         attempt.exchange_order_id = Some(ack.order_id.clone());
-        attempt.message = format!("Binance 已返回订单号，状态 {}", ack.status);
+        attempt.message = crate::msg!("backend.binanceReturnedAnOrderIdStatus", p0 = ack.status);
         attempt.updated_at = Utc::now();
         progress.emit(
             OrderProgressStage::Persist,
             OrderProgressStatus::Running,
-            "正在保存本地订单记录",
+            crate::msg!("backend.savingLocalOrderRecord"),
             Some(&contract.symbol),
             Some(&ack.order_id),
         );
@@ -1173,7 +1205,7 @@ impl AppState {
             progress.emit(
                 OrderProgressStage::Persist,
                 OrderProgressStatus::Error,
-                error.to_string(),
+                error.message(),
                 Some(&contract.symbol),
                 Some(&ack.order_id),
             );
@@ -1181,9 +1213,9 @@ impl AppState {
         }
 
         if is_unfilled_terminal_option_ack(&ack) {
-            let message = format!(
-                "Binance 返回未成交终态 {}，成交数量 0，本地不创建策略订单",
-                ack.status
+            let message = crate::msg!(
+                "backend.binanceReturnedTerminalStatusWithZeroFill",
+                p0 = ack.status
             );
             attempt.status = OrderAttemptStatus::Failed;
             attempt.message.clone_from(&message);
@@ -1191,7 +1223,7 @@ impl AppState {
             self.save_order_attempt(&attempt)?;
             self.record_log(
                 "strategy.order.manual.failed",
-                &format!("{} {}", contract.symbol, message),
+                &crate::msg!("ui.join", p0 = contract.symbol, p1 = message),
             );
             progress.emit(
                 OrderProgressStage::Persist,
@@ -1200,38 +1232,43 @@ impl AppState {
                 Some(&contract.symbol),
                 Some(&ack.order_id),
             );
-            self.sweep_option_idle_usdt_best_effort(&client, "期权下单未成交后归集")
-                .await;
+            self.sweep_option_idle_usdt_best_effort(
+                &client,
+                &crate::msg!("backend.fundSweepAfterUnfilledOptionOrder"),
+            )
+            .await;
             return Err(AppError::response(message));
         }
 
         let order = strategy::order_from_request(&request, &ack);
         if let Err(error) = self.save_order(&order).await {
             attempt.status = OrderAttemptStatus::PersistFailed;
-            attempt.message = "交易所订单已创建，但订单记录保存失败".to_string();
+            attempt.message = crate::msg!("backend.exchangeOrderCreatedButLocalOrderSave");
             attempt.updated_at = Utc::now();
             self.save_order_attempt(&attempt)?;
             progress.emit(
                 OrderProgressStage::Persist,
                 OrderProgressStatus::Error,
-                "交易所订单已创建，但订单记录保存失败，请查看恢复记录",
+                crate::msg!("backend.exchangeOrderCreatedButLocalOrderSave2"),
                 Some(&contract.symbol),
                 Some(&ack.order_id),
             );
-            return Err(AppError::Storage(format!(
-                "交易所订单已创建但订单记录保存失败，exchangeOrderId={}，clientOrderId={}。请先用 Binance 后台核对后再继续操作。原始错误：{}",
-                ack.order_id, client_order_id, error
+            return Err(AppError::Storage(crate::msg!(
+                "backend.exchangeOrderCreatedButLocalSaveFailed",
+                p0 = ack.order_id,
+                p1 = client_order_id,
+                p2 = error
             )));
         }
 
         attempt.status = OrderAttemptStatus::Persisted;
-        attempt.message = "交易所订单和订单记录均已保存".to_string();
+        attempt.message = crate::msg!("backend.exchangeOrderAndLocalOrderRecordBoth");
         attempt.updated_at = Utc::now();
         if let Err(error) = self.save_order_attempt(&attempt) {
             progress.emit(
                 OrderProgressStage::Persist,
                 OrderProgressStatus::Error,
-                error.to_string(),
+                error.message(),
                 Some(&contract.symbol),
                 Some(&ack.order_id),
             );
@@ -1239,24 +1276,30 @@ impl AppState {
         }
         self.record_log(
             "strategy.order.manual.created",
-            &format!(
-                "{} {} {} 张，执行价 {}，交易所状态 {}",
-                order.symbol,
-                order.direction.display(),
-                order.quantity,
-                order.strike,
-                order.exchange_status
+            &crate::msg!(
+                "backend.contractsStrikeExchangeStatus",
+                p0 = order.symbol,
+                p1 = order.direction.display(),
+                p2 = order.quantity,
+                p3 = order.strike,
+                p4 = order.exchange_status
             ),
         );
         progress.emit(
             OrderProgressStage::Persist,
             OrderProgressStatus::Success,
-            format!("订单已保存，交易所状态 {}", order.exchange_status),
+            crate::msg!(
+                "backend.orderSavedExchangeStatus",
+                p0 = order.exchange_status
+            ),
             Some(&contract.symbol),
             Some(&ack.order_id),
         );
-        self.sweep_option_idle_usdt_best_effort(&client, "期权下单后归集")
-            .await;
+        self.sweep_option_idle_usdt_best_effort(
+            &client,
+            &crate::msg!("backend.fundSweepAfterOptionOrder"),
+        )
+        .await;
         Ok(order)
     }
 
@@ -1273,9 +1316,9 @@ impl AppState {
             )
             .await?;
         if is_unfilled_terminal_option_ack(&ack) {
-            let message = format!(
-                "Binance 返回未成交终态 {}，成交数量 0，本地不创建策略订单",
-                ack.status
+            let message = crate::msg!(
+                "backend.binanceReturnedTerminalStatusWithZeroFill",
+                p0 = ack.status
             );
             attempt.status = OrderAttemptStatus::Failed;
             attempt.exchange_order_id = Some(ack.order_id.clone());
@@ -1284,7 +1327,7 @@ impl AppState {
             self.save_order_attempt(&attempt)?;
             self.record_log(
                 "strategy.order.recover_failed",
-                &format!("{} {}", attempt.option_symbol, message),
+                &crate::msg!("ui.join", p0 = attempt.option_symbol, p1 = message),
             );
             return Err(AppError::response(message));
         }
@@ -1293,22 +1336,22 @@ impl AppState {
             .iter()
             .find(|contract| contract.symbol == attempt.option_symbol)
             .ok_or_else(|| {
-                AppError::RiskRejected(
-                    "恢复记录中的 Binance 期权合约已不在 exchangeInfo 中，无法精确恢复到期时间"
-                        .to_string(),
-                )
+                AppError::RiskRejected(crate::msg!("backend.theRecoveryContractIsNoLongerIn"))
             })?;
         let request = request_from_option_attempt(&attempt, &ack, contract)?;
         let order = strategy::order_from_request(&request, &ack);
         self.save_order(&order).await?;
         attempt.status = OrderAttemptStatus::Persisted;
         attempt.exchange_order_id = Some(ack.order_id.clone());
-        attempt.message = "已从 Binance 查询订单并恢复到订单记录".to_string();
+        attempt.message = crate::msg!("backend.queriedBinanceAndRestoredTheOrderRecord");
         attempt.updated_at = Utc::now();
         self.save_order_attempt(&attempt)?;
         self.record_log(
             "strategy.order.recovered",
-            &format!("{} 已从恢复记录重建订单记录", attempt.option_symbol),
+            &crate::msg!(
+                "backend.orderRecordRebuiltFromRecoveryRecord",
+                p0 = attempt.option_symbol
+            ),
         );
         Ok(order)
     }
@@ -1333,7 +1376,7 @@ impl AppState {
                 .cloned()
         }
         .ok_or_else(|| {
-            AppError::Storage("未找到现货补齐对应的期权订单记录，无法自动恢复".to_string())
+            AppError::Storage(crate::msg!("backend.optionOrderLinkedToSpotRebalancingNot"))
         })?;
 
         order.spot_order_id = Some(ack.order_id.clone());
@@ -1341,12 +1384,15 @@ impl AppState {
         apply_spot_ack(&mut order, &ack);
         attempt.status = OrderAttemptStatus::SpotPersisted;
         attempt.exchange_order_id = Some(ack.order_id.clone());
-        attempt.message = "已从 Binance 查询现货订单并恢复补齐状态".to_string();
+        attempt.message = crate::msg!("backend.queriedBinanceSpotOrderAndRestoredRebalancing");
         attempt.updated_at = Utc::now();
         self.save_settlement_order(&order, &attempt).await?;
         self.record_log(
             "strategy.rebalance.recovered",
-            &format!("{} 已从恢复记录重建现货补齐状态", attempt.option_symbol),
+            &crate::msg!(
+                "backend.spotRebalancingStateRebuiltFromRecoveryRecord",
+                p0 = attempt.option_symbol
+            ),
         );
         Ok(order)
     }
@@ -1367,7 +1413,7 @@ impl AppState {
             match client.option_positions().await {
                 Ok(positions) => Some(positions),
                 Err(error) => {
-                    self.record_warning("strategy.position.sync_failed", &error.to_string());
+                    self.record_warning("strategy.position.sync_failed", &error.message());
                     None
                 }
             }
@@ -1386,7 +1432,7 @@ impl AppState {
             if let Err(error) = result {
                 self.record_warning(
                     "strategy.order.sync_failed",
-                    &format!("{} 同步失败：{}", order.option_symbol, error),
+                    &crate::msg!("backend.syncFailed", p0 = order.option_symbol, p1 = error),
                 );
             }
         }
@@ -1410,9 +1456,10 @@ impl AppState {
             self.delete_order(&order.id).await?;
             self.record_log(
                 "strategy.order.unfilled_removed",
-                &format!(
-                    "{} 交易所状态 {} 且未成交，已从本地订单移除",
-                    order.option_symbol, ack.status
+                &crate::msg!(
+                    "backend.exchangeStatusWithNoFillRemovedFrom",
+                    p0 = order.option_symbol,
+                    p1 = ack.status
                 ),
             );
             return Ok(());
@@ -1432,8 +1479,7 @@ impl AppState {
             order.status = StrategyStatus::Cancelled;
             order.exchange_status = "POSITION_CLOSED".to_string();
             order.updated_at = Utc::now();
-            order.rebalance_message =
-                "Binance 当前期权持仓已不存在，本机停止跟踪该接管记录".to_string();
+            order.rebalance_message = crate::msg!("backend.theBinanceOptionPositionNoLongerExists");
         }
     }
 
@@ -1472,12 +1518,12 @@ impl AppState {
                     // 后台维护不排队堆积；上一轮未结束时直接跳过并记录脱敏日志。
                     state.record_warning(
                         "background.tick_skipped",
-                        "上一轮后台同步仍在运行，本轮跳过",
+                        &crate::msg!("backend.previousBackgroundSyncIsStillRunningSkipping"),
                     );
                     continue;
                 };
                 if let Err(error) = state.background_tick().await {
-                    state.record_error("background.tick_failed", &error.to_string());
+                    state.record_error("background.tick_failed", &error.message());
                 }
                 drop(maintenance_guard);
                 let account_state = state.clone();
@@ -1487,7 +1533,7 @@ impl AppState {
                         return;
                     };
                     if let Err(error) = account_state.refresh_account_cache().await {
-                        account_state.record_warning("account.snapshot_failed", &error.to_string());
+                        account_state.record_warning("account.snapshot_failed", &error.message());
                     }
                 });
             }
@@ -1500,7 +1546,7 @@ impl AppState {
             let persistence = self
                 .persistence
                 .lock()
-                .map_err(|error| AppError::Storage(error.to_string()))?;
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
             persistence.save_order(order)?;
         }
         let mut orders = self.orders.write().await;
@@ -1518,7 +1564,7 @@ impl AppState {
             let persistence = self
                 .persistence
                 .lock()
-                .map_err(|error| AppError::Storage(error.to_string()))?;
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
             persistence.delete_order(order_id)?;
         }
         let mut orders = self.orders.write().await;
@@ -1529,17 +1575,17 @@ impl AppState {
     /// 写信息日志。
     ///
     /// 调用方传入的 message 必须是脱敏摘要，不应包含原始 Binance 响应。
-    fn record_log(&self, event: &str, message: &str) {
+    fn record_log(&self, event: &str, message: &Message) {
         self.logs.append(LogLevel::Info, event, message);
     }
 
     /// 写警告日志。
-    fn record_warning(&self, event: &str, message: &str) {
+    fn record_warning(&self, event: &str, message: &Message) {
         self.logs.append(LogLevel::Warn, event, message);
     }
 
     /// 写错误日志。
-    fn record_error(&self, event: &str, message: &str) {
+    fn record_error(&self, event: &str, message: &Message) {
         self.logs.append(LogLevel::Error, event, message);
     }
 
@@ -1547,7 +1593,7 @@ impl AppState {
         let persistence = self
             .persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         Ok(persistence.count_pending_order_attempts()?
             + persistence.count_pending_funding_attempts()?)
     }
@@ -1556,7 +1602,7 @@ impl AppState {
     fn save_order_attempt(&self, attempt: &OrderAttempt) -> AppResult<()> {
         self.persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .save_order_attempt(attempt)
     }
 
@@ -1564,7 +1610,7 @@ impl AppState {
     fn save_funding_attempt(&self, attempt: &FundingAttempt) -> AppResult<()> {
         self.persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .save_funding_attempt(attempt)
     }
 
@@ -1572,7 +1618,7 @@ impl AppState {
     fn funding_attempts_by_chain(&self, chain_id: &str) -> AppResult<Vec<FundingAttempt>> {
         self.persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
             .list_funding_attempts_by_chain(chain_id)
     }
 
@@ -1583,7 +1629,7 @@ impl AppState {
             .await
             .client
             .clone()
-            .ok_or_else(|| AppError::Config("请先连接 Binance API".to_string()))
+            .ok_or_else(|| AppError::Config(crate::msg!("backend.connectToTheBinanceApiFirst")))
     }
 
     /// 账户缓存仅用于展示；换账户或断开后丢弃旧连接正在返回的查询结果。
@@ -1631,7 +1677,7 @@ impl AppState {
             let persistence = self
                 .persistence
                 .lock()
-                .map_err(|error| AppError::Storage(error.to_string()))?;
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
             persistence
                 .list_funding_attempts(usize::MAX)?
                 .into_iter()
@@ -1649,7 +1695,7 @@ impl AppState {
             if let Err(error) = self.recover_funding_attempt_inner(&client, attempt).await {
                 self.record_warning(
                     "funding.recovery.failed",
-                    &format!("资金恢复查询失败：{error}"),
+                    &crate::msg!("backend.fundingRecoveryQueryFailed", p0 = error),
                 );
             }
         }
@@ -1686,9 +1732,9 @@ impl AppState {
             return if existing.status == FundingAttemptStatus::Confirmed {
                 Ok(existing)
             } else {
-                Err(AppError::RiskRejected(
-                    "该资金步骤已有恢复记录，只能查询或人工核对，不能重复发送".to_string(),
-                ))
+                Err(AppError::RiskRejected(crate::msg!(
+                    "backend.thisFundingStepAlreadyHasARecovery"
+                )))
             };
         }
         if self.settlement_reserves_assets().await?
@@ -1697,21 +1743,21 @@ impl AppState {
                 .iter()
                 .any(|batch| request.chain_id.starts_with(&format!("{}-", batch.id)))
         {
-            return Err(AppError::RiskRejected(
-                "资金已预留给到期结算，暂停其它资金动作".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.fundsAreReservedForExpirySettlementOther"
+            )));
         }
         if self.pending_recovery_count()? > 0 {
-            return Err(AppError::RiskRejected(
-                "存在待确认恢复记录，暂停新的资金动作".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.unconfirmedRecoveryRecordsExistNewFundingActions"
+            )));
         }
         // 先落库再发送真实资金请求，确保请求结果不确定时有可恢复的本地事实。
         let now = Utc::now();
-        let message = format!(
-            "正在发送 Binance {} 请求，用于{}",
-            request.kind.display(),
-            request.purpose
+        let message = crate::msg!(
+            "backend.sendingBinanceRequestFor",
+            p0 = request.kind.display(),
+            p1 = request.purpose
         );
         let attempt = FundingAttempt {
             id: Uuid::new_v4().to_string(),
@@ -1740,11 +1786,11 @@ impl AppState {
         if attempt.status == FundingAttemptStatus::Confirmed {
             Ok(attempt)
         } else {
-            Err(AppError::RiskRejected(format!(
-                "{} {} {} 尚未被 Binance 确认，已暂停后续资金动作",
-                attempt.kind.display(),
-                attempt.amount,
-                attempt.asset
+            Err(AppError::RiskRejected(crate::msg!(
+                "backend.isNotConfirmedByBinanceSubsequentFunding",
+                p0 = attempt.kind.display(),
+                p1 = attempt.amount,
+                p2 = attempt.asset
             )))
         }
     }
@@ -1759,7 +1805,9 @@ impl AppState {
         let result = match attempt.kind {
             FundingAttemptKind::UniversalTransfer => {
                 let transfer_type = attempt.transfer_type.as_deref().ok_or_else(|| {
-                    AppError::Storage("账户划转恢复记录缺少 transfer_type".to_string())
+                    AppError::Storage(crate::msg!(
+                        "backend.transferRecoveryRecordIsMissingTransferType"
+                    ))
                 })?;
                 client
                     .universal_transfer(transfer_type, &attempt.asset, attempt.amount)
@@ -1767,7 +1815,9 @@ impl AppState {
             }
             FundingAttemptKind::SimpleEarnRedeem => {
                 let product_id = attempt.product_id.as_deref().ok_or_else(|| {
-                    AppError::Storage("活期赎回恢复记录缺少 product_id".to_string())
+                    AppError::Storage(crate::msg!(
+                        "backend.flexibleRedemptionRecoveryRecordIsMissingProduct"
+                    ))
                 })?;
                 client
                     .redeem_simple_earn_flexible(product_id, attempt.amount)
@@ -1775,7 +1825,9 @@ impl AppState {
             }
             FundingAttemptKind::SimpleEarnSubscribe => {
                 let product_id = attempt.product_id.as_deref().ok_or_else(|| {
-                    AppError::Storage("活期申购恢复记录缺少 product_id".to_string())
+                    AppError::Storage(crate::msg!(
+                        "backend.flexibleSubscriptionRecoveryRecordIsMissingProduct"
+                    ))
                 })?;
                 client
                     .subscribe_simple_earn_flexible(product_id, attempt.amount)
@@ -1788,7 +1840,8 @@ impl AppState {
                 attempt.status = FundingAttemptStatus::ExchangeAck;
                 attempt.exchange_ref = Some(exchange_ref);
                 attempt.submit_error_kind = None;
-                attempt.message = "Binance 已返回资金动作引用，正在查询历史确认".to_string();
+                attempt.message =
+                    crate::msg!("backend.binanceReturnedAFundingReferenceQueryingHistory");
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(&attempt)?;
                 self.query_funding_attempt(client, attempt).await
@@ -1798,8 +1851,10 @@ impl AppState {
                 attempt.status = FundingAttemptStatus::Uncertain;
                 let error_kind = error.classification();
                 attempt.submit_error_kind = Some(error_kind.to_string());
-                attempt.message =
-                    format!("资金请求结果不确定，正在按 Binance 历史确认：{error_kind}");
+                attempt.message = crate::msg!(
+                    "backend.fundingRequestResultUncertainConfirmingAgainstBinance",
+                    p0 = error_kind
+                );
                 attempt.query_after_at = Some(Utc::now());
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(&attempt)?;
@@ -1809,7 +1864,10 @@ impl AppState {
                 attempt.status = FundingAttemptStatus::Failed;
                 let error_kind = error.classification();
                 attempt.submit_error_kind = Some(error_kind.to_string());
-                attempt.message = format!("Binance 明确拒绝或本地校验失败：{error_kind}");
+                attempt.message = crate::msg!(
+                    "backend.explicitBinanceRejectionOrLocalValidationFailure",
+                    p0 = error_kind
+                );
                 attempt.query_after_at = None;
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(&attempt)?;
@@ -1859,13 +1917,18 @@ impl AppState {
             attempt.history_error_kind = Some(error_kind.to_string());
             attempt.query_after_at =
                 Some(Utc::now() + funding_backoff_after_count(attempt.transport_error_count));
-            attempt.message = format!("Binance 历史查询暂时失败，稍后继续确认：{error_kind}");
+            attempt.message = crate::msg!(
+                "backend.binanceHistoryQueryTemporarilyFailedConfirmationWill",
+                p0 = error_kind
+            );
         } else {
             attempt.status = FundingAttemptStatus::Blocked;
             attempt.history_error_kind = Some(error_kind.to_string());
             attempt.query_after_at = None;
-            attempt.message =
-                format!("Binance 历史查询发生不可自动确认错误，已阻断资金动作：{error_kind}");
+            attempt.message = crate::msg!(
+                "backend.binanceHistoryCannotBeConfirmedAutomaticallyFunding",
+                p0 = error_kind
+            );
         }
         attempt.updated_at = Utc::now();
         self.save_funding_attempt(attempt)
@@ -1881,17 +1944,20 @@ impl AppState {
                 attempt.status = FundingAttemptStatus::Confirmed;
                 attempt.exchange_ref = Some(exchange_ref);
                 attempt.query_after_at = None;
-                attempt.message = format!("已按 Binance 历史确认成功，状态 {status}");
+                attempt.message = crate::msg!(
+                    "backend.successConfirmedByBinanceHistoryStatus",
+                    p0 = status
+                );
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(attempt)?;
                 self.record_log(
                     "funding.recovery.confirmed",
-                    &format!(
-                        "{} {} {} 已由 Binance 历史确认，用于{}",
-                        attempt.kind.display(),
-                        attempt.amount,
-                        attempt.asset,
-                        attempt.purpose
+                    &crate::msg!(
+                        "backend.confirmedByBinanceHistoryFor",
+                        p0 = attempt.kind.display(),
+                        p1 = attempt.amount,
+                        p2 = attempt.asset,
+                        p3 = attempt.purpose
                     ),
                 );
             }
@@ -1902,7 +1968,8 @@ impl AppState {
                 attempt.status = FundingAttemptStatus::Pending;
                 attempt.query_after_at =
                     Some(Utc::now() + funding_backoff_after_count(attempt.effective_query_count));
-                attempt.message = format!("Binance 历史显示仍在处理中，状态 {status}");
+                attempt.message =
+                    crate::msg!("backend.binanceHistoryShowsProcessingStatus", p0 = status);
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(attempt)?;
             }
@@ -1912,7 +1979,10 @@ impl AppState {
                 }
                 attempt.status = FundingAttemptStatus::Failed;
                 attempt.query_after_at = None;
-                attempt.message = format!("Binance 历史确认失败，状态 {status}");
+                attempt.message = crate::msg!(
+                    "backend.failureConfirmedByBinanceHistoryStatus",
+                    p0 = status
+                );
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(attempt)?;
             }
@@ -1921,7 +1991,7 @@ impl AppState {
                 attempt.status = FundingAttemptStatus::Blocked;
                 attempt.query_after_at = None;
                 attempt.message =
-                    "Binance 历史匹配到多条可能记录，无法唯一确认，已阻断自动资金动作".to_string();
+                    crate::msg!("backend.multiplePossibleBinanceHistoryMatchesPreventUnique");
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(attempt)?;
             }
@@ -1930,15 +2000,13 @@ impl AppState {
                     attempt.status = FundingAttemptStatus::Blocked;
                     attempt.query_after_at = None;
                     attempt.message =
-                        "多次有效查询 Binance 历史仍无法确认该资金动作是否发生，已阻断自动资金动作"
-                            .to_string();
+                        crate::msg!("backend.repeatedValidBinanceHistoryQueriesCannotConfirm");
                 } else {
                     attempt.status = FundingAttemptStatus::Uncertain;
                     attempt.query_after_at = Some(
                         Utc::now() + funding_backoff_after_count(attempt.effective_query_count),
                     );
-                    attempt.message =
-                        "暂未在 Binance 历史中确认该资金动作，稍后继续查询".to_string();
+                    attempt.message = crate::msg!("backend.fundingActionNotYetConfirmedInBinance");
                 }
                 attempt.updated_at = Utc::now();
                 self.save_funding_attempt(attempt)?;
@@ -1960,7 +2028,9 @@ impl AppState {
         match attempt.kind {
             FundingAttemptKind::UniversalTransfer => {
                 let transfer_type = attempt.transfer_type.as_deref().ok_or_else(|| {
-                    AppError::Storage("账户划转恢复记录缺少 transfer_type".to_string())
+                    AppError::Storage(crate::msg!(
+                        "backend.transferRecoveryRecordIsMissingTransferType"
+                    ))
                 })?;
                 let records = client
                     .universal_transfer_history(transfer_type, start_time_ms, end_time_ms)
@@ -1998,7 +2068,7 @@ impl AppState {
         &self,
         client: &BinanceClient,
         chain_id: &str,
-        purpose: &str,
+        purpose: &Message,
         transfer_type: &str,
         asset: &str,
         amount: Decimal,
@@ -2009,7 +2079,7 @@ impl AppState {
             FundingRequest {
                 chain_id: chain_id.to_string(),
                 kind: FundingAttemptKind::UniversalTransfer,
-                purpose: purpose.to_string(),
+                purpose: purpose.clone(),
                 asset: asset.to_string(),
                 amount,
                 transfer_type: Some(transfer_type.to_string()),
@@ -2024,7 +2094,7 @@ impl AppState {
         &self,
         client: &BinanceClient,
         chain_id: &str,
-        purpose: &str,
+        purpose: &Message,
         product_id: &str,
         asset: &str,
         amount: Decimal,
@@ -2035,7 +2105,7 @@ impl AppState {
             FundingRequest {
                 chain_id: chain_id.to_string(),
                 kind: FundingAttemptKind::SimpleEarnRedeem,
-                purpose: purpose.to_string(),
+                purpose: purpose.clone(),
                 asset: asset.to_string(),
                 amount,
                 transfer_type: None,
@@ -2050,7 +2120,7 @@ impl AppState {
         &self,
         client: &BinanceClient,
         chain_id: &str,
-        purpose: &str,
+        purpose: &Message,
         product_id: &str,
         asset: &str,
         amount: Decimal,
@@ -2061,7 +2131,7 @@ impl AppState {
             FundingRequest {
                 chain_id: chain_id.to_string(),
                 kind: FundingAttemptKind::SimpleEarnSubscribe,
-                purpose: purpose.to_string(),
+                purpose: purpose.clone(),
                 asset: asset.to_string(),
                 amount,
                 transfer_type: None,
@@ -2087,12 +2157,18 @@ impl AppState {
 
         let amount = round_up_funding_amount(shortfall);
         let chain_id = Uuid::new_v4().to_string();
-        self.ensure_spot_asset_available(client, "USDT", amount, "期权保证金准备", &chain_id)
-            .await?;
+        self.ensure_spot_asset_available(
+            client,
+            "USDT",
+            amount,
+            &crate::msg!("backend.optionsMarginPreparation"),
+            &chain_id,
+        )
+        .await?;
         self.execute_universal_transfer(
             client,
             &chain_id,
-            "期权保证金准备",
+            &crate::msg!("backend.optionsMarginPreparation"),
             "MAIN_OPTION",
             "USDT",
             amount,
@@ -2100,7 +2176,10 @@ impl AppState {
         .await?;
         self.record_log(
             "funding.transfer.main_option",
-            &format!("已从现货划转 {amount} USDT 到期权保证金账户，用于期权下单"),
+            &crate::msg!(
+                "backend.transferredUsdtFromSpotToOptionsMargin",
+                p0 = amount
+            ),
         );
         self.wait_for_option_account_funding(client, contract, request, amount)
             .await
@@ -2120,7 +2199,7 @@ impl AppState {
                 if attempt_index > 0 {
                     self.record_log(
                         "funding.option_account_refreshed",
-                        "期权保证金账户已反映本次划转，继续执行下单风控",
+                        &crate::msg!("backend.optionsAccountReflectsTheTransferContinuingPre"),
                     );
                 }
                 return Ok(account);
@@ -2139,8 +2218,10 @@ impl AppState {
             round_up_funding_amount(option_funding_shortfall(&account, contract, request));
         self.record_warning(
             "funding.option_account_refresh_timeout",
-            &format!(
-                "已划转 {transferred_amount} USDT 用于期权下单，但期权账户快照仍显示资金或权益缺口约 {remaining} USDT，将按最新账户快照继续风控"
+            &crate::msg!(
+                "backend.transferredUsdtForOptionsButTheAccount",
+                p0 = transferred_amount,
+                p1 = remaining
             ),
         );
         Ok(account)
@@ -2152,7 +2233,7 @@ impl AppState {
         client: &BinanceClient,
         asset: &str,
         required: Decimal,
-        purpose: &str,
+        purpose: &Message,
         chain_id: &str,
     ) -> AppResult<()> {
         if required <= Decimal::ZERO {
@@ -2174,7 +2255,7 @@ impl AppState {
         client: &BinanceClient,
         asset: &str,
         amount: Decimal,
-        purpose: &str,
+        purpose: &Message,
         chain_id: &str,
     ) -> AppResult<()> {
         if amount <= Decimal::ZERO {
@@ -2194,14 +2275,17 @@ impl AppState {
             })
             .max_by(|left, right| left.amount.cmp(&right.amount))
             .ok_or_else(|| {
-                AppError::RiskRejected(format!(
-                    "现货 {asset} 不足，且没有可赎回的 Simple Earn 活期持仓"
+                AppError::RiskRejected(crate::msg!(
+                    "backend.insufficientSpotAndNoRedeemableFlexibleEarn",
+                    p0 = asset
                 ))
             })?;
         if position.amount < amount {
-            return Err(AppError::RiskRejected(format!(
-                "Simple Earn 活期 {asset} 可赎回数量不足，预计需要 {}，当前可赎回 {}",
-                amount, position.amount
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.insufficientRedeemableFlexibleEarnNeededRedeemable",
+                p0 = asset,
+                p1 = amount,
+                p2 = position.amount
             )));
         }
 
@@ -2216,12 +2300,17 @@ impl AppState {
         .await?;
         self.record_log(
             "funding.earn.redeemed",
-            &format!("已从 Simple Earn 活期赎回 {amount} {asset} 至现货账户，用于{purpose}"),
+            &crate::msg!(
+                "backend.redeemedFromFlexibleEarnToSpotFor",
+                p0 = amount,
+                p1 = asset,
+                p2 = purpose
+            ),
         );
         Ok(())
     }
 
-    async fn sweep_option_idle_usdt_best_effort(&self, client: &BinanceClient, purpose: &str) {
+    async fn sweep_option_idle_usdt_best_effort(&self, client: &BinanceClient, purpose: &Message) {
         if self.settlement_reserves_assets().await.unwrap_or(true) {
             return;
         }
@@ -2236,7 +2325,10 @@ impl AppState {
                 self.record_warning("funding.sweep.waiting", &message);
             }
             Err(error) => {
-                self.record_warning("funding.sweep.failed", &format!("{purpose}失败：{error}"));
+                self.record_warning(
+                    "funding.sweep.failed",
+                    &crate::msg!("backend.failed", p0 = purpose, p1 = error),
+                );
             }
         }
     }
@@ -2245,13 +2337,16 @@ impl AppState {
     async fn sweep_option_idle_usdt(
         &self,
         client: &BinanceClient,
-        purpose: &str,
+        purpose: &Message,
     ) -> AppResult<SweepExecutionOutcome> {
         let account = client.option_account().await?;
         let transfer_amount = round_down_funding_amount(option_idle_usdt_sweep_amount(&account));
         if transfer_amount < OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT {
-            let message = format!(
-                "{purpose}跳过期权 USDT 归集：可归集数量 {transfer_amount} USDT 小于自动归集阈值 {OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT} USDT"
+            let message = crate::msg!(
+                "backend.optionsUsdtSweepSkippedUsdtIsBelow",
+                p0 = purpose,
+                p1 = transfer_amount,
+                p2 = OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT
             );
             self.record_log("funding.option_idle_sweep.skipped", &message);
             return Ok(SweepExecutionOutcome::Skipped(message));
@@ -2270,15 +2365,21 @@ impl AppState {
         .await?;
         self.record_log(
             "funding.transfer.option_main",
-            &format!("已从期权保证金账户归集 {transfer_amount} USDT 到现货账户，{purpose}"),
+            &crate::msg!(
+                "backend.sweptUsdtFromOptionsMarginToSpot",
+                p0 = transfer_amount,
+                p1 = purpose
+            ),
         );
 
         if !self
             .wait_for_spot_asset_available(client, "USDT", minimum_spot_amount)
             .await?
         {
-            let message = format!(
-                "{purpose}已确认 OPTION_MAIN 划转，但现货账户暂未反映 {transfer_amount} USDT，延后 Simple Earn 申购"
+            let message = crate::msg!(
+                "backend.optionMainTransferConfirmedButSpotHas",
+                p0 = purpose,
+                p1 = transfer_amount
             );
             self.record_warning("funding.earn.subscribe_deferred", &message);
             return Ok(SweepExecutionOutcome::Waiting(message));
@@ -2286,8 +2387,9 @@ impl AppState {
 
         self.subscribe_spot_asset_to_earn(client, "USDT", transfer_amount, purpose, &chain_id)
             .await?;
-        Ok(SweepExecutionOutcome::Completed(format!(
-            "{purpose}已完成期权闲置 USDT 归集链路"
+        Ok(SweepExecutionOutcome::Completed(crate::msg!(
+            "backend.idleOptionsUsdtSweepCompleted",
+            p0 = purpose
         )))
     }
 
@@ -2303,7 +2405,11 @@ impl AppState {
                 if attempt_index > 0 {
                     self.record_log(
                         "funding.spot_balance_refreshed",
-                        &format!("现货账户已反映 {expected_amount} {asset}，继续后续资金收尾动作"),
+                        &crate::msg!(
+                            "backend.spotAccountReflectsContinuingFundingFinalization",
+                            p0 = expected_amount,
+                            p1 = asset
+                        ),
                     );
                 }
                 return Ok(true);
@@ -2321,7 +2427,7 @@ impl AppState {
         client: &BinanceClient,
         asset: &str,
         amount: Decimal,
-        purpose: &str,
+        purpose: &Message,
         chain_id: &str,
     ) -> AppResult<()> {
         let amount = round_down_funding_amount(amount);
@@ -2340,15 +2446,19 @@ impl AppState {
                 FundingAttemptStatus::Confirmed => {
                     self.record_log(
                         "funding.earn.subscribe_already_confirmed",
-                        &format!("{purpose}已存在确认完成的 {asset} 活期申购记录，跳过重复申购"),
+                        &crate::msg!("backend.confirmedFlexibleSubscriptionAlreadyExistsDuplicateSubscription", p0 = purpose, p1 = asset),
                     );
                     Ok(())
                 }
-                FundingAttemptStatus::Failed => Err(AppError::RiskRejected(format!(
-                    "{purpose}已有失败的 {asset} 活期申购记录，需要人工复核"
+                FundingAttemptStatus::Failed => Err(AppError::RiskRejected(crate::msg!(
+                    "backend.failedFlexibleSubscriptionExistsManualReviewRequired",
+                    p0 = purpose,
+                    p1 = asset
                 ))),
-                _ => Err(AppError::RiskRejected(format!(
-                    "{purpose}已有待确认的 {asset} 活期申购记录"
+                _ => Err(AppError::RiskRejected(crate::msg!(
+                    "backend.flexibleSubscriptionAwaitsConfirmation",
+                    p0 = purpose,
+                    p1 = asset
                 ))),
             };
         }
@@ -2362,14 +2472,20 @@ impl AppState {
                     && product.status == "PURCHASING"
             })
             .ok_or_else(|| {
-                AppError::response(format!("未找到可申购的 Simple Earn 活期 {asset} 产品"))
+                AppError::response(crate::msg!(
+                    "backend.noAvailableSimpleEarnFlexibleProductFound",
+                    p0 = asset
+                ))
             })?;
         if amount < product.min_purchase_amount {
             self.record_log(
                 "funding.earn.subscribe_skipped",
-                &format!(
-                    "{purpose}跳过 {asset} 活期申购：数量 {} 小于最小申购 {}",
-                    amount, product.min_purchase_amount
+                &crate::msg!(
+                    "backend.flexibleSubscriptionSkippedQuantityIsBelowMinimum",
+                    p0 = purpose,
+                    p1 = asset,
+                    p2 = amount,
+                    p3 = product.min_purchase_amount
                 ),
             );
             return Ok(());
@@ -2388,7 +2504,12 @@ impl AppState {
         .await?;
         self.record_log(
             "funding.earn.subscribed",
-            &format!("已把 {amount} {asset} 从现货账户重新申购 Simple Earn 活期，{purpose}"),
+            &crate::msg!(
+                "backend.resubscribedFromSpotToFlexibleEarn",
+                p0 = amount,
+                p1 = asset,
+                p2 = purpose
+            ),
         );
         Ok(())
     }

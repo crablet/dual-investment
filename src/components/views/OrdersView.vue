@@ -5,6 +5,7 @@
 -->
 <script setup lang="ts">
 import type { StrategyOrder } from '@/types/domain'
+
 import { CheckCircle2, RefreshCw, ScanLine, XCircle } from '@lucide/vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
 import { computed, shallowRef, watchEffect } from 'vue'
@@ -13,6 +14,7 @@ import AdoptOptionPositionsPanel from '@/components/orders/AdoptOptionPositionsP
 import { useFormat } from '@/composables/useFormat'
 import { useLocalToday } from '@/composables/useLocalToday'
 import { useRecoveryRows } from '@/composables/useRecoveryRows'
+import { messageText, t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
 
@@ -58,64 +60,62 @@ const detailRows = computed(() => {
 
 function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
   return [
-    { label: '方向', value: directionText(order.direction) },
-    { label: '标的', value: order.symbol },
-    { label: '期权合约', value: order.optionSymbol },
-    { label: '交易所状态', value: order.exchangeStatus },
-    { label: '客户端订单号', value: order.clientOrderId },
-    { label: '到期时间', value: localDateTimeLabel(order.expiryAt) },
-    { label: '执行价', value: money(order.strike, 'USDT', 0) },
-    { label: '成交数量', value: `${order.filledQuantity} / ${order.quantity} 张` },
-    { label: '成交均价', value: money(order.avgPrice) },
-    { label: '权利金', value: money(order.premium) },
-    { label: '保本价', value: money(order.breakeven) },
-    { label: '结算参考价', value: money(order.settlementPrice) },
-    { label: '现货订单号', value: order.spotOrderId ?? '--' },
-    { label: '现货状态', value: order.spotOrderStatus || '--' },
-    { label: '现货成交数量', value: `${order.spotFilledQuantity} BTC` },
-    { label: '现货成交均价', value: money(order.spotAvgPrice) },
-    { label: '到期补齐', value: order.settlementAction },
-    { label: '补齐结果', value: order.rebalanceMessage || '--' },
+    { label: t('ui.direction'), value: directionText(order.direction) },
+    { label: t('ui.underlying'), value: order.symbol },
+    { label: t('ui.optionContract'), value: order.optionSymbol },
+    { label: t('ui.exchangeStatus'), value: order.exchangeStatus },
+    { label: t('ui.clientOrderId'), value: order.clientOrderId },
+    { label: t('ui.expiryTime'), value: localDateTimeLabel(order.expiryAt) },
+    { label: t('ui.strikePrice'), value: money(order.strike, 'USDT', 0) },
+    { label: t('ui.filledQuantity'), value: t('ui.contracts2', { p0: order.filledQuantity, p1: order.quantity }) },
+    { label: t('ui.averageFillPrice'), value: money(order.avgPrice) },
+    { label: t('ui.premium2'), value: money(order.premium) },
+    { label: t('ui.breakevenPrice'), value: money(order.breakeven) },
+    { label: t('ui.settlementReferencePrice'), value: money(order.settlementPrice) },
+    { label: t('ui.spotOrderId'), value: order.spotOrderId ?? '--' },
+    { label: t('ui.spotStatus'), value: order.spotOrderStatus || '--' },
+    { label: t('ui.spotFilledQuantity'), value: `${order.spotFilledQuantity} BTC` },
+    { label: t('ui.spotAverageFillPrice'), value: money(order.spotAvgPrice) },
+    { label: t('ui.expiryRebalancing'), value: messageText(order.settlementAction) },
+    { label: t('ui.rebalancingResult'), value: messageText(order.rebalanceMessage) || '--' },
   ]
 }
 </script>
 
 <template>
   <div class="view-grid">
-    <Panel title="订单统计" class="span-12">
+    <Panel :title="t('ui.orderStatistics')" class="span-12">
       <template #action>
         <div class="button-row compact">
           <NButton size="small" secondary :loading="store.isLoading('sync')" @click="store.syncLiveState()">
-            <template #icon><NIcon :component="RefreshCw" /></template>
-            同步订单
+            <template #icon><NIcon :component="RefreshCw" /></template> {{ t('ui.syncOrders') }}
           </NButton>
           <NButton size="small" secondary :loading="store.isLoading('settlement')" @click="store.runSettlementScan()">
-            <template #icon><NIcon :component="ScanLine" /></template>
-            结算扫描
+            <template #icon><NIcon :component="ScanLine" /></template> {{ t('ui.scanSettlements') }}
           </NButton>
         </div>
       </template>
       <div class="summary-cards order-summary-cards">
-        <article><span>总订单数</span><strong>{{ store.orders.length }}</strong></article>
-        <article><span>进行中订单</span><strong>{{ store.runningOrders.length }}</strong></article>
-        <article><span>今日到期</span><strong>{{ todayExpiryCount }}</strong></article>
-        <article><span>累计权利金</span><strong>{{ store.pnl ? money(store.pnl.optionPremium) : '--' }}</strong></article>
+        <article><span> {{ t('ui.totalOrders') }} </span><strong>{{ store.orders.length }}</strong></article>
+        <article><span> {{ t('ui.activeOrders') }} </span><strong>{{ store.runningOrders.length }}</strong></article>
+        <article><span> {{ t('ui.expiringToday') }} </span><strong>{{ todayExpiryCount }}</strong></article>
+        <article><span> {{ t('ui.totalPremium') }} </span><strong>{{ store.pnl ? money(store.pnl.optionPremium) : '--' }}</strong></article>
       </div>
     </Panel>
 
-    <Panel title="订单列表" class="span-8">
+    <Panel :title="t('ui.orderList')" class="span-8">
       <div class="table-wrap">
         <table class="data-table">
           <thead>
             <tr>
-              <th>订单编号</th>
-              <th>方向</th>
-              <th>标的</th>
-              <th>执行价</th>
-              <th>到期日</th>
-              <th>数量</th>
-              <th>权利金</th>
-              <th>状态</th>
+              <th> {{ t('ui.orderId') }} </th>
+              <th> {{ t('ui.direction') }} </th>
+              <th> {{ t('ui.underlying') }} </th>
+              <th> {{ t('ui.strikePrice') }} </th>
+              <th> {{ t('ui.expiryDate') }} </th>
+              <th> {{ t('ui.quantity') }} </th>
+              <th> {{ t('ui.premium2') }} </th>
+              <th> {{ t('ui.status') }} </th>
             </tr>
           </thead>
           <tbody>
@@ -136,11 +136,11 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
             </tr>
           </tbody>
         </table>
-        <p v-if="store.orders.length === 0" class="empty-state">暂无订单</p>
+        <p v-if="store.orders.length === 0" class="empty-state"> {{ t('ui.noOrders') }} </p>
       </div>
     </Panel>
 
-    <Panel title="订单详情" class="span-4">
+    <Panel :title="t('ui.orderDetails')" class="span-4">
       <div v-if="selected" class="detail-list order-detail-list">
         <header class="order-detail-heading">
           <h3 :title="selected.id">{{ selected.id }}</h3>
@@ -153,26 +153,26 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
           <strong :title="row.value">{{ row.value }}</strong>
         </p>
       </div>
-      <p v-else class="empty-state">暂无订单详情</p>
+      <p v-else class="empty-state"> {{ t('ui.noOrderDetails') }} </p>
     </Panel>
 
     <AdoptOptionPositionsPanel class="span-12" />
 
-    <Panel title="恢复中心" class="span-12">
+    <Panel :title="t('ui.recoveryCenter')" class="span-12">
       <div class="table-wrap">
         <table class="data-table recovery-table">
           <thead>
             <tr>
-              <th>时间</th>
-              <th>类型</th>
-              <th>对象</th>
-              <th>金额/标的</th>
-              <th>交易所引用</th>
-              <th>状态</th>
-              <th>事实来源</th>
-              <th>下一步</th>
-              <th>说明</th>
-              <th>操作</th>
+              <th> {{ t('ui.time') }} </th>
+              <th> {{ t('ui.type') }} </th>
+              <th> {{ t('ui.target') }} </th>
+              <th> {{ t('ui.amountUnderlying') }} </th>
+              <th> {{ t('ui.exchangeReference') }} </th>
+              <th> {{ t('ui.status') }} </th>
+              <th> {{ t('ui.sourceOfFacts') }} </th>
+              <th> {{ t('ui.nextStep') }} </th>
+              <th> {{ t('ui.description') }} </th>
+              <th> {{ t('ui.action') }} </th>
             </tr>
           </thead>
           <tbody>
@@ -216,7 +216,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
                     :loading="store.isLoading('recover')"
                     @click="finishSettlementRow(row)"
                   >
-                    结束理财收尾
+                    {{ t('ui.endEarnFinalization') }}
                   </NButton>
                   <template v-if="canManuallyResolve(row)">
                     <NButton
@@ -226,8 +226,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
                       :loading="store.isLoading('recover')"
                       @click="resolveFundingRow(row, 'confirmed')"
                     >
-                      <template #icon><NIcon :component="CheckCircle2" /></template>
-                      核实成功
+                      <template #icon><NIcon :component="CheckCircle2" /></template> {{ t('ui.verifySuccess') }}
                     </NButton>
                     <NButton
                       size="small"
@@ -236,8 +235,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
                       :loading="store.isLoading('recover')"
                       @click="resolveFundingRow(row, 'failed')"
                     >
-                      <template #icon><NIcon :component="XCircle" /></template>
-                      核实失败
+                      <template #icon><NIcon :component="XCircle" /></template> {{ t('ui.verifyFailure') }}
                     </NButton>
                   </template>
                 </div>
@@ -245,7 +243,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
             </tr>
           </tbody>
         </table>
-        <p v-if="recoveryRows.length === 0" class="empty-state">暂无恢复记录</p>
+        <p v-if="recoveryRows.length === 0" class="empty-state"> {{ t('ui.noRecoveryRecords') }} </p>
       </div>
     </Panel>
   </div>

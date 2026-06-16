@@ -6,6 +6,7 @@ import type { MaybeRefOrGetter } from 'vue'
 import type { AppViewId } from '@/stores/app'
 import type { FundingAttemptView, OrderAttempt, StrategyOrder } from '@/types/domain'
 import { computed, toValue } from 'vue'
+import { messageText, t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import {
   localDateKey,
@@ -53,12 +54,12 @@ interface UseCalendarEventsOptions {
 
 /** 日历顶部筛选项；顺序即 UI 展示顺序。 */
 export const calendarEventTypes: CalendarEventTypeMeta[] = [
-  { id: 'all', label: '全部', tone: 'gold' },
-  { id: 'order', label: '下单', tone: 'gold' },
-  { id: 'expiry', label: '到期', tone: 'purple' },
-  { id: 'settlement', label: '结算', tone: 'green' },
-  { id: 'rebalance', label: '补齐', tone: 'green' },
-  { id: 'recovery', label: '恢复', tone: 'gray' },
+  { id: 'all', get label() { return t('ui.all') }, tone: 'gold' },
+  { id: 'order', get label() { return t('ui.placeOrder') }, tone: 'gold' },
+  { id: 'expiry', get label() { return t('ui.expiry') }, tone: 'purple' },
+  { id: 'settlement', get label() { return t('ui.settlement') }, tone: 'green' },
+  { id: 'rebalance', get label() { return t('ui.rebalancing') }, tone: 'green' },
+  { id: 'recovery', get label() { return t('ui.recovery') }, tone: 'gray' },
 ]
 
 /**
@@ -105,15 +106,15 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
 
 /** 从策略订单派生下单、到期、结算和现货补齐事件。 */
 function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
-  const direction = order.direction === 'sellPut' ? '低买 BTC' : '高卖 BTC'
+  const direction = order.direction === 'sellPut' ? t('ui.buyBtcLow') : t('ui.sellBtcHigh2')
   const rows: CalendarEvent[] = [
     {
       id: `order-${order.id}`,
       type: 'order',
       date: localDateKey(order.createdAt),
       timeLabel: localTimeLabel(order.createdAt),
-      title: `${direction} 下单`,
-      detail: `${order.optionSymbol}，已成交 ${order.filledQuantity} 张，权利金 ${order.premium} USDT`,
+      title: t('ui.order', { p0: direction }),
+      detail: t('ui.filledContractsPremiumUsdt', { p0: order.optionSymbol, p1: order.filledQuantity, p2: order.premium }),
       tone: 'gold',
       targetView: 'orders',
       priority: 30,
@@ -123,8 +124,8 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
       type: 'expiry',
       date: localDateKey(order.expiryAt),
       timeLabel: localTimeLabel(order.expiryAt),
-      title: `${direction} 到期日`,
-      detail: `${order.optionSymbol}，执行价 ${order.strike}，状态 ${strategyStatusText(order.status)}`,
+      title: t('ui.expiry2', { p0: direction }),
+      detail: t('ui.strikeStatus', { p0: order.optionSymbol, p1: order.strike, p2: strategyStatusText(order.status) }),
       tone: 'purple',
       targetView: 'orders',
       priority: 70,
@@ -137,8 +138,8 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
       type: 'settlement',
       date: localDateKey(order.settledAt),
       timeLabel: localTimeLabel(order.settledAt),
-      title: '订单结算完成',
-      detail: order.rebalanceMessage || `${order.optionSymbol} 已完成到期结算`,
+      get title() { return t('ui.orderSettled') },
+      detail: messageText(order.rebalanceMessage) || t('ui.hasCompletedExpirySettlement', { p0: order.optionSymbol }),
       tone: 'green',
       targetView: 'orders',
       priority: 60,
@@ -151,8 +152,8 @@ function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
       type: 'rebalance',
       date: localDateKey(order.settledAt ?? order.updatedAt),
       timeLabel: localTimeLabel(order.settledAt ?? order.updatedAt),
-      title: order.status === 'rebalanceFailed' ? '现货补齐失败' : '现货补齐',
-      detail: order.rebalanceMessage || `${order.optionSymbol} 现货补齐状态 ${order.spotOrderStatus || '--'}`,
+      title: order.status === 'rebalanceFailed' ? t('ui.spotRebalancingFailed') : t('ui.spotRebalancing'),
+      detail: messageText(order.rebalanceMessage) || t('ui.spotRebalancingStatus', { p0: order.optionSymbol, p1: order.spotOrderStatus || '--' }),
       tone: order.status === 'rebalanceFailed' ? 'red' : 'green',
       targetView: order.status === 'rebalanceFailed' ? 'orders' : 'portfolio',
       priority: order.status === 'rebalanceFailed' ? 90 : 65,
@@ -173,8 +174,8 @@ function eventFromOrderAttempt(attempt: OrderAttempt): CalendarEvent | undefined
     type: 'recovery',
     date: localDateKey(attempt.updatedAt),
     timeLabel: localTimeLabel(attempt.updatedAt),
-    title: attempt.status.includes('failed') ? '订单恢复待办' : '订单尝试记录',
-    detail: `${attempt.optionSymbol}，${attemptStatusText(attempt.status)}，${attempt.message}`,
+    title: attempt.status.includes('failed') ? t('ui.pendingOrderRecovery') : t('ui.orderAttemptRecord'),
+    detail: `${attempt.optionSymbol} · ${attemptStatusText(attempt.status)} · ${messageText(attempt.message)}`,
     tone: attempt.status.includes('failed') ? 'red' : 'gray',
     targetView: 'orders',
     priority: attempt.status.includes('failed') ? 92 : 52,
@@ -192,8 +193,8 @@ function eventFromFundingAttempt(attempt: FundingAttemptView): CalendarEvent | u
     type: 'recovery',
     date: localDateKey(attempt.updatedAt),
     timeLabel: localTimeLabel(attempt.updatedAt),
-    title: attempt.status === 'blocked' ? '资金恢复待办' : '资金恢复记录',
-    detail: `${attempt.kindLabel} ${attempt.amount} ${attempt.asset}，${fundingAttemptStatusText(attempt.status)}，${attempt.message}`,
+    title: attempt.status === 'blocked' ? t('ui.pendingFundingRecovery') : t('ui.fundingRecoveryRecord'),
+    detail: `${messageText(attempt.kindLabel)} ${attempt.amount} ${attempt.asset} · ${fundingAttemptStatusText(attempt.status)} · ${messageText(attempt.message)}`,
     tone: attempt.status === 'blocked' ? 'red' : 'gray',
     targetView: 'orders',
     priority: attempt.status === 'blocked' ? 94 : 54,

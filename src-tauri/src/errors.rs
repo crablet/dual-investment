@@ -3,18 +3,19 @@
 //! 恢复、重试和连接策略只读取结构化原因；展示文字不参与交易决策。
 //! Binance 错误上下文必须由本地生成，不保存原始响应、交易所 msg 或签名参数。
 
+use crate::messages::Message;
 use std::fmt;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("配置错误：{0}")]
-    Config(String),
-    #[error("交易被风控拒绝：{0}")]
-    RiskRejected(String),
-    #[error("币安接口错误：{0}")]
+    #[error("{0}")]
+    Config(Message),
+    #[error("{0}")]
+    RiskRejected(Message),
+    #[error("{0}")]
     Binance(BinanceError),
-    #[error("数据库错误：{0}")]
-    Storage(String),
+    #[error("{0}")]
+    Storage(Message),
 }
 
 pub type AppResult<T> = Result<T, AppError>;
@@ -36,11 +37,11 @@ pub enum BinanceErrorKind {
 #[derive(Debug)]
 pub struct BinanceError {
     kind: BinanceErrorKind,
-    context: String,
+    context: Message,
 }
 
 impl AppError {
-    pub fn binance(kind: BinanceErrorKind, context: impl Into<String>) -> Self {
+    pub fn binance(kind: BinanceErrorKind, context: impl Into<Message>) -> Self {
         Self::Binance(BinanceError {
             kind,
             context: context.into(),
@@ -48,7 +49,7 @@ impl AppError {
     }
 
     /// 调用方只传本地构造的契约说明，不包含 Binance 响应值。
-    pub fn response(context: impl Into<String>) -> Self {
+    pub fn response(context: impl Into<Message>) -> Self {
         Self::binance(BinanceErrorKind::Response, context)
     }
 
@@ -145,30 +146,47 @@ impl AppError {
     }
 }
 
-impl fmt::Display for BinanceError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl AppError {
+    pub fn message(&self) -> Message {
+        match self {
+            Self::Config(detail) => crate::msg!("errors.config", detail = detail),
+            Self::RiskRejected(detail) => crate::msg!("errors.risk", detail = detail),
+            Self::Storage(detail) => crate::msg!("errors.storage", detail = detail),
+            Self::Binance(error) => crate::msg!("errors.binance", detail = error.message()),
+        }
+    }
+}
+
+impl BinanceError {
+    fn message(&self) -> Message {
         let reason = match self.kind {
-            BinanceErrorKind::Timeout => "请求超时",
-            BinanceErrorKind::Connection => "连接失败",
-            BinanceErrorKind::BodyRead => "响应体读取失败",
-            BinanceErrorKind::Network => "网络请求失败",
-            BinanceErrorKind::Request => "请求构造失败",
-            BinanceErrorKind::Decode => "响应解码失败",
+            BinanceErrorKind::Timeout => crate::msg!("errors.timeout"),
+            BinanceErrorKind::Connection => crate::msg!("errors.connection"),
+            BinanceErrorKind::BodyRead => crate::msg!("errors.bodyRead"),
+            BinanceErrorKind::Network => crate::msg!("errors.network"),
+            BinanceErrorKind::Request => crate::msg!("errors.request"),
+            BinanceErrorKind::Decode => crate::msg!("errors.decode"),
             BinanceErrorKind::MissingRows | BinanceErrorKind::Response => {
-                return formatter.write_str(&self.context);
+                return self.context.clone();
             }
             BinanceErrorKind::Http { status, code } => {
-                write!(
-                    formatter,
-                    "Binance {} 请求失败（HTTP {status}",
-                    self.context
-                )?;
-                if let Some(code) = code {
-                    write!(formatter, ", code {code}")?;
-                }
-                return formatter.write_str("）");
+                return match code {
+                    Some(code) => crate::msg!(
+                        "errors.httpCode",
+                        context = self.context,
+                        status = status,
+                        code = code
+                    ),
+                    None => crate::msg!("errors.http", context = self.context, status = status),
+                };
             }
         };
-        write!(formatter, "Binance {} {reason}", self.context)
+        crate::msg!("errors.operation", context = self.context, reason = reason)
+    }
+}
+
+impl fmt::Display for BinanceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message().fmt(formatter)
     }
 }

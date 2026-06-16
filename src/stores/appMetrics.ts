@@ -4,12 +4,15 @@
 
 import type { AccountSnapshot, AppSettings, PnlReport } from '@/types/domain'
 import type { MetricCardModel } from '@/types/view'
+import { formatLocale, t } from '@/i18n'
 import { decimalStringToDisplayNumber } from '@/utils/decimal'
 
-const metricMoneyFormatter = new Intl.NumberFormat('zh-CN', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
+function metricMoneyFormatter() {
+  return new Intl.NumberFormat(formatLocale(), {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
 
 /** 根据连接状态、账户资产和收益快照构造总览顶部指标卡。 */
 export function buildMetrics(
@@ -24,29 +27,29 @@ export function buildMetrics(
   return [
     {
       id: 'portfolio',
-      title: '总资产估值',
+      title: t('ui.totalAssetValue'),
       value: formatMetricMoney(totalEquity),
       icon: 'wallet',
       tone: 'gold',
     },
     {
       id: 'margin',
-      title: '可用保证金',
+      title: t('ui.availableMargin'),
       value: formatMetricMoney(availableMargin),
       icon: 'shield',
       tone: 'blue',
     },
     {
       id: 'premium',
-      title: '今日权利金',
+      title: t('ui.todaySPremium'),
       value: formatMetricMoney(pnl?.today),
       icon: 'coins',
       tone: 'gold',
     },
     {
       id: 'status',
-      title: '运行状态',
-      value: connected ? '已连接' : '未连接',
+      title: t('ui.runtimeStatus'),
+      value: connected ? t('ui.connected') : t('ui.disconnected'),
       icon: 'activity',
       tone: connected ? 'gold' : 'gray',
     },
@@ -58,5 +61,5 @@ function formatMetricMoney(value: string | undefined) {
     return '-- USDT'
   }
   const numeric = decimalStringToDisplayNumber(value)
-  return `${metricMoneyFormatter.format(numeric)} USDT`
+  return `${metricMoneyFormatter().format(numeric)} USDT`
 }

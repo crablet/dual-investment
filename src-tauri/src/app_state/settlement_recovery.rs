@@ -1,5 +1,7 @@
 //! 人工结束失败的理财收尾。只关闭批次，不改写成交或资金结果，也不发送交易所请求。
 
+use crate::messages::Message;
+
 use super::{
     AppError, AppResult, AppState, Decimal, FundingAttempt, FundingAttemptKind,
     FundingAttemptStatus, SettlementBatch, SettlementStage, StrategyOrder, StrategyStatus, Utc,
@@ -12,9 +14,9 @@ fn finish_blocker(
     orders: &[StrategyOrder],
     funding: &[FundingAttempt],
     has_pending_recovery: bool,
-) -> Option<&'static str> {
+) -> Option<Message> {
     if batch.stage != SettlementStage::Blocked {
-        return Some("只有已阻断的理财收尾可以人工结束");
+        return Some(crate::msg!("backend.onlyBlockedEarnFinalizationCanBeEnded"));
     }
     if batch.order_ids.is_empty()
         || batch.order_ids.iter().any(|id| {
@@ -32,10 +34,12 @@ fn finish_blocker(
                 && order.status != StrategyStatus::Settled
         })
     {
-        return Some("同批订单尚未全部结算完成，请先核对订单");
+        return Some(crate::msg!("backend.notAllBatchOrdersAreSettledCheck"));
     }
     if has_pending_recovery {
-        return Some("存在待确认的订单或资金请求，请先完成恢复核对");
+        return Some(crate::msg!(
+            "backend.orderOrFundingRequestsAwaitConfirmationComplete"
+        ));
     }
     if batch.sweep_after_at.is_none()
         || batch.spot_sweep.is_none()
@@ -46,10 +50,14 @@ fn finish_blocker(
         || batch.shortfall.usdt != Decimal::ZERO
         || batch.shortfall.btc != Decimal::ZERO
     {
-        return Some("尚未确认资金准备、划转及现货到账，不能跳过收尾");
+        return Some(crate::msg!(
+            "backend.fundingPreparationTransfersAndSpotReceiptAre"
+        ));
     }
     let Some(option_sweep_usdt) = batch.option_sweep_usdt else {
-        return Some("缺少期权划转计划，请先核对资金记录");
+        return Some(crate::msg!(
+            "backend.optionsTransferPlanIsMissingCheckFunding"
+        ));
     };
     if option_sweep_usdt > Decimal::ZERO
         && !funding.iter().any(|attempt| {
@@ -61,7 +69,9 @@ fn finish_blocker(
                 && attempt.status == FundingAttemptStatus::Confirmed
         })
     {
-        return Some("期权划转尚未确认成功，请先核对资金记录");
+        return Some(crate::msg!(
+            "backend.optionsTransferSuccessIsUnconfirmedCheckFunding"
+        ));
     }
     let prefix = format!("{}-", batch.id);
     if funding
@@ -73,7 +83,9 @@ fn finish_blocker(
                     && attempt.status != FundingAttemptStatus::Confirmed)
         })
     {
-        return Some("该批次仍有未确认或失败的赎回、划转，不能结束理财收尾");
+        return Some(crate::msg!(
+            "backend.thisBatchHasUnconfirmedOrFailedRedemptions"
+        ));
     }
     None
 }
@@ -92,19 +104,19 @@ fn recovery_view(
         expiry_at: batch.expiry_at,
         status: batch.stage,
         status_label: if skipped {
-            "已人工结束"
+            crate::msg!("backend.endedManually")
         } else {
-            "批次阻断"
-        }
-        .to_string(),
+            crate::msg!("backend.batchBlocked")
+        },
         can_finish: blocker.is_none(),
-        fact_source: "本地结算、订单与资金恢复记录".to_string(),
+        fact_source: crate::msg!("backend.localSettlementOrderAndFundingRecoveryRecords"),
         next_action: if skipped {
-            "本批理财收尾已结束，未申购资金留在现货"
+            crate::msg!("backend.earnFinalizationEndedForThisBatchUnsubscribed")
         } else {
-            blocker.unwrap_or("可选择结束理财收尾，未申购资金留在现货")
-        }
-        .to_string(),
+            blocker.unwrap_or(crate::msg!(
+                "backend.youMayEndEarnFinalizationUnsubscribedFunds"
+            ))
+        },
         message: batch.message.clone(),
         updated_at: batch.updated_at,
     }
@@ -115,7 +127,7 @@ impl AppState {
         let persistence = self
             .persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let orders = persistence.list_orders()?;
         let funding = persistence.list_funding_attempts(usize::MAX)?;
         let has_pending = persistence.count_pending_order_attempts()?
@@ -140,20 +152,20 @@ impl AppState {
     ) -> AppResult<SettlementRecoveryView> {
         let _trade_guard = self.trade_lock.lock().await;
         if !request.confirm_manual {
-            return Err(AppError::RiskRejected(
-                "结束理财收尾需要用户明确确认".to_string(),
-            ));
+            return Err(AppError::RiskRejected(crate::msg!(
+                "backend.endingEarnFinalizationRequiresExplicitUserConfirmation"
+            )));
         }
         // 在交易锁内重读数据库，按钮显示时的快照不能作为放行依据。
         let persistence = self
             .persistence
             .lock()
-            .map_err(|error| AppError::Storage(error.to_string()))?;
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         let mut batch = persistence
             .list_settlement_batches()?
             .into_iter()
             .find(|batch| batch.id == request.batch_id)
-            .ok_or_else(|| AppError::Storage("未找到指定结算批次".to_string()))?;
+            .ok_or_else(|| AppError::Storage(crate::msg!("backend.settlementBatchNotFound")))?;
         let orders = persistence.list_orders()?;
         let funding = persistence.list_funding_attempts(usize::MAX)?;
         let has_pending = persistence.count_pending_order_attempts()?
@@ -161,18 +173,21 @@ impl AppState {
             > 0;
         if batch.stage != SettlementStage::SweepSkipped {
             if let Some(reason) = finish_blocker(&batch, &orders, &funding, has_pending) {
-                return Err(AppError::RiskRejected(reason.to_string()));
+                return Err(AppError::RiskRejected(reason));
             }
             batch.stage = SettlementStage::SweepSkipped;
-            batch.message = format!(
-                "用户确认结束理财收尾，未申购资金留在现货。原暂停原因：{}",
-                batch.message
+            batch.message = crate::msg!(
+                "backend.userConfirmedEndingEarnFinalizationUnsubscribedFunds",
+                p0 = batch.message
             );
             batch.updated_at = Utc::now();
             persistence.save_settlement_batch(&batch)?;
             self.record_log(
                 "settlement.sweep.skipped",
-                &format!("{} 用户确认结束理财收尾，保留原资金结果", batch.id),
+                &crate::msg!(
+                    "backend.userConfirmedEndingEarnFinalizationOriginalFunding",
+                    p0 = batch.id
+                ),
             );
         }
         Ok(recovery_view(&batch, &orders, &funding, has_pending))

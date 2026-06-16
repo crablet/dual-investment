@@ -4,6 +4,7 @@
 // 真实收益归因或金融事实计算。
 
 import type { PnlBreakdownItem } from '@/types/view'
+import { formatLocale, t } from '@/i18n'
 import {
   decimalStringToDisplayNumber,
   isNegativeDecimalString,
@@ -73,20 +74,26 @@ const fallbackPalette = [
   '#c284ff',
 ]
 
-const collator = new Intl.Collator('zh-CN', {
-  numeric: true,
-  sensitivity: 'base',
-})
+function collator() {
+  return new Intl.Collator(formatLocale(), {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
 
-const valueFormatter = new Intl.NumberFormat('zh-CN', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
+function valueFormatter() {
+  return new Intl.NumberFormat(formatLocale(), {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
 
-const percentFormatter = new Intl.NumberFormat('zh-CN', {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-})
+function percentFormatter() {
+  return new Intl.NumberFormat(formatLocale(), {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })
+}
 
 /** 归一化环形图输入，过滤零值并按业务稳定顺序排序。 */
 export function normalizeDonutItems(items: PnlBreakdownItem[]): NormalizedDonutItem[] {
@@ -112,7 +119,7 @@ export function normalizeDonutItems(items: PnlBreakdownItem[]): NormalizedDonutI
       if (rankDiff !== 0) {
         return rankDiff
       }
-      const keyCompare = collator.compare(a.key, b.key)
+      const keyCompare = collator().compare(a.key, b.key)
       return keyCompare === 0 ? a.sourceIndex - b.sourceIndex : keyCompare
     })
 }
@@ -138,12 +145,12 @@ export function buildDonutSegments(items: NormalizedDonutItem[]): DonutSegment[]
     const segment = {
       ...item,
       color: resolveColor(item),
-      percentLabel: `${percentFormatter.format(percent)}%`,
+      percentLabel: `${percentFormatter().format(percent)}%`,
       valueLabel: formatDonutValue(item.value),
       dasharray: `${svgNumber(length)} ${svgNumber(100 - length)}`,
       dashoffset: svgNumber(offset),
       negative: isNegativeDecimalString(item.value),
-      ariaLabel: `${item.label}，${formatDonutValue(item.value)} USDT，占比 ${percentFormatter.format(percent)}%`,
+      ariaLabel: t('ui.usdt', { p0: item.label, p1: formatDonutValue(item.value), p2: percentFormatter().format(percent) }),
     }
     offset -= length
     return segment
@@ -175,7 +182,7 @@ export function centerDisplayForSegment(
 /** 格式化环形图数值；非法数字保留原字符串，方便暴露异常输入。 */
 export function formatDonutValue(value: string) {
   const numeric = Number(value)
-  return Number.isFinite(numeric) ? valueFormatter.format(numeric) : value
+  return Number.isFinite(numeric) ? valueFormatter().format(numeric) : value
 }
 
 function sortRank(item: NormalizedDonutItem) {

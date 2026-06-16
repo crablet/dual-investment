@@ -6,11 +6,13 @@ Binance 期权持仓接管面板。
 -->
 <script setup lang="ts">
 import type { AdoptableOptionPositionView } from '@/types/domain'
+
 import { DownloadCloud, RefreshCw } from '@lucide/vue'
 import { NButton, NCheckbox, NIcon, NTag } from 'naive-ui'
 import { computed, shallowRef, watch } from 'vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
+import { messageText, t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import { localDateTimeLabel } from '@/utils/date'
 
@@ -54,7 +56,7 @@ function adoptSelected() {
   if (!canAdoptSelected.value) {
     return
   }
-  if (!window.confirm('确认接管选中的 Binance 期权持仓？到期 ITM 后本机会继续执行现货补齐流程。')) {
+  if (!window.confirm(t('ui.takeOverTheSelectedBinanceOptionPositions'))) {
     return
   }
   // confirmLive 表示用户确认接管真实 Binance 持仓；这里只写入本地跟踪，不重放历史下单。
@@ -66,16 +68,14 @@ function adoptSelected() {
 </script>
 
 <template>
-  <Panel title="接管 Binance 订单">
+  <Panel :title="t('ui.takeOverBinancePositions')">
     <template #action>
       <div class="button-row compact adopt-actions">
         <NButton size="small" secondary :loading="store.isLoading('adopt')" @click="refreshPositions">
-          <template #icon><NIcon :component="RefreshCw" /></template>
-          查询持仓
+          <template #icon><NIcon :component="RefreshCw" /></template> {{ t('ui.queryPositions') }}
         </NButton>
         <NButton size="small" type="primary" :disabled="!canAdoptSelected" @click="adoptSelected">
-          <template #icon><NIcon :component="DownloadCloud" /></template>
-          接管选中
+          <template #icon><NIcon :component="DownloadCloud" /></template> {{ t('ui.takeOverSelected') }}
         </NButton>
       </div>
     </template>
@@ -92,15 +92,15 @@ function adoptSelected() {
                 @update:checked="toggleAll"
               />
             </th>
-            <th>合约</th>
-            <th>方向</th>
-            <th>到期时间</th>
-            <th>执行价</th>
-            <th>持仓张数</th>
-            <th>入场均价</th>
-            <th>标记价格</th>
-            <th>权利金</th>
-            <th>状态</th>
+            <th> {{ t('ui.contract') }} </th>
+            <th> {{ t('ui.direction') }} </th>
+            <th> {{ t('ui.expiryTime') }} </th>
+            <th> {{ t('ui.strikePrice') }} </th>
+            <th> {{ t('ui.contractsHeld') }} </th>
+            <th> {{ t('ui.averageEntryPrice') }} </th>
+            <th> {{ t('ui.markPrice') }} </th>
+            <th> {{ t('ui.premium2') }} </th>
+            <th> {{ t('ui.status') }} </th>
           </tr>
         </thead>
         <tbody>
@@ -126,15 +126,13 @@ function adoptSelected() {
             <td>{{ money(row.premium) }}</td>
             <td>
               <NTag :type="row.adoptable ? 'success' : row.alreadyTracked ? 'info' : 'warning'" size="small">
-                {{ row.reason }}
+                {{ messageText(row.reason) }}
               </NTag>
             </td>
           </tr>
         </tbody>
       </table>
-      <p v-if="rows.length === 0" class="empty-state">
-        暂无可显示的 Binance 期权持仓
-      </p>
+      <p v-if="rows.length === 0" class="empty-state"> {{ t('ui.noBinanceOptionPositionsToDisplay') }} </p>
     </div>
   </Panel>
 </template>
