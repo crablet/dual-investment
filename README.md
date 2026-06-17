@@ -1,84 +1,91 @@
-# 双币赢助手
+<div align="center">
+  <img src="src-tauri/icons/128x128.png" width="80" height="80" alt="双币赢助手图标" />
+  <h1>双币赢助手</h1>
+  <p><strong>在桌面上管理 BTC/USDT 双币赢式策略。</strong></p>
+  <p>连接 Binance 期权与现货，把候选筛选、下单复核、订单跟踪和到期处理集中在一个工作台。</p>
+  <p>Binance · BTC/USDT · 11 种界面语言 · <a href="LICENSE">AGPL-3.0-only</a></p>
+  <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
+  <p>
+    <a href="#快速开始">快速开始</a> ·
+    <a href="#工作流程">工作流程</a> ·
+    <a href="#文档">使用文档</a> ·
+    <a href="#开发">参与开发</a>
+  </p>
+</div>
 
-通过 Binance 期权与现货执行 BTC/USDT 双币赢式策略的 Tauri 实盘客户端。
+![双币赢工作台：左侧筛选 Put/Call 候选，右侧复核数量与订单预估](docs/images/workbench-zh-CN.webp)
 
-## 使用
+<p align="center">双币赢工作台 · 候选筛选与下单预估</p>
 
-在“设置”连接 Binance，再到“双币赢”选择卖 Put 低买或卖 Call 高卖，复核后提交。已有未到期的 BTC/USDT 卖方义务仓可在“策略订单”接管。设置页上方左侧为“Binance 连接”，右侧为“通用设置”，日志位于下方。
+## 从筛选到结算
 
-在“设置 → 通用设置”选择界面语言，支持简体中文、英语、繁体中文、巴西葡萄牙语、西班牙语、越南语、土耳其语、印尼语、日语、韩语和泰语。首次按系统语言优先列表选择支持的语言，均不支持时使用英语；手动选择在词典加载完成后生效并保存在当前设备。选择“跟随系统”可恢复自动选择。
+双币赢助手面向需要自行选择合约、确认下单，并持续跟踪到期处理的 Binance 用户。你决定策略方向与数量，客户端负责把后续状态和操作组织起来。
 
-启动只加载当前语言和英语回退，其他词典在切换时加载并在当前会话缓存，均随安装包提供，可离线使用。快速切换以最后一次选择为准；加载失败时保留当前语言，启动时则回退到英语。切换语言保留当前表单和交易状态，日期仍使用系统本地时区和公历。
+| 能力 | 你可以做什么 |
+| --- | --- |
+| 筛选候选 | 在卖 Put 低买与卖 Call 高卖之间切换，按到期日、年化、行权概率和距现价筛选合约。 |
+| 下单复核 | 查看权利金与保本价预估，确认合约和数量后提交；已有活跃仓位的合约会显示持仓标识。 |
+| 策略跟踪 | 查看活跃策略、持仓与现货、收益汇总和到期日历，也可手动接管已有的 BTC/USDT 卖方义务仓。 |
+| 到期处理 | 按已确认策略处理期权现金结算、现货补齐与资金归集，在恢复中心核对异常和待确认请求。 |
+| 本地保存 | 凭据存入系统 keyring，订单和恢复记录保存在本机 SQLite，日志可在客户端查看。 |
+| 多语言界面 | 支持 11 种语言，跟随系统或手动选择；切换时保留当前表单与交易状态。 |
 
-启动时会尝试使用 keyring 中已保存的凭据连接。连接成功或点击“同步订单”会读取交易所状态；平时页面刷新读取本地快照，后台定期维护订单并刷新账户展示。账户查询失败时保留上次成功的数据，并显示错误提示。
+> [!IMPORTANT]
+> **这是实盘客户端。** 当前仅支持 Binance、BTC/USDT，通过期权与现货组合执行策略，不提供模拟盘。新策略须手动确认；确认后的恢复、结算和资金收尾可由后台继续执行。使用前请阅读[实盘交易安全](docs/trading-safety.md)。
 
-已连接且进入“双币赢”时没有缓存候选，会自动扫描；已有候选通过“刷新候选”更新。修改数量时的权利金和保本价是本地预估，提交后以实际成交回报为准。
+## 快速开始
 
-候选目标价旁的“持仓”标识表示该合约已有本程序跟踪的活跃策略，包括本机下单和已接管的仓位；仅标记有实际成交的策略，并随订单快照更新。
+当前打包配置面向 **Linux（`.deb` / `.rpm`）**，可先从源码运行。
 
-期权采用现金结算。保持客户端运行并连接，后台处理价内到期订单的现货补齐和资金归集。未完成批次会预留资金并限制新策略。
+准备 **Node.js 24+、pnpm、Rust 1.95+**，并按 [Tauri 2 官方说明](https://v2.tauri.app/start/prerequisites/)安装系统依赖。Linux 还需要可用的 Secret Service / keyring 服务来保存凭据。
 
-异常在“策略订单 → 恢复中心”处理；符合条件的失败收尾可选择“结束理财收尾”，未申购资金留在现货。保证金门槛、备资顺序和恢复条件见[实盘交易安全](docs/trading-safety.md)。
+```bash
+git clone https://github.com/crablet/dual-investment.git
+cd dual-investment
+pnpm install --frozen-lockfile
+pnpm tauri:dev
+```
 
-API Key 关闭提现权限，仅授予读取、现货与期权交易、Simple Earn 和 Universal Transfer 所需权限；凭据保存在系统 keyring。
+构建 Linux 安装包：
 
-## 资产与收益口径
+```bash
+pnpm tauri:build
+```
 
-同名资产合并展示并保留账户来源；合并后无法完整估值的资产保留数量，不计入总资产估值和比例图。
+产物位于 `src-tauri/target/release/bundle/`。交易功能需要 Tauri 桌面客户端；`pnpm dev` 仅用于浏览器界面预览。环境配置、命令和排查说明见[开发指南](docs/development.md)。
 
-已成交订单的权利金按 `实际成交均价 × 已成交数量` 计算；保本价为卖 Put 的 `执行价 − 成交均价` 或卖 Call 的 `执行价 + 成交均价`。加载本地订单时会从成交字段重算这些派生指标，读取过程不改写数据库。
+## 工作流程
 
-义务仓概览只统计运行中或部分成交且有实际成交的订单。卖 Put 的“已成交名义本金”为 `执行价 × 已成交数量`，实际保证金占用以 Binance 账户记录为准。
+1. **连接账户** — 在“设置 → Binance 连接”填写 API 凭据。关闭提现权限，并配置所需的读取、交易、Simple Earn 和 Universal Transfer 权限。
+2. **选择策略** — 在“双币赢”选择低买或高卖，筛选到期日和候选合约，输入数量。
+3. **复核并提交** — 查看权利金、保本价等预估，在复核窗口确认后发送真实订单。
+4. **跟踪到期处理** — 在“策略订单”和“总览”查看状态；保持客户端运行并连接，让后台处理已确认策略的结算与收尾。异常可进入“恢复中心”核对。
 
-累计收益 = 订单权利金 + 卖 Put 补齐 BTC 的浮动盈亏，后者按 `(现价 − 补齐成交均价) × 补齐成交数量` 计算。不计手续费。
+期权采用现金结算，策略需要的现货补齐由客户端另行执行。页面上的年化与权利金是预估，不代表最终成交或收益承诺。完整操作说明和计算口径见[使用指南](docs/usage.md)。
 
-收益估值中的现价取最近一次成功账户刷新中的有效 BTC/USDT 价格；未取得有效价格时，浮动盈亏暂显示为 0。
+## 用你熟悉的语言
 
-日期展示和按日统计使用系统本地时区；“今日权利金”按订单创建日期汇总。到期判断使用合约精确时间。
+简体中文 · English · 繁體中文 · Português (Brasil) · Español · Tiếng Việt · Türkçe · Bahasa Indonesia · 日本語 · 한국어 · ไทย
 
-年化为单利估算：
+在“设置 → 通用设置”切换语言。默认跟随系统，未匹配到支持的语言时使用英语；语言资源随应用提供，切换无需联网下载。日期保持系统本地时区和公历。
 
-    年化（%） = 权利金 ÷（执行价 × 数量基数）× 365 ÷ 到期天数 × 100
+## 文档
 
-候选使用预估权利金、候选数量和扫描时点；订单使用成交权利金、已成交数量和记录中的创建时点。到期天数向上取整，至少按 1 天计算。
+| 你想了解 | 从这里开始 |
+| --- | --- |
+| 连接、筛选、跟踪订单与查看收益 | [使用指南](docs/usage.md) |
+| 交易授权、资金预留、待确认请求与恢复边界 | [实盘交易安全](docs/trading-safety.md) |
+| 源码运行、构建、架构与多语言维护 | [开发指南](docs/development.md) |
+| 修改项目时需要遵循的约束 | [AGENTS.md](AGENTS.md) |
 
 ## 开发
 
-需要 Rust 1.95+ 和 pnpm：
+前端使用 **Vue 3、TypeScript 和 Pinia**，桌面运行时使用 **Tauri 2**。交易编排与金融计算在 **Rust** 中完成，金额使用 **Decimal**，本地记录使用 **SQLite**。
 
-    pnpm install
-    pnpm tauri:dev
+欢迎通过 [Issues](https://github.com/crablet/dual-investment/issues) 反馈问题，或提交改进界面、翻译和文档的 PR。问题报告请附系统环境、复现步骤和脱敏后的错误信息；不要附 API 凭据、签名请求或账户原始响应。
 
-`pnpm dev` 仅用于浏览器布局检查，不提供业务能力。
-
-TypeScript 暂保留在 6.0.x，以满足 [typescript-eslint 的版本要求](https://typescript-eslint.io/users/dependency-versions/)；升级到 7 前须确认 lint 与 Vue 类型检查工具链兼容。
-
-维护时遵循 [AGENTS.md](AGENTS.md)，并保持以下边界：
-
-- [AppState](src-tauri/src/app_state.rs) 编排交易、恢复和后台维护。`get_app_snapshot` 只读取本地状态和账户缓存；`sync_live_state` 完成同步后不返回快照，由 Pinia 再读取完整状态。
-- [策略层](src-tauri/src/strategy.rs) 使用 Decimal 计算金额、数量和收益，前端以字符串接收。`preview_strategy` 只做本地预估；金融字段在前端的数值转换仅用于格式化和图形比例。
-- [错误分类](src-tauri/src/errors.rs) 决定查询重试、提交结果是否待确认和连接重试资格。[IPC](src-tauri/src/commands.rs) 的业务错误返回 `{ message: { code, params }, canAutoReconnect }`，前端不根据文案判断重连；Tauri 自身的传输或参数错误不授予自动重连资格。
-- [消息结构](src-tauri/src/messages.rs) 在 IPC、SQLite 和日志中保存 `{ code, params }`；参数为字符串或嵌套消息，金融参数保留 Decimal 字符串。前端通过 `messageText()` 在展示时递归翻译；Rust 的 `Display` 使用简体中文词典，仅供进程诊断。开发期不兼容旧的纯文本消息记录，也不自动迁移或删除已有数据库与日志。
-- [本地日志](src-tauri/src/logs.rs) 按本机日期写入应用数据目录下的 `logs/YYYY-MM-DD.log`，每行一条 JSON。日志面板按当前语言翻译消息；日志级别与事件代码保持原值，切换语言不改写日志文件。
-
-### 多语言维护
-
-- [翻译入口](src/i18n.ts) 使用 Vue I18n，英语词典随主包提供，其余词典通过动态导入独立分包；保留按需加载，不改回一次性载入全部语言。已加载词典在当前会话复用，同一语言的并发加载共用请求。
-- [语言偏好](src/stores/preferences.ts) 由 Pinia 管理，保存在 `localStorage` 的 `dual-investment.locale` 键中。[应用入口](src/main.ts) 等待语言初始化后再挂载界面；切换成功后才更新当前语言和保存偏好，过期请求不能覆盖后续选择。存储不可用时仍允许本次会话切换。
-- 文案位于 [src/locales](src/locales/)，新增或删除消息时同步全部语言的消息键与插值参数。业务消息保留结构，展示时使用 `t()` 或 `messageText()`；合约代码、资产符号、状态值和日志事件代码保持稳定，翻译对应的展示标签。
-- 新增语言时同时更新 `src/i18n.ts` 的 `supportedLocales`、[语言选择器](src/components/settings/GeneralSettingsPanel.vue) 的原生语言名称，以及 [App.vue](src/App.vue) 中 Naive UI 的界面与日期语言映射；需要本地化的数字和日期展示通过 `formatLocale()` 选择格式，保持系统本地时区和公历约定。
-
-### 验证与打包
-
-按改动范围验证：
-
-- 前端：`pnpm lint`、`pnpm typecheck`；依赖、构建、工具配置、语言词典或加载逻辑变更加跑 `pnpm build`。
-- Rust：先通过 `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`，再运行 `cargo fmt --manifest-path src-tauri/Cargo.toml`。
-- UI：检查 1180px 最小宽度和较宽窗口下的布局，包含较长的多语言文案；设置页的连接与通用设置保持并排，按钮文案不能被截断。Tauri 启动、图标或窗口变更须实际启动验证。
-- 多语言：词典变更核对全部语言的消息键与插值参数；加载逻辑变更核对首次系统语言、手动选择与重启记忆、快速切换、加载失败回退和缓存复用。构建产物应保留独立语言分包，启动仅加载英语回退和当前语言。
-
-`pnpm tauri:build` 生成 Linux `.deb`、`.rpm`；加 `--no-bundle` 仅生成 `src-tauri/target/release/dual-investment` 可执行文件。
+开始修改前阅读 [AGENTS.md](AGENTS.md) 与[开发指南](docs/development.md)，并按[验证要求](docs/development.md#验证与打包)完成相关检查。涉及下单、资金或恢复的改动，还须先阅读[实盘交易安全](docs/trading-safety.md)。
 
 ## 许可证
 
-项目自有内容使用 [AGPL-3.0-only](LICENSE)。
+项目自有内容采用 [AGPL-3.0-only](LICENSE)。
