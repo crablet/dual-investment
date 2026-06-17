@@ -3,7 +3,28 @@
 // 所有函数都按浏览器本地时区处理日期键，避免 `toISOString()` 在跨时区时把日历日期
 // 推到前一天或后一天。
 
-import { formatLocale } from '@/i18n'
+import { dateEo } from 'naive-ui'
+import { formatLocale, i18n } from '@/i18n'
+
+function esperantoMonth(date: Date) {
+  return dateEo.locale.localize.month(date.getMonth() as Parameters<typeof dateEo.locale.localize.month>[0], { width: 'wide' })
+}
+
+/** 日历标题使用当前语言；世界语直接复用组件库日期词典，不依赖 WebView 的 ICU 覆盖。 */
+export function calendarMonthLabel(date: Date) {
+  if (i18n.global.locale.value === 'eo')
+    return `${esperantoMonth(date)} ${date.getFullYear()}`
+  return new Intl.DateTimeFormat(formatLocale(), { year: 'numeric', month: 'long', calendar: 'gregory' }).format(date)
+}
+
+export function calendarDateLabel(date: Date) {
+  if (i18n.global.locale.value === 'eo') {
+    const weekday = dateEo.locale.localize.day(date.getDay() as Parameters<typeof dateEo.locale.localize.day>[0], { width: 'wide' })
+    return `${weekday}, ${date.getDate()} ${esperantoMonth(date)}`
+  }
+  return new Intl.DateTimeFormat(formatLocale(), { month: 'long', day: 'numeric', weekday: 'long', calendar: 'gregory' }).format(date)
+}
+
 /** 按本地时区格式化 YYYY-MM-DD。 */
 export function formatDateKey(date: Date) {
   const year = date.getFullYear()

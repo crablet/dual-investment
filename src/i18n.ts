@@ -7,7 +7,7 @@ export interface LocalizedMessage {
   params: Record<string, string | LocalizedMessage>
 }
 
-export const supportedLocales = ['zh-CN', 'en', 'zh-TW', 'pt-BR', 'es', 'vi', 'tr', 'id', 'ja', 'ko', 'th'] as const
+export const supportedLocales = ['zh-CN', 'en', 'zh-TW', 'pt-BR', 'es', 'vi', 'tr', 'id', 'ja', 'ko', 'th', 'eo', 'fr'] as const
 export type AppLocale = typeof supportedLocales[number]
 
 const catalogs = import.meta.glob<typeof en>(['./locales/*.json', '!./locales/en.json'], { import: 'default' })
@@ -79,5 +79,10 @@ export function resolveLocale(languages: readonly string[]): AppLocale {
 
 /** 语言只决定展示惯例；日期仍使用系统本地时区和公历。 */
 export function formatLocale(): string {
-  return i18n.global.locale.value === 'th' ? 'th-TH-u-ca-gregory-nu-latn' : i18n.global.locale.value
+  const locale = i18n.global.locale.value
+  // 部分 WebView 缺少世界语 Intl 数据；数字与 24 小时时间采用相同惯例的法语格式。
+  // 日历中的世界语月份和星期由日期词典提供，避免回退到设备默认语言。
+  if (locale === 'eo')
+    return 'fr'
+  return locale === 'th' ? 'th-TH-u-ca-gregory-nu-latn' : locale
 }

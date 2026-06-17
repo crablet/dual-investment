@@ -19,10 +19,15 @@ const languageNames: Record<AppLocale, string> = {
   'ja': '日本語',
   'ko': '한국어',
   'th': 'ไทย',
+  'eo': 'Esperanto',
+  'fr': 'Français',
 }
 const options = computed(() => [
   { label: t('ui.system'), value: 'system' as const },
-  ...Object.entries(languageNames).map(([value, label]) => ({ value: value as AppLocale, label })),
+  ...Object.entries(languageNames)
+    .map(([value, label]) => ({ value: value as AppLocale, label }))
+    // 固定排序规则，切换界面语言时选项位置保持稳定。
+    .sort((left, right) => left.label.localeCompare(right.label, 'en', { sensitivity: 'base' })),
 ])
 
 function changeLanguage(event: Event) {

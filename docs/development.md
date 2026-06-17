@@ -48,6 +48,7 @@ TypeScript 暂保留在 6.0.x，以满足 [typescript-eslint 的版本要求](ht
 - [语言偏好](../src/stores/preferences.ts) 由 Pinia 管理，保存在 `localStorage` 的 `dual-investment.locale` 键中。[应用入口](../src/main.ts) 等待语言初始化后再挂载界面；切换成功后才更新当前语言和保存偏好，过期请求不能覆盖后续选择。存储不可用时仍允许本次会话切换。
 - 文案位于 [src/locales](../src/locales/)，新增或删除消息时同步全部语言的消息键与插值参数。业务消息保留结构，展示时使用 `t()` 或 `messageText()`；合约代码、资产符号、状态值和日志事件代码保持稳定，翻译对应的展示标签。
 - 新增语言时同时更新 `src/i18n.ts` 的 `supportedLocales`、[语言选择器](../src/components/settings/GeneralSettingsPanel.vue) 的原生语言名称，以及 [App.vue](../src/App.vue) 中 Naive UI 的界面与日期语言映射；需要本地化的数字和日期展示通过 `formatLocale()` 选择格式，保持系统本地时区和公历约定。
+- 部分 WebView 的 `Intl` 不支持世界语。世界语的数字与 24 小时时间使用相同惯例的法语格式；[日历日期工具](../src/utils/date.ts) 直接复用 Naive UI 的世界语月份、星期词典，避免回退到设备默认语言。新增语言须在浏览器中检查日期与数字格式，不能仅依赖 Node.js 的 ICU 支持。
 
 ## 验证与打包
 

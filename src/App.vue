@@ -4,7 +4,7 @@
 业务状态全部放在 Pinia store，视图组件只消费当前快照和触发显式操作。
 -->
 <script setup lang="ts">
-import { darkTheme, dateEnUS, dateEsAR, dateIdID, dateJaJP, dateKoKR, datePtBR, dateThTH, dateTrTR, dateViVN, dateZhCN, dateZhTW, enUS, esAR, idID, jaJP, koKR, NConfigProvider, NMessageProvider, ptBR, thTH, trTR, viVN, zhCN, zhTW } from 'naive-ui'
+import { darkTheme, dateEnUS, dateEo, dateEsAR, dateFrFR, dateIdID, dateJaJP, dateKoKR, datePtBR, dateThTH, dateTrTR, dateViVN, dateZhCN, dateZhTW, enUS, eo, esAR, frFR, idID, jaJP, koKR, NConfigProvider, NMessageProvider, ptBR, thTH, trTR, viVN, zhCN, zhTW } from 'naive-ui'
 import { computed, defineAsyncComponent, onMounted, onUnmounted } from 'vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import { useBackgroundSync } from '@/composables/useBackgroundSync'
@@ -13,8 +13,8 @@ import { usePreferencesStore } from '@/stores/preferences'
 import { themeOverrides } from '@/theme/naive'
 
 const preferences = usePreferencesStore()
-const locales = { 'zh-CN': zhCN, 'zh-TW': zhTW, 'en': enUS, 'pt-BR': ptBR, 'es': esAR, 'vi': viVN, 'tr': trTR, 'id': idID, 'ja': jaJP, 'ko': koKR, 'th': thTH }
-const dates = { 'zh-CN': dateZhCN, 'zh-TW': dateZhTW, 'en': dateEnUS, 'pt-BR': datePtBR, 'es': dateEsAR, 'vi': dateViVN, 'tr': dateTrTR, 'id': dateIdID, 'ja': dateJaJP, 'ko': dateKoKR, 'th': dateThTH }
+const locales = { 'zh-CN': zhCN, 'zh-TW': zhTW, 'en': enUS, 'pt-BR': ptBR, 'es': esAR, 'vi': viVN, 'tr': trTR, 'id': idID, 'ja': jaJP, 'ko': koKR, 'th': thTH, 'eo': eo, 'fr': frFR }
+const dates = { 'zh-CN': dateZhCN, 'zh-TW': dateZhTW, 'en': dateEnUS, 'pt-BR': datePtBR, 'es': dateEsAR, 'vi': dateViVN, 'tr': dateTrTR, 'id': dateIdID, 'ja': dateJaJP, 'ko': dateKoKR, 'th': dateThTH, 'eo': dateEo, 'fr': dateFrFR }
 onMounted(() => window.addEventListener('languagechange', preferences.refreshSystemLocale))
 onUnmounted(() => window.removeEventListener('languagechange', preferences.refreshSystemLocale))
 const store = useAppStore()

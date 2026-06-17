@@ -3,7 +3,7 @@
   <h1>双币赢助手</h1>
   <p><strong>在桌面上管理 BTC/USDT 双币赢式策略。</strong></p>
   <p>连接 Binance 期权与现货，把候选筛选、下单复核、订单跟踪和到期处理集中在一个工作台。</p>
-  <p>Binance · BTC/USDT · 11 种界面语言 · <a href="LICENSE">AGPL-3.0-only</a></p>
+  <p>Binance · BTC/USDT · 13 种界面语言 · <a href="LICENSE">AGPL-3.0-only</a></p>
   <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
   <p>
     <a href="#快速开始">快速开始</a> ·
@@ -28,7 +28,7 @@
 | 策略跟踪 | 查看活跃策略、持仓与现货、收益汇总和到期日历，也可手动接管已有的 BTC/USDT 卖方义务仓。 |
 | 到期处理 | 按已确认策略处理期权现金结算、现货补齐与资金归集，在恢复中心核对异常和待确认请求。 |
 | 本地保存 | 凭据存入系统 keyring，订单和恢复记录保存在本机 SQLite，日志可在客户端查看。 |
-| 多语言界面 | 支持 11 种语言，跟随系统或手动选择；切换时保留当前表单与交易状态。 |
+| 多语言界面 | 支持 13 种语言，跟随系统或手动选择；切换时保留当前表单与交易状态。 |
 
 > [!IMPORTANT]
 > **这是实盘客户端。** 当前仅支持 Binance、BTC/USDT，通过期权与现货组合执行策略，不提供模拟盘。新策略须手动确认；确认后的恢复、结算和资金收尾可由后台继续执行。使用前请阅读[实盘交易安全](docs/trading-safety.md)。
@@ -65,7 +65,7 @@ pnpm tauri:build
 
 ## 用你熟悉的语言
 
-简体中文 · English · 繁體中文 · Português (Brasil) · Español · Tiếng Việt · Türkçe · Bahasa Indonesia · 日本語 · 한국어 · ไทย
+简体中文 · English · 繁體中文 · Português (Brasil) · Español · Tiếng Việt · Türkçe · Bahasa Indonesia · 日本語 · 한국어 · ไทย · Esperanto · Français
 
 在“设置 → 通用设置”切换语言。默认跟随系统，未匹配到支持的语言时使用英语；语言资源随应用提供，切换无需联网下载。日期保持系统本地时区和公历。
 

@@ -3,7 +3,7 @@
   <h1>Dual Investment Assistant</h1>
   <p><strong>Manage BTC/USDT dual-investment-style strategies from your desktop.</strong></p>
   <p>Work with Binance options and spot in one place: filter contracts, review orders, track positions, and manage expiry.</p>
-  <p>Binance · BTC/USDT · 11 interface languages · <a href="LICENSE">AGPL-3.0-only</a></p>
+  <p>Binance · BTC/USDT · 13 interface languages · <a href="LICENSE">AGPL-3.0-only</a></p>
   <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
   <p>
     <a href="#quick-start">Quick start</a> ·
@@ -28,7 +28,7 @@ Dual Investment Assistant is for Binance users who want to select their own cont
 | Strategy tracking | View active strategies, options and spot positions, returns, and an expiry calendar. Manually adopt existing BTC/USDT short-option positions. |
 | Expiry handling | Follow cash settlement, spot rebalancing, and fund sweeps for confirmed strategies. Review exceptions and unconfirmed requests in the recovery center. |
 | Local storage | Store credentials in the system keyring, orders and recovery records in local SQLite, and inspect logs in the app. |
-| Multiple languages | Use any of 11 interface languages. Switching languages preserves forms and trading state. |
+| Multiple languages | Use any of 13 interface languages. Switching languages preserves forms and trading state. |
 
 > [!IMPORTANT]
 > **This is a live-trading client.** It currently supports Binance and BTC/USDT only, using options and spot trades; there is no paper-trading mode. New strategies require manual confirmation. Recovery, settlement, and funding steps for confirmed strategies may then continue in the background. Read the [trading safety guide](docs/trading-safety.md) before use.
@@ -65,7 +65,7 @@ Options are cash-settled; the client performs any spot trades required by the st
 
 ## Use your preferred language
 
-简体中文 · English · 繁體中文 · Português (Brasil) · Español · Tiếng Việt · Türkçe · Bahasa Indonesia · 日本語 · 한국어 · ไทย
+简体中文 · English · 繁體中文 · Português (Brasil) · Español · Tiếng Việt · Türkçe · Bahasa Indonesia · 日本語 · 한국어 · ไทย · Esperanto · Français
 
 Choose a language under **Settings → General settings**. The app follows system preferences by default and falls back to English if none match. Language resources ship with the app, so switching does not require a download. Dates retain the system's local time zone and the Gregorian calendar.
 

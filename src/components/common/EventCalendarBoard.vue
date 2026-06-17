@@ -19,11 +19,13 @@ import {
   useCalendarEvents,
 } from '@/composables/useCalendarEvents'
 import { useLocalToday } from '@/composables/useLocalToday'
-import { formatLocale, t } from '@/i18n'
+import { t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import {
   addDays,
   addMonths,
+  calendarDateLabel,
+  calendarMonthLabel,
   formatDateKey,
   isSameMonth,
   parseDateKey,
@@ -102,16 +104,8 @@ const selectedDayEvents = computed(() =>
   eventsByDate.value.get(selectedDate.value) ?? [],
 )
 
-const monthTitle = computed(() => new Intl.DateTimeFormat(formatLocale(), { year: 'numeric', month: 'long', calendar: 'gregory' }).format(currentMonth.value))
-
-const selectedDateTitle = computed(() => {
-  const date = parseDateKey(selectedDate.value)
-  return date.toLocaleDateString(formatLocale(), {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  })
-})
+const monthTitle = computed(() => calendarMonthLabel(currentMonth.value))
+const selectedDateTitle = computed(() => calendarDateLabel(parseDateKey(selectedDate.value)))
 
 function selectDate(date: string) {
   selectedDate.value = date
