@@ -35,9 +35,21 @@ Dual Investment Assistant is for Binance users who want to select their own cont
 
 ## Quick start
 
-The current packaging configuration targets **Linux (`.deb` / `.rpm`)**. You can run the app from source.
+### Install and check platform status
 
-Install **Node.js 24+, pnpm, and Rust 1.95+**, along with the system dependencies in the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/). Linux also needs a working Secret Service / keyring service for credential storage.
+Installers are distributed through [GitHub Releases](https://github.com/crablet/dual-investment/releases). If no matching release is available yet, build from source using the instructions below.
+
+| Platform | Installation and runtime | Validation status |
+| --- | --- | --- |
+| Linux x64 | Install `.deb` / `.rpm` with your package manager. Requires WebKitGTK 4.1 and a Secret Service / keyring. | Used and developed on Linux; individual distributions still need compatibility checks. |
+| Windows 10 / 11 x64 | Run the `-setup.exe` installer. It downloads WebView2 if the runtime is missing. | Platform integration and packaging are configured; CI builds and real-device validation are still pending. |
+| macOS 13.3+, Apple Silicon / Intel | Open the Universal `.dmg`, drag the app to Applications, then launch it. | Platform integration and packaging are configured; CI builds and real-device validation are still pending. |
+
+Windows installers are unsigned. macOS uses a free ad-hoc signature without Apple notarization, so the first launch may require system approval. See [platform setup](docs/development.md#平台环境).
+
+### Run from source
+
+Use the same commands on all three platforms. Install **Node.js 24+, pnpm 12.9.1, and Rust 1.95+**, plus the [platform build dependencies](docs/development.md#平台环境). Windows requires the MSVC toolchain; macOS requires Xcode Command Line Tools.
 
 ```bash
 git clone https://github.com/crablet/dual-investment.git
@@ -46,13 +58,15 @@ pnpm install --frozen-lockfile
 pnpm tauri:dev
 ```
 
-Build Linux installers:
+Build installers for the current operating system:
 
 ```bash
 pnpm tauri:build
 ```
 
-Packages are written to `src-tauri/target/release/bundle/`. Trading requires the Tauri desktop runtime; `pnpm dev` is for browser UI previews only. See the [development guide](docs/development.md) for setup, commands, and troubleshooting.
+Packages default to `src-tauri/target/release/bundle/`. Tauri selects the platform configuration automatically. Trading requires the Tauri desktop runtime; `pnpm dev` is for browser UI previews only.
+
+The [build workflow](.github/workflows/build-desktop.yml) creates installers for all three platforms when a version tag is pushed and attaches them to a release draft for manual publication. It uses standard runners in public repositories only; private repositories are skipped to keep the workflow free. See the [release guide](docs/releases.md) for setup and cost boundaries.
 
 ## Workflow
 
@@ -78,6 +92,7 @@ The detailed guides are currently in Chinese; this README covers the essential s
 | Connecting, selecting contracts, tracking orders, and viewing returns | [Usage guide](docs/usage.md) |
 | Authorization, reserved funds, unconfirmed requests, and recovery | [Trading safety](docs/trading-safety.md) |
 | Running from source, builds, architecture, and localization | [Development guide](docs/development.md) |
+| Automated installers, free build constraints, and releases | [Release guide](docs/releases.md) |
 | Repository rules for contributors | [AGENTS.md](AGENTS.md) |
 
 ## Development

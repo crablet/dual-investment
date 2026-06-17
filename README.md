@@ -35,9 +35,21 @@
 
 ## 快速开始
 
-当前打包配置面向 **Linux（`.deb` / `.rpm`）**，可先从源码运行。
+### 安装与平台状态
 
-准备 **Node.js 24+、pnpm、Rust 1.95+**，并按 [Tauri 2 官方说明](https://v2.tauri.app/start/prerequisites/)安装系统依赖。Linux 还需要可用的 Secret Service / keyring 服务来保存凭据。
+安装包通过 [GitHub Releases](https://github.com/crablet/dual-investment/releases) 分发；如果尚无对应版本，请按下方说明从源码运行。
+
+| 平台 | 安装包与运行方式 | 验证状态 |
+| --- | --- | --- |
+| Linux x64 | 用系统包管理器安装 `.deb` / `.rpm`；需要 WebKitGTK 4.1 与 Secret Service / keyring。 | 已在 Linux 开发、使用；各发行版兼容性仍需分别验证。 |
+| Windows 10 / 11 x64 | 运行 `-setup.exe` 安装；缺少 WebView2 时安装器会联网下载。 | 已有平台实现与打包配置，尚待 CI 构建及实机验证。 |
+| macOS 13.3+，Apple Silicon / Intel | 打开通用版 `.dmg`，将应用拖到“应用程序”后运行。 | 已有平台实现与打包配置，尚待 CI 构建及实机验证。 |
+
+Windows 安装包未做发布者签名；macOS 使用免费的 ad-hoc 签名，未做 Apple 公证，首次打开可能需要系统确认。详见[平台运行说明](docs/development.md#平台环境)。
+
+### 从源码运行
+
+三个平台使用相同命令。准备 **Node.js 24+、pnpm 12.9.1、Rust 1.95+**，并安装对应的[平台构建依赖](docs/development.md#平台环境)。Windows 使用 MSVC 工具链；macOS 需要 Xcode Command Line Tools。
 
 ```bash
 git clone https://github.com/crablet/dual-investment.git
@@ -46,13 +58,15 @@ pnpm install --frozen-lockfile
 pnpm tauri:dev
 ```
 
-构建 Linux 安装包：
+在当前系统构建安装包：
 
 ```bash
 pnpm tauri:build
 ```
 
-产物位于 `src-tauri/target/release/bundle/`。交易功能需要 Tauri 桌面客户端；`pnpm dev` 仅用于浏览器界面预览。环境配置、命令和排查说明见[开发指南](docs/development.md)。
+默认产物位于 `src-tauri/target/release/bundle/`，Tauri 自动选择当前系统的打包配置。交易功能需要 Tauri 桌面客户端；`pnpm dev` 仅用于浏览器界面预览。
+
+仓库还提供[自动构建流水线](.github/workflows/build-desktop.yml)：推送版本标签后生成三平台安装包并上传到 Releases 草稿，审核后手动发布。为保持免费，流水线仅在公开仓库使用标准 runner，私有仓库自动跳过。启用方式与费用边界见[发布指南](docs/releases.md)。
 
 ## 工作流程
 
@@ -76,6 +90,7 @@ pnpm tauri:build
 | 连接、筛选、跟踪订单与查看收益 | [使用指南](docs/usage.md) |
 | 交易授权、资金预留、待确认请求与恢复边界 | [实盘交易安全](docs/trading-safety.md) |
 | 源码运行、构建、架构与多语言维护 | [开发指南](docs/development.md) |
+| 自动生成安装包、免费构建约束与发布版本 | [发布指南](docs/releases.md) |
 | 修改项目时需要遵循的约束 | [AGENTS.md](AGENTS.md) |
 
 ## 开发

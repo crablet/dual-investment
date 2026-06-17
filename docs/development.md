@@ -4,8 +4,8 @@
 
 ## 环境与运行
 
-- Node.js 24+ 与 pnpm。当前工具链也支持 Node.js 22.13+ 的 22.x 版本。
-- Rust 1.95+，与 [Cargo.toml](../src-tauri/Cargo.toml) 的 `rust-version` 一致。
+- Node.js 24+ 与 pnpm 12.9.1，pnpm 版本固定在 [package.json](../package.json)。当前工具链也支持 Node.js 22.13+ 的 22.x 版本。
+- Rust 1.95+，与 [Cargo.toml](../src-tauri/Cargo.toml) 的 `rust-version` 一致；发布流水线固定使用 Rust 1.99.1。
 - [Tauri 2 系统依赖](https://v2.tauri.app/start/prerequisites/)。Linux 的凭据存储还需要可用的 Secret Service / keyring 服务。
 
 ```bash
@@ -18,6 +18,26 @@ pnpm tauri:dev
 `pnpm tauri:dev` 启动桌面客户端。`pnpm dev` 只用于浏览器布局检查：没有 Tauri runtime 时业务命令会报错，不提供模拟交易或浏览器业务替代路径。
 
 TypeScript 暂保留在 6.0.x，以满足 [typescript-eslint 的版本要求](https://typescript-eslint.io/users/dependency-versions/)；升级到 7 前须确认 lint 与 Vue 类型检查工具链兼容。
+
+### 平台环境
+
+三个桌面平台共享业务代码，但当前仅有 Linux 的实际使用记录。Windows 与 macOS 已配置原生凭据存储、图标和安装包目标，仍须通过首次 CI 构建及实机验证；构建成功不代表安装、Keychain / 凭据管理器或实盘流程已经验收。
+
+| 平台 | 从源码构建所需环境 | 凭据保存位置 |
+| --- | --- | --- |
+| Linux x64 | C/C++ 编译工具、`pkg-config`、WebKitGTK 4.1、GTK、D-Bus 开发库；按 [Tauri Linux 依赖](https://v2.tauri.app/start/prerequisites/#linux)安装，并确保桌面会话有可用的 Secret Service。 | Secret Service / 系统 keyring |
+| Windows 10 / 11 x64 | [Microsoft C++ Build Tools](https://v2.tauri.app/start/prerequisites/#windows) 的“使用 C++ 的桌面开发”工作负载及 Windows SDK、Rust MSVC 工具链、WebView2 Evergreen Runtime、Git。 | Windows 凭据管理器 |
+| macOS 13.3+，Apple Silicon / Intel | Xcode Command Line Tools（`xcode-select --install`）、Rust、Git。 | macOS Keychain |
+
+安装 Node.js 后可用 `npm install --global pnpm@12.9.1` 安装项目使用的 pnpm。Windows 请在原生 PowerShell 或其他 Windows 终端执行上方启动命令；WSL 构建的是 Linux 应用。
+
+macOS 打包下限设为 13.3，以配合当前 `es2022` 前端构建目标及对应的 [Safari 16.4 / WebKit 能力](https://webkit.org/blog/13966/webkit-features-in-safari-16-4/)。这是配置的支持下限，实机兼容性仍待验证。
+
+安装包的签名状态与首次运行：
+
+- Windows：运行 `-setup.exe`，缺少 WebView2 时安装器会下载运行时。当前未购买发布者签名证书，可能显示 SmartScreen 提示。
+- macOS：打开 `.dmg`，拖入“应用程序”。采用[免费 ad-hoc 签名](https://v2.tauri.app/distribute/sign/macos/#ad-hoc-signing)，未做 Apple 公证；确认来源后可按 [Apple 官方说明](https://support.apple.com/en-us/102445)在“隐私与安全性”中允许该应用。
+- Linux：通过包管理器安装对应格式，运行时需要发行版提供的 WebKitGTK 4.1 与兼容系统库。CI 使用 Ubuntu 24.04 构建，不能据此推断所有 Linux 发行版均已兼容。
 
 ## 代码入口与边界
 
@@ -66,13 +86,30 @@ TypeScript 暂保留在 6.0.x，以满足 [typescript-eslint 的版本要求](ht
 
 遵循 [AGENTS.md](../AGENTS.md)：验证使用的临时测试、夹具、快照及其依赖和配置不保留在交付中。
 
-### Linux 安装包
+### 桌面安装包
+
+在对应系统执行同一条命令：
 
 ```bash
 pnpm tauri:build
 ```
 
-当前 [Tauri 配置](../src-tauri/tauri.conf.json) 生成 `.deb` 和 `.rpm`，默认产物目录为 `src-tauri/target/release/bundle/`。
+Tauri 将[公共配置](../src-tauri/tauri.conf.json)与平台文件自动合并，默认产物目录为 `src-tauri/target/release/bundle/`：
+
+| 当前系统 | 平台配置 | 产物 |
+| --- | --- | --- |
+| Linux | [tauri.linux.conf.json](../src-tauri/tauri.linux.conf.json) | `deb/*.deb`、`rpm/*.rpm` |
+| Windows | [tauri.windows.conf.json](../src-tauri/tauri.windows.conf.json) | `nsis/*-setup.exe` |
+| macOS | [tauri.macos.conf.json](../src-tauri/tauri.macos.conf.json) | `macos/*.app`、`dmg/*.dmg` |
+
+普通本地构建使用当前机器的架构。在 macOS 上构建同时支持 Intel 与 Apple Silicon 的通用版：
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+pnpm tauri:build --target universal-apple-darwin -- --locked
+```
+
+通用版产物位于 `src-tauri/target/universal-apple-darwin/release/bundle/`。指定其他 `--target` 时也会在 `target/` 下增加对应架构目录。
 
 只生成可执行文件：
 
@@ -80,7 +117,9 @@ pnpm tauri:build
 pnpm tauri:build --no-bundle
 ```
 
-默认路径为 `src-tauri/target/release/dual-investment`。
+Linux 默认可执行文件为 `src-tauri/target/release/dual-investment`，Windows 为同目录下的 `dual-investment.exe`；macOS 通常使用 `.app` 包运行。
+
+三平台自动构建、版本标签与零付费约束见[发布指南](releases.md)。流水线保留 Releases 草稿，发布前仍需检查构建结果并进行对应平台的运行验证。
 
 ## 文档与截图
 

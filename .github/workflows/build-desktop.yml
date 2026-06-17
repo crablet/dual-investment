@@ -1,0 +1,177 @@
+name: Build desktop installers
+run-name: Build desktop installers · ${{ inputs.tag || github.ref_name }}
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to build, for example v0.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-installers-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    name: Prepare release draft
+    # 在分配 runner 前跳过非公开仓库，避免消耗私有仓库的付费额度。
+    if: github.server_url == 'https://github.com' && github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.release.outputs.release-id }}
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - name: Check out the existing version tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Validate versions and prepare an unpublished release
+        id: release
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { execFileSync } = require('node:child_process');
+            const tag = process.env.RELEASE_TAG;
+            const app = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            const frontend = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const cargo = fs.readFileSync('src-tauri/Cargo.toml', 'utf8');
+            const rustVersion = cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+            if (tag !== `v${app.version}` || frontend.version !== app.version || rustVersion !== app.version) {
+              throw new Error('The tag, package.json, tauri.conf.json and Cargo.toml versions must match.');
+            }
+
+            const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              ...context.repo,
+              per_page: 100,
+            });
+            let release = releases.find(item => item.tag_name === tag);
+            if (release && !release.draft) {
+              throw new Error('This release is already published. Use a new version tag instead of replacing its installers.');
+            }
+            if (!release) {
+              ({ data: release } = await github.rest.repos.createRelease({
+                ...context.repo,
+                tag_name: tag,
+                target_commitish: commit,
+                name: `${app.productName} ${tag}`,
+                draft: true,
+                prerelease: app.version.includes('-'),
+                body: [
+                  'Desktop installers for Linux x64, Windows x64 and macOS (Universal: Apple Silicon + Intel).',
+                  '',
+                  'Windows installers are unsigned. macOS uses an ad-hoc signature without Apple notarization.',
+                  'Windows and macOS still require real-device validation, including credential storage and trading flows.',
+                  '',
+                  'Maintainer: wait for all three build jobs to succeed, verify the installers and edit these notes before publishing.',
+                ].join('\n'),
+              }));
+            }
+            core.setOutput('release-id', String(release.id));
+            core.setOutput('commit', commit);
+            await core.summary
+              .addHeading('Release draft prepared')
+              .addLink(tag, release.html_url)
+              .addRaw('\n\nInstallers will be attached to this draft. Publication remains manual.\n')
+              .write();
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: prepare
+    # 保留独立的公开仓库检查；新增 job 时也须使用这一条件。
+    if: github.server_url == 'https://github.com' && github.event.repository.visibility == 'public'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Linux x64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - platform: Windows x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - platform: macOS Universal
+            runner: macos-15
+            target: universal-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the validated commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Set up the pinned pnpm version
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+        with:
+          run_install: false
+          cache: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.99.1'
+          components: rustfmt
+          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential pkg-config libwebkit2gtk-4.1-dev \
+            libdbus-1-dev libssl-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check frontend lint and Rust formatting
+        run: |
+          pnpm lint
+          cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      # 使用 Releases 保存安装包；不启用 Actions artifacts 或跨运行缓存。
+      - name: Build installers and upload to the release draft
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.prepare.outputs.release-id }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseDraft: true
+          tauriScript: pnpm tauri
+          args: --target ${{ matrix.target }} --ci -- --locked
+          uploadWorkflowArtifacts: false
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
+          uploadPlainBinary: false
