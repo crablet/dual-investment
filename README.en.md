@@ -27,7 +27,7 @@ Dual Investment Assistant is for Binance users who want to select their own cont
 | Order review | Review estimated premium and breakeven before confirming the contract and quantity. Contracts with an active position are marked. |
 | Strategy tracking | View active strategies, options and spot positions, returns, and an expiry calendar. Manually adopt existing BTC/USDT short-option positions. |
 | Expiry handling | Follow cash settlement, spot rebalancing, and fund sweeps for confirmed strategies. Review exceptions and unconfirmed requests in the recovery center. |
-| Local storage | Store credentials in the system keyring, orders and recovery records in local SQLite, and inspect logs in the app. |
+| Local storage | Store credentials in the system keyring, bind each local SQLite database to one account for orders and recovery records, and inspect logs in the app. |
 | Multiple languages | Use any of 13 interface languages. Switching languages preserves forms and trading state. |
 
 > [!IMPORTANT]

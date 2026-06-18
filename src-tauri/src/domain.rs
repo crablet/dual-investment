@@ -669,6 +669,7 @@ impl OptionAccountSnapshot {
 /// Binance 现货账户快照，用于到期 ITM 后的现货补齐检查。
 #[derive(Clone, Debug)]
 pub struct SpotAccountSnapshot {
+    pub uid: String,
     pub balances: Vec<SpotAssetBalance>,
     pub can_trade: bool,
 }

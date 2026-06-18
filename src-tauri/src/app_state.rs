@@ -492,7 +492,7 @@ impl AppState {
         let api_key = request.api_key.trim().to_string();
         let api_secret = request.api_secret;
         let client = BinanceClient::new(api_key.clone(), api_secret.clone())?;
-        verify_binance_access(&client).await?;
+        self.verify_account_binding(&client).await?;
         secrets::save_binance_credentials(&api_key, &api_secret)?;
 
         let mut runtime = self.runtime.write().await;
@@ -529,7 +529,7 @@ impl AppState {
             )));
         };
         let client = BinanceClient::new(api_key, api_secret)?;
-        verify_binance_access(&client).await?;
+        self.verify_account_binding(&client).await?;
 
         let mut runtime = self.runtime.write().await;
         runtime.client = Some(Arc::new(client));
@@ -543,6 +543,15 @@ impl AppState {
             &crate::msg!("backend.connectedToBinanceUsingSystemKeyringCredentials"),
         );
         Ok(settings)
+    }
+
+    /// 两种连接入口在维护锁和交易锁内校验归属，通过后才更新凭据与当前客户端。
+    async fn verify_account_binding(&self, client: &BinanceClient) -> AppResult<()> {
+        let uid = verify_binance_access(client).await?;
+        self.persistence
+            .lock()
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
+            .bind_account(&uid)
     }
 
     /// 删除系统 keyring 凭据并清空运行期连接状态。

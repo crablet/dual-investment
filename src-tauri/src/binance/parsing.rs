@@ -84,6 +84,16 @@ fn parse_asset_balance(value: &Value) -> AppResult<OptionAssetBalance> {
 
 /// 解析现货账户快照。
 pub(super) fn parse_spot_account(value: &Value) -> AppResult<SpotAccountSnapshot> {
+    let uid = value
+        .get("uid")
+        .and_then(Value::as_u64)
+        .filter(|uid| *uid > 0)
+        .ok_or_else(|| {
+            AppError::response(crate::msg!(
+                "backend.binanceSpotAccountResponseHasInvalidUid"
+            ))
+        })?
+        .to_string();
     let balances = value
         .get("balances")
         .and_then(Value::as_array)
@@ -97,6 +107,7 @@ pub(super) fn parse_spot_account(value: &Value) -> AppResult<SpotAccountSnapshot
         .collect::<AppResult<Vec<_>>>()?;
 
     Ok(SpotAccountSnapshot {
+        uid,
         balances,
         can_trade: value
             .get("canTrade")

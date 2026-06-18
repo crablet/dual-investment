@@ -1,6 +1,6 @@
 //! 本地 `SQLite` 持久化层。
 //!
-//! 这里只保存业务事件、订单快照和恢复记录；API Key/Secret 永远不进入
+//! 这里只保存账户归属、业务事件、订单快照和恢复记录；API Key/Secret 永远不进入
 //! SQLite。订单和审计以追加/替换业务事实的方式保存，便于应用重启后从真实交易所状态恢复。
 
 use crate::messages::Message;
@@ -49,6 +49,11 @@ impl Persistence {
         self.connection
             .execute_batch(
                 "
+                CREATE TABLE IF NOT EXISTS account_binding (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    uid TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS strategy_orders (
                     id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL,
@@ -110,6 +115,29 @@ impl Persistence {
                 ",
             )
             .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        Ok(())
+    }
+
+    /// 首次验证账户时绑定数据库；已有归属只允许同一 UID，删除凭据不解除绑定。
+    pub fn bind_account(&self, uid: &str) -> AppResult<()> {
+        self.connection
+            .execute(
+                "INSERT INTO account_binding (id, uid) VALUES (1, ?1)
+                 ON CONFLICT (id) DO NOTHING",
+                [uid],
+            )
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        let bound_uid: String = self
+            .connection
+            .query_row("SELECT uid FROM account_binding WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        if bound_uid != uid {
+            return Err(AppError::Config(crate::msg!(
+                "backend.localDataBelongsToAnotherBinanceAccount"
+            )));
+        }
         Ok(())
     }
 

@@ -8,7 +8,7 @@ use chrono::Utc;
 use crate::binance::BinanceClient;
 use crate::domain::{AppError, AppResult, StrategyDirection};
 
-pub(super) async fn verify_binance_access(client: &BinanceClient) -> AppResult<()> {
+pub(super) async fn verify_binance_access(client: &BinanceClient) -> AppResult<String> {
     let (option_account, spot_account) =
         tokio::join!(client.verify_account(), client.spot_account());
     option_account?;
@@ -18,7 +18,7 @@ pub(super) async fn verify_binance_access(client: &BinanceClient) -> AppResult<(
             "backend.binanceSpotAccountCannotTradeExpiryRebalancing"
         )));
     }
-    Ok(())
+    Ok(spot_account.uid)
 }
 
 /// 生成期权订单客户端订单号。

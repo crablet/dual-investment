@@ -51,16 +51,17 @@ macOS 打包下限设为 13.3，以配合当前 `es2022` 前端构建目标及�
 | [src/i18n.ts](../src/i18n.ts)、[src/locales](../src/locales/) | 消息翻译与语言词典加载 |
 | [src-tauri/src/app_state](../src-tauri/src/app_state/) | 连接、交易、恢复、结算与后台维护编排 |
 | [src-tauri/src/strategy](../src-tauri/src/strategy/) | Decimal 金融计算与策略规则 |
-| [src-tauri/src/persistence.rs](../src-tauri/src/persistence.rs) | SQLite 订单和恢复记录 |
+| [src-tauri/src/persistence.rs](../src-tauri/src/persistence.rs) | SQLite 账户归属、订单和恢复记录 |
 | [src-tauri/src/secrets.rs](../src-tauri/src/secrets.rs) | 系统 keyring 凭据读写 |
 
 - [AppState](../src-tauri/src/app_state.rs) 编排交易、恢复和后台维护。`get_app_snapshot` 只读取本地状态和账户缓存；`sync_live_state` 完成同步后不返回快照，由 Pinia 再读取完整状态。
+- 手动连接与保存凭据连接共用账户归属校验：从 `GET /api/v3/account` 解析 UID，经权限验证后写入或核对 SQLite 单行 `account_binding`，再更新凭据与运行态。UID 只在 Rust 和本地数据库中使用；归属不随删除凭据改变，不增加逐订单账户字段或额外查询。
 - [策略层](../src-tauri/src/strategy.rs) 使用 Decimal 计算金额、数量和收益，前端以字符串接收。`preview_strategy` 只做本地预估；金融字段在前端的数值转换仅用于格式化和图形比例。
 - [错误分类](../src-tauri/src/errors.rs) 决定查询重试、提交结果是否待确认和连接重试资格。[IPC](../src-tauri/src/commands.rs) 的业务错误返回 `{ message: { code, params }, canAutoReconnect }`，前端不根据文案判断重连；Tauri 自身的传输或参数错误不授予自动重连资格。
 - [消息结构](../src-tauri/src/messages.rs) 在 IPC、SQLite 和日志中保存 `{ code, params }`；参数为字符串或嵌套消息，金融参数保留 Decimal 字符串。前端通过 `messageText()` 在展示时递归翻译；Rust 的 `Display` 使用简体中文词典，仅供进程诊断。
 - [本地日志](../src-tauri/src/logs.rs) 按本机日期写入 `logs/YYYY-MM-DD.log`，每行一条 JSON。日志面板按当前语言翻译消息；日志级别与事件代码保持原值，切换语言不改写日志文件。
 
-开发期不保留旧 IPC、DTO 或 SQLite 兼容与迁移分支。当前结构化消息格式不兼容旧的纯文本消息记录；应用不会自动迁移或删除已有数据库与日志。处理已有开发数据前，应先明确对应的订单和恢复状态。
+开发期不保留旧 IPC、DTO 或 SQLite 兼容与迁移分支。当前结构要求数据库具有账户归属，旧的无归属业务库与纯文本消息记录不受支持；升级开发数据时先关闭应用，明确处理旧义务后使用空数据库。应用不自动迁移或删除已有数据库与日志；清理数据库不应调用删除系统 keyring 凭据的命令。
 
 ## 多语言维护
 
