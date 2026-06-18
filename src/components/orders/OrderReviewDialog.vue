@@ -103,7 +103,7 @@ function confirm() {
 
       <footer class="order-review-actions">
         <NButton size="large" secondary class="order-review-back" @click="emit('close')"> {{ t('ui.backToEdit') }} </NButton>
-        <NButton size="large" type="primary" class="order-review-confirm" @click="confirm"> {{ t('ui.confirmSubmission') }} </NButton>
+        <NButton size="large" type="primary" class="order-review-confirm" :disabled="!props.show" @click="confirm"> {{ t('ui.confirmSubmission') }} </NButton>
       </footer>
     </section>
   </NModal>

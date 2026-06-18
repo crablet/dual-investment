@@ -100,7 +100,7 @@ function clearOrderReviewSnapshot() {
 
 function confirmOrderReview() {
   const review = orderReview.value
-  if (!review) {
+  if (!orderReviewVisible.value || !review) {
     return
   }
   closeOrderReview()
