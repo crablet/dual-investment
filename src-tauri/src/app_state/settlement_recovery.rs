@@ -3,35 +3,34 @@
 use crate::messages::Message;
 
 use super::{
-    AppError, AppResult, AppState, Decimal, FundingAttempt, FundingAttemptKind,
-    FundingAttemptStatus, SettlementBatch, SettlementStage, StrategyOrder, StrategyStatus, Utc,
+    AppError, AppResult, AppState, Decimal, DeliveryStatus, DeliveryTask, FundingAttempt,
+    FundingAttemptKind, FundingAttemptStatus, SettlementBatch, SettlementStage, Utc,
 };
 use crate::domain::{FinishSettlementSweepRequest, SettlementRecoveryView};
 
 /// `spot_sweep` 只在期权划转确认且现货到账后落库，是进入理财收尾的事实边界。
 fn finish_blocker(
     batch: &SettlementBatch,
-    orders: &[StrategyOrder],
+    orders: &[DeliveryTask],
     funding: &[FundingAttempt],
     has_pending_recovery: bool,
 ) -> Option<Message> {
     if batch.stage != SettlementStage::Blocked {
         return Some(crate::msg!("backend.onlyBlockedEarnFinalizationCanBeEnded"));
     }
-    if batch.order_ids.is_empty()
-        || batch.order_ids.iter().any(|id| {
+    if batch.task_ids.is_empty()
+        || batch.task_ids.iter().any(|id| {
             !orders.iter().any(|order| {
                 order.id == *id
                     && order.symbol == batch.symbol
                     && order.expiry_at == batch.expiry_at
-                    && order.status == StrategyStatus::Settled
+                    && order.status == DeliveryStatus::Completed
             })
         })
         || orders.iter().any(|order| {
             order.symbol == batch.symbol
                 && order.expiry_at == batch.expiry_at
-                && order.filled_quantity > Decimal::ZERO
-                && order.status != StrategyStatus::Settled
+                && order.status != DeliveryStatus::Completed
         })
     {
         return Some(crate::msg!("backend.notAllBatchOrdersAreSettledCheck"));
@@ -92,7 +91,7 @@ fn finish_blocker(
 
 fn recovery_view(
     batch: &SettlementBatch,
-    orders: &[StrategyOrder],
+    orders: &[DeliveryTask],
     funding: &[FundingAttempt],
     has_pending_recovery: bool,
 ) -> SettlementRecoveryView {
@@ -128,7 +127,7 @@ impl AppState {
             .persistence
             .lock()
             .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
-        let orders = persistence.list_orders()?;
+        let orders = persistence.list_delivery_tasks()?;
         let funding = persistence.list_funding_attempts(usize::MAX)?;
         let has_pending = persistence.count_pending_order_attempts()?
             + persistence.count_pending_funding_attempts()?
@@ -166,7 +165,7 @@ impl AppState {
             .into_iter()
             .find(|batch| batch.id == request.batch_id)
             .ok_or_else(|| AppError::Storage(crate::msg!("backend.settlementBatchNotFound")))?;
-        let orders = persistence.list_orders()?;
+        let orders = persistence.list_delivery_tasks()?;
         let funding = persistence.list_funding_attempts(usize::MAX)?;
         let has_pending = persistence.count_pending_order_attempts()?
             + persistence.count_pending_funding_attempts()?

@@ -1,20 +1,21 @@
 <!--
 策略订单视图。
 
-展示真实订单、同步/结算操作和恢复记录；恢复动作会回到 Rust 重新查询 Binance。
+分别展示本机订单历史、按到期前净仓登记的交割任务与恢复记录。
 -->
 <script setup lang="ts">
 import type { StrategyOrder } from '@/types/domain'
 
-import { CheckCircle2, RefreshCw, ScanLine, XCircle } from '@lucide/vue'
+import { CheckCircle2, RefreshCw, XCircle } from '@lucide/vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
 import { computed, shallowRef, watchEffect } from 'vue'
 import Panel from '@/components/common/Panel.vue'
-import AdoptOptionPositionsPanel from '@/components/orders/AdoptOptionPositionsPanel.vue'
+import PositionSyncFeedback from '@/components/common/PositionSyncFeedback.vue'
+import DeliveryTasksPanel from '@/components/orders/DeliveryTasksPanel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useLocalToday } from '@/composables/useLocalToday'
 import { useRecoveryRows } from '@/composables/useRecoveryRows'
-import { messageText, t } from '@/i18n'
+import { t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import { localDateKey, localDateTimeLabel } from '@/utils/date'
 
@@ -49,7 +50,7 @@ watchEffect(() => {
 const selected = computed(() => store.orders.find(order => order.id === selectedId.value) ?? store.orders[0])
 const todayExpiryCount = computed(() => {
   // “今日到期”按本地日期展示，真实结算触发仍以后端 expiryAt 毫秒时间戳为准。
-  return store.orders.filter(order => localDateKey(order.expiryAt) === todayKey.value).length
+  return store.openPositions.filter(position => localDateKey(position.expiryAt) === todayKey.value).length
 })
 const detailRows = computed(() => {
   if (!selected.value) {
@@ -67,17 +68,11 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
     { label: t('ui.clientOrderId'), value: order.clientOrderId },
     { label: t('ui.expiryTime'), value: localDateTimeLabel(order.expiryAt) },
     { label: t('ui.strikePrice'), value: money(order.strike, 'USDT', 0) },
+    { label: t('ui.contractUnit'), value: `${order.unit} BTC` },
     { label: t('ui.filledQuantity'), value: t('ui.contracts2', { p0: order.filledQuantity, p1: order.quantity }) },
     { label: t('ui.averageFillPrice'), value: money(order.avgPrice) },
     { label: t('ui.premium2'), value: money(order.premium) },
     { label: t('ui.breakevenPrice'), value: money(order.breakeven) },
-    { label: t('ui.settlementReferencePrice'), value: money(order.settlementPrice) },
-    { label: t('ui.spotOrderId'), value: order.spotOrderId ?? '--' },
-    { label: t('ui.spotStatus'), value: order.spotOrderStatus || '--' },
-    { label: t('ui.spotFilledQuantity'), value: `${order.spotFilledQuantity} BTC` },
-    { label: t('ui.spotAverageFillPrice'), value: money(order.spotAvgPrice) },
-    { label: t('ui.expiryRebalancing'), value: messageText(order.settlementAction) },
-    { label: t('ui.rebalancingResult'), value: messageText(order.rebalanceMessage) || '--' },
   ]
 }
 </script>
@@ -88,22 +83,20 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
       <template #action>
         <div class="button-row compact">
           <NButton size="small" secondary :loading="store.isLoading('sync')" @click="store.syncLiveState()">
-            <template #icon><NIcon :component="RefreshCw" /></template> {{ t('ui.syncOrders') }}
-          </NButton>
-          <NButton size="small" secondary :loading="store.isLoading('settlement')" @click="store.runSettlementScan()">
-            <template #icon><NIcon :component="ScanLine" /></template> {{ t('ui.scanSettlements') }}
+            <template #icon><NIcon :component="RefreshCw" /></template> {{ t('ui.syncAccount') }}
           </NButton>
         </div>
       </template>
       <div class="summary-cards order-summary-cards">
         <article><span> {{ t('ui.totalOrders') }} </span><strong>{{ store.orders.length }}</strong></article>
-        <article><span> {{ t('ui.activeOrders') }} </span><strong>{{ store.runningOrders.length }}</strong></article>
+        <article><span> {{ t('ui.openShortPositions') }} </span><strong>{{ store.openPositions.length }}</strong></article>
         <article><span> {{ t('ui.expiringToday') }} </span><strong>{{ todayExpiryCount }}</strong></article>
-        <article><span> {{ t('ui.totalPremium') }} </span><strong>{{ store.pnl ? money(store.pnl.optionPremium) : '--' }}</strong></article>
+        <article><span> {{ t('ui.recordedPremium') }} </span><strong>{{ store.pnl ? money(store.pnl.recordedPremium) : '--' }}</strong></article>
       </div>
+      <PositionSyncFeedback :sync="store.positionSync" />
     </Panel>
 
-    <Panel :title="t('ui.orderList')" class="span-8">
+    <Panel :title="t('ui.orderHistory')" class="span-8">
       <div class="table-wrap">
         <table class="data-table">
           <thead>
@@ -122,7 +115,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
             <tr
               v-for="order in store.orders"
               :key="order.id"
-              :class="{ selected: order.id === selectedId }"
+              :class="{ selected: order.id === selected?.id }"
               @click="selectedId = order.id"
             >
               <td>{{ order.id }}</td>
@@ -156,7 +149,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
       <p v-else class="empty-state"> {{ t('ui.noOrderDetails') }} </p>
     </Panel>
 
-    <AdoptOptionPositionsPanel class="span-12" />
+    <DeliveryTasksPanel class="span-12" />
 
     <Panel :title="t('ui.recoveryCenter')" class="span-12">
       <div class="table-wrap">

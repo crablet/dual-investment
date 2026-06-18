@@ -7,8 +7,8 @@ use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 
 use crate::domain::{
-    OptionAccountSnapshot, OptionContract, SettlementAssets, SpotAccountSnapshot,
-    StrategyDirection, StrategyOrder, StrategyRequest,
+    AppResult, DeliveryStatus, DeliveryTask, OptionAccountSnapshot, OptionContract,
+    SettlementAssets, SpotAccountSnapshot, StrategyDirection, StrategyRequest,
 };
 use crate::strategy;
 
@@ -85,14 +85,17 @@ pub(super) fn risk_equity_target(margin: Decimal, max_usage_percent: Decimal) ->
 }
 
 /// 到期 ITM 后现货补齐所需资产；卖 Put 需要 USDT 缓冲，卖 Call 需要 BTC。
-pub(super) fn spot_rebalance_required_asset(order: &StrategyOrder) -> (&'static str, Decimal) {
-    match order.direction {
+pub(super) fn spot_rebalance_required_asset(
+    task: &DeliveryTask,
+) -> AppResult<(&'static str, Decimal)> {
+    let remaining = (task.base_quantity()? - task.spot_filled_quantity).max(Decimal::ZERO);
+    Ok(match task.direction {
         StrategyDirection::SellPut => (
             "USDT",
-            order.settlement_price * order.filled_quantity * SELL_PUT_REBALANCE_USDT_BUFFER,
+            task.exercise_price()? * remaining * SELL_PUT_REBALANCE_USDT_BUFFER,
         ),
-        StrategyDirection::SellCall => ("BTC", order.filled_quantity),
-    }
+        StrategyDirection::SellCall => ("BTC", remaining),
+    })
 }
 
 /// 查询现货账户某资产可用余额，缺失资产按 0 处理。
@@ -121,21 +124,21 @@ pub(super) fn round_down_funding_amount(value: Decimal) -> Decimal {
 
 /// 汇总尚未完成的补齐资金。预留在本应用内生效，发送前仍须查询实盘余额。
 pub(super) fn settlement_required_assets(
-    orders: &[StrategyOrder],
-) -> crate::domain::SettlementAssets {
+    orders: &[DeliveryTask],
+) -> AppResult<crate::domain::SettlementAssets> {
     let mut assets = crate::domain::SettlementAssets::default();
     for order in orders
         .iter()
-        .filter(|order| order.status != crate::domain::StrategyStatus::Settled)
+        .filter(|order| order.status != DeliveryStatus::Completed)
     {
-        let (asset, amount) = spot_rebalance_required_asset(order);
+        let (asset, amount) = spot_rebalance_required_asset(order)?;
         match asset {
             "USDT" => assets.usdt += amount,
             "BTC" => assets.btc += amount,
             _ => {}
         }
     }
-    assets
+    Ok(assets)
 }
 
 pub(super) fn settlement_funding_amount(asset: &str, value: Decimal) -> Decimal {

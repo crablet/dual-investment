@@ -253,35 +253,23 @@ pub fn decimal_matches_step(value: Decimal, step: Decimal) -> bool {
 
 /// 把 Binance 订单状态映射成本地策略状态。
 ///
-/// IOC 订单可能返回 `CANCELED` 但已经部分成交，因此需要结合成交数量判断。
+/// 已取消或到期的 IOC 仍可能有部分成交；成交字段保留事实，订单状态不再承担义务跟踪。
 pub fn status_from_exchange(
     status: &str,
     executed_qty: Decimal,
     requested_qty: Decimal,
 ) -> StrategyStatus {
     match status {
-        "FILLED" => StrategyStatus::Running,
+        "FILLED" => StrategyStatus::Filled,
         "PARTIALLY_FILLED" => StrategyStatus::PartiallyFilled,
-        "CANCELED" | "CANCELLED" => {
-            if executed_qty > Decimal::ZERO {
-                StrategyStatus::PartiallyFilled
-            } else {
-                StrategyStatus::Cancelled
-            }
-        }
-        "EXPIRED" => {
-            if executed_qty > Decimal::ZERO {
-                StrategyStatus::PartiallyFilled
-            } else {
-                StrategyStatus::Expired
-            }
-        }
+        "CANCELED" | "CANCELLED" => StrategyStatus::Cancelled,
+        "EXPIRED" => StrategyStatus::Expired,
         "REJECTED" => StrategyStatus::Rejected,
         "NEW" | "PENDING" => StrategyStatus::Pending,
         _ if executed_qty > Decimal::ZERO && executed_qty < requested_qty => {
             StrategyStatus::PartiallyFilled
         }
-        _ if executed_qty > Decimal::ZERO => StrategyStatus::Running,
+        _ if executed_qty > Decimal::ZERO => StrategyStatus::Filled,
         _ => StrategyStatus::Pending,
     }
 }

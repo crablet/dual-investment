@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::errors::BinanceErrorKind;
 
 use crate::domain::{
-    AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot,
+    AppError, AppResult, ExchangeOrderAck, ExercisePrice, ExerciseRecord, OptionAccountSnapshot,
     OptionAssetBalance, OptionContract, OptionMarkPrice, OptionOrderBook, OptionPosition,
     OptionTicker, OrderBookLevel, SimpleEarnAssetBalance, SimpleEarnFlexibleProduct,
     SimpleEarnRedemptionRecord, SimpleEarnSubscriptionRecord, SpotAccountSnapshot,
@@ -48,25 +48,21 @@ pub(super) fn parse_option_positions(value: &Value) -> AppResult<Vec<OptionPosit
         AppError::response(crate::msg!("backend.binanceOptionPositionResponseIsNotAn"))
     })?;
 
-    rows.iter()
-        .map(parse_option_position)
-        .filter(|result| {
-            result
-                .as_ref()
-                .map_or(true, |position| position.quantity > Decimal::ZERO)
-        })
-        .collect()
+    rows.iter().map(parse_option_position).collect()
 }
 
-/// 解析当前 EAPI 持仓字段；数量负号表示义务仓，领域数量统一保留绝对值。
+/// EAPI 数量负号表示卖方净仓，不能取绝对值后再猜测方向。
 fn parse_option_position(value: &Value) -> AppResult<OptionPosition> {
     Ok(OptionPosition {
         symbol: string_field(value, "symbol")?,
-        side: string_field(value, "side")?,
-        quantity: decimal_field(value, "quantity")?.abs(),
+        quantity: decimal_field(value, "quantity")?,
         entry_price: decimal_field(value, "entryPrice")?,
-        mark_price: optional_decimal_field(value, "markPrice")?.unwrap_or(Decimal::ZERO),
-        update_time: date_time_from_millis_field(value, "time"),
+        mark_price: decimal_field(value, "markPrice")?,
+        unrealized_pnl: decimal_field(value, "unrealizedPNL")?,
+        strike: decimal_field(value, "strikePrice")?,
+        expiry_at: required_date_time_from_millis_field(value, "expiryDate")?,
+        option_side: string_field(value, "optionSide")?,
+        quote_asset: string_field(value, "quoteAsset")?,
     })
 }
 
@@ -316,6 +312,11 @@ fn date_time_from_millis_field(value: &Value, key: &str) -> Option<DateTime<Utc>
         .and_then(DateTime::<Utc>::from_timestamp_millis)
 }
 
+fn required_date_time_from_millis_field(value: &Value, key: &str) -> AppResult<DateTime<Utc>> {
+    date_time_from_millis_field(value, key)
+        .ok_or_else(|| AppError::response(crate::msg!("backend.cannotParseBinanceField", p0 = key)))
+}
+
 /// 解析现货交易对价格列表。
 pub(super) fn parse_spot_price_tickers(value: &Value) -> AppResult<HashMap<String, Decimal>> {
     let rows = value.as_array().ok_or_else(|| {
@@ -356,13 +357,20 @@ fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
     })?;
     let price_filter = exchange_info_filter(value, "PRICE_FILTER")?;
     let lot_filter = exchange_info_filter(value, "LOT_SIZE")?;
+    let unit = decimal_field(value, "unit")?;
+    if unit <= Decimal::ZERO {
+        return Err(AppError::response(crate::msg!(
+            "backend.cannotParseBinanceField",
+            p0 = "unit"
+        )));
+    }
 
     Ok(OptionContract {
         symbol: string_field(value, "symbol")?,
         side: string_field(value, "side")?,
         strike_price: decimal_field(value, "strikePrice")?,
         underlying: string_field(value, "underlying")?,
-        unit: decimal_field(value, "unit")?,
+        unit,
         min_qty: decimal_field(value, "minQty")?,
         max_qty: decimal_field(value, "maxQty")?,
         quantity_step_size: decimal_field(lot_filter, "stepSize")?,
@@ -594,7 +602,7 @@ fn average_price_from_spot_ack(value: &Value, executed_qty: Decimal) -> AppResul
 
 /// 解析行权记录。
 ///
-/// 当前 EAPI 行权记录返回数组，行权价由 exercisePrice 提供。
+/// 账户数量和现金结算额只来自账户记录；不读取或计算手续费。
 pub(super) fn parse_exercise_records(value: &Value) -> AppResult<Vec<ExerciseRecord>> {
     let rows = value.as_array().ok_or_else(|| {
         AppError::response(crate::msg!("backend.binanceExerciseRecordResponseIsNotAn"))
@@ -602,12 +610,72 @@ pub(super) fn parse_exercise_records(value: &Value) -> AppResult<Vec<ExerciseRec
 
     rows.iter()
         .map(|row| {
+            for field in ["currency", "quoteAsset"] {
+                if string_field(row, field)? != "USDT" {
+                    return Err(AppError::response(crate::msg!(
+                        "backend.cannotParseBinanceField",
+                        p0 = field
+                    )));
+                }
+            }
             Ok(ExerciseRecord {
+                id: string_field(row, "id")?,
                 symbol: string_field(row, "symbol")?,
                 settlement_price: decimal_field(row, "exercisePrice")?,
+                quantity: decimal_field(row, "quantity")?,
+                amount: decimal_field(row, "amount")?,
+                created_at: required_date_time_from_millis_field(row, "createDate")?,
+                option_side: string_field(row, "optionSide")?,
+                position_side: string_field(row, "positionSide")?,
             })
         })
         .collect()
+}
+
+/// 同一标的在同一到期时刻使用同一指数结算价，不按各执行价合约累加。
+pub(super) fn parse_exercise_history(
+    value: &Value,
+    underlying: &str,
+    expiry_at: DateTime<Utc>,
+) -> AppResult<Option<ExercisePrice>> {
+    if underlying != "BTCUSDT" {
+        return Err(AppError::Config(crate::msg!(
+            "backend.onlyBtcUsdtOptionsAreSupported"
+        )));
+    }
+    let rows = value.as_array().ok_or_else(|| {
+        AppError::response(crate::msg!("backend.binanceExerciseRecordResponseIsNotAn"))
+    })?;
+    let mut matched: Option<ExercisePrice> = None;
+    for row in rows {
+        if !string_field(row, "symbol")?.starts_with("BTC-")
+            || required_date_time_from_millis_field(row, "expiryDate")? != expiry_at
+        {
+            continue;
+        }
+        // strikePrice 是合约执行价，realStrikePrice 才是到期的实际结算价。
+        let settlement_price = decimal_field(row, "realStrikePrice")?;
+        if settlement_price <= Decimal::ZERO {
+            return Err(AppError::response(crate::msg!(
+                "backend.cannotParseBinanceField",
+                p0 = "realStrikePrice"
+            )));
+        }
+        if matched
+            .as_ref()
+            .is_some_and(|previous| previous.settlement_price != settlement_price)
+        {
+            return Err(AppError::response(crate::msg!(
+                "backend.exerciseRecordsHaveInconsistentSettlementPricesManual"
+            )));
+        }
+        matched = Some(ExercisePrice {
+            underlying: underlying.to_string(),
+            settlement_price,
+            expiry_at,
+        });
+    }
+    Ok(matched)
 }
 
 /// 读取必填字符串字段，空字符串视为缺失。

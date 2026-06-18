@@ -12,10 +12,9 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::app_state::AppState;
 use crate::domain::{
-    AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppSettings, AppSnapshot,
-    ConnectBinanceRequest, FinishSettlementSweepRequest, FundingAttemptView, LogSnapshot,
-    ResolveFundingAttemptRequest, SettlementRecoveryView, StrategyCandidate, StrategyOrder,
-    StrategyPreview, StrategyPreviewRequest, StrategyRequest,
+    AppSettings, AppSnapshot, ConnectBinanceRequest, FinishSettlementSweepRequest,
+    FundingAttemptView, LogSnapshot, ResolveFundingAttemptRequest, SettlementRecoveryView,
+    StrategyCandidate, StrategyOrder, StrategyPreview, StrategyPreviewRequest, StrategyRequest,
 };
 
 /// 获取应用完整快照。
@@ -84,7 +83,7 @@ pub async fn place_manual_strategy(
 pub async fn recover_order_attempt(
     state: State<'_, AppState>,
     attempt_id: String,
-) -> Result<StrategyOrder, CommandError> {
+) -> Result<(), CommandError> {
     state
         .recover_order_attempt(attempt_id)
         .await
@@ -127,41 +126,10 @@ pub async fn finish_settlement_sweep(
         .map_err(to_command_error)
 }
 
-/// 列出可由本机接管监控的 Binance 期权持仓。
-#[tauri::command]
-pub async fn list_adoptable_option_positions(
-    state: State<'_, AppState>,
-) -> Result<Vec<AdoptableOptionPositionView>, CommandError> {
-    state
-        .list_adoptable_option_positions()
-        .await
-        .map_err(to_command_error)
-}
-
-/// 接管选中的 Binance 期权持仓。
-#[tauri::command]
-pub async fn adopt_option_positions(
-    state: State<'_, AppState>,
-    request: AdoptOptionPositionsRequest,
-) -> Result<Vec<StrategyOrder>, CommandError> {
-    state
-        .adopt_option_positions(request)
-        .await
-        .map_err(to_command_error)
-}
-
 /// 显式同步实盘事实；前端随后读取本地快照，避免多入口返回旧快照互相覆盖。
 #[tauri::command]
 pub async fn sync_live_state(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.sync_live_state().await.map_err(to_command_error)
-}
-
-/// 手动触发到期结算扫描。
-#[tauri::command]
-pub async fn run_settlement_scan(
-    state: State<'_, AppState>,
-) -> Result<Vec<StrategyOrder>, CommandError> {
-    state.run_settlement_scan().await.map_err(to_command_error)
 }
 
 /// 读取文件日志快照。

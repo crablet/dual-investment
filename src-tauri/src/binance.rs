@@ -14,7 +14,7 @@ use std::future::Future;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::{Client, StatusCode};
 use rust_decimal::Decimal;
@@ -25,24 +25,27 @@ use tokio::time::sleep;
 use self::http::{encode_query, request_context, request_error};
 use self::parsing::{
     decimal_field, ensure_success_response, parse_account_snapshot, parse_exchange_info,
-    parse_exercise_records, parse_mark_prices, parse_option_order_book, parse_option_positions,
-    parse_option_tickers, parse_order_ack, parse_simple_earn_flexible_product_page,
-    parse_simple_earn_position_page, parse_simple_earn_redemption_records,
-    parse_simple_earn_subscription_records, parse_spot_account, parse_spot_price_tickers,
-    parse_universal_transfer_records, value_to_string,
+    parse_exercise_history, parse_exercise_records, parse_mark_prices, parse_option_order_book,
+    parse_option_positions, parse_option_tickers, parse_order_ack,
+    parse_simple_earn_flexible_product_page, parse_simple_earn_position_page,
+    parse_simple_earn_redemption_records, parse_simple_earn_subscription_records,
+    parse_spot_account, parse_spot_price_tickers, parse_universal_transfer_records,
+    value_to_string,
 };
 use crate::domain::{
-    AppError, AppResult, ExchangeOrderAck, ExerciseRecord, OptionAccountSnapshot, OptionContract,
-    OptionMarkPrice, OptionOrderBook, OptionPosition, OptionTicker, SimpleEarnAssetBalance,
-    SimpleEarnFlexibleProduct, SimpleEarnRedemptionRecord, SimpleEarnSnapshot,
-    SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyDirection, StrategyRequest,
-    UniversalTransferRecord,
+    AppError, AppResult, ExchangeOrderAck, ExercisePrice, ExerciseRecord, OptionAccountSnapshot,
+    OptionContract, OptionMarkPrice, OptionOrderBook, OptionPosition, OptionTicker,
+    SimpleEarnAssetBalance, SimpleEarnFlexibleProduct, SimpleEarnRedemptionRecord,
+    SimpleEarnSnapshot, SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyDirection,
+    StrategyRequest, UniversalTransferRecord,
 };
 use crate::errors::BinanceErrorKind;
 
 type HmacSha256 = Hmac<Sha256>;
 const QUERY_RETRY_DELAYS: [Duration; 2] = [Duration::from_millis(500), Duration::from_millis(1500)];
 const BINANCE_FUNDING_AMOUNT_SCALE: u32 = 8;
+const EXERCISE_RECORD_PAGE_SIZE: usize = 1_000;
+const EXERCISE_HISTORY_PAGE_SIZE: usize = 100;
 const EAPI_BASE: &str = "https://eapi.binance.com";
 const SPOT_BASE: &str = "https://api.binance.com";
 
@@ -93,7 +96,7 @@ impl BinanceClient {
         parse_account_snapshot(&response)
     }
 
-    /// 查询当前期权持仓，用于接管外部订单和同步已接管记录。
+    /// 查询当前期权净仓；数量符号、到期时间和方向用于自动跟踪判断。
     pub async fn option_positions(&self) -> AppResult<Vec<OptionPosition>> {
         let response = self
             .signed_get(EAPI_BASE, "/eapi/v1/position", Vec::new())
@@ -449,25 +452,91 @@ impl BinanceClient {
         parse_spot_price_tickers(&response)
     }
 
-    /// 查询期权行权记录，优先用于确定到期结算参考价。
+    /// 查询完整账户行权事实。满页时缩小时间窗，不能把截断数量用于交割。
     pub async fn exercise_records(
         &self,
         symbol: &str,
         start_time_ms: i64,
         end_time_ms: i64,
     ) -> AppResult<Vec<ExerciseRecord>> {
+        if start_time_ms > end_time_ms {
+            return Err(AppError::binance(
+                BinanceErrorKind::MissingRows,
+                crate::msg!("backend.exerciseHistoryIncomplete"),
+            ));
+        }
+        let mut windows = vec![(start_time_ms, end_time_ms)];
+        let mut records = Vec::new();
+        while let Some((start, end)) = windows.pop() {
+            let response = self
+                .signed_get(
+                    EAPI_BASE,
+                    "/eapi/v1/exerciseRecord",
+                    vec![
+                        ("symbol".to_string(), symbol.to_string()),
+                        ("startTime".to_string(), start.to_string()),
+                        ("endTime".to_string(), end.to_string()),
+                        ("limit".to_string(), EXERCISE_RECORD_PAGE_SIZE.to_string()),
+                    ],
+                )
+                .await?;
+            let page = parse_exercise_records(&response)?;
+            if page.len() < EXERCISE_RECORD_PAGE_SIZE {
+                records.extend(page);
+                continue;
+            }
+            if start == end {
+                return Err(AppError::binance(
+                    BinanceErrorKind::MissingRows,
+                    crate::msg!("backend.exerciseHistoryIncomplete"),
+                ));
+            }
+            // 时间窗包含两端；两半不重叠，也不漏掉分界毫秒。
+            let middle = start.midpoint(end);
+            windows.push((middle + 1, end));
+            windows.push((start, middle));
+        }
+        Ok(records)
+    }
+
+    /// 同标的、同到期时刻的公开结算价，不需要具体执行价合约那一行。
+    pub async fn exercise_history(
+        &self,
+        underlying: &str,
+        expiry_at: DateTime<Utc>,
+    ) -> AppResult<Option<ExercisePrice>> {
+        if underlying != "BTCUSDT" {
+            return Err(AppError::Config(crate::msg!(
+                "backend.onlyBtcUsdtOptionsAreSupported"
+            )));
+        }
+        let query = encode_query(&[
+            ("underlying".to_string(), underlying.to_string()),
+            (
+                "startTime".to_string(),
+                expiry_at.timestamp_millis().to_string(),
+            ),
+            (
+                "endTime".to_string(),
+                expiry_at.timestamp_millis().to_string(),
+            ),
+            ("limit".to_string(), EXERCISE_HISTORY_PAGE_SIZE.to_string()),
+        ]);
         let response = self
-            .signed_get(
-                EAPI_BASE,
-                "/eapi/v1/exerciseRecord",
-                vec![
-                    ("symbol".to_string(), symbol.to_string()),
-                    ("startTime".to_string(), start_time_ms.to_string()),
-                    ("endTime".to_string(), end_time_ms.to_string()),
-                ],
-            )
+            .public_get(EAPI_BASE, &format!("/eapi/v1/exerciseHistory?{query}"))
             .await?;
-        parse_exercise_records(&response)
+        let matched = parse_exercise_history(&response, underlying, expiry_at)?;
+        if matched.is_none()
+            && response
+                .as_array()
+                .is_some_and(|rows| rows.len() >= EXERCISE_HISTORY_PAGE_SIZE)
+        {
+            return Err(AppError::binance(
+                BinanceErrorKind::MissingRows,
+                crate::msg!("backend.exerciseHistoryIncomplete"),
+            ));
+        }
+        Ok(matched)
     }
 
     /// 发送真实 Binance 现货市价补齐订单。

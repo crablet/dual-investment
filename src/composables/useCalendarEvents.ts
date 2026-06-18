@@ -1,10 +1,10 @@
 // 事件日历派生逻辑。
 //
-// 日历只从当前应用快照派生订单、到期、结算、补齐和恢复事件。
+// 日历从合约净仓派生登记/到期事件，从交割任务派生进度；订单历史不累计为持仓。
 
 import type { MaybeRefOrGetter } from 'vue'
 import type { AppViewId } from '@/stores/app'
-import type { FundingAttemptView, OrderAttempt, StrategyOrder } from '@/types/domain'
+import type { DeliveryTask, FundingAttemptView, OrderAttempt, TrackedPosition } from '@/types/domain'
 import { computed, toValue } from 'vue'
 import { messageText, t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
@@ -14,15 +14,13 @@ import {
   parseDateKey,
   startOfDay,
 } from '@/utils/date'
-import { decimalStringHasValue } from '@/utils/decimal'
-import { attemptStatusText, fundingAttemptStatusText, strategyStatusText } from '@/utils/labels'
+import { attemptStatusText, deliveryStatusText, fundingAttemptStatusText, positionStatusText } from '@/utils/labels'
 
 /** 日历事件类型只用于筛选和跳转，不对应独立持久化任务。 */
 export type CalendarEventType
-  = | 'order'
+  = | 'position'
     | 'expiry'
-    | 'settlement'
-    | 'rebalance'
+    | 'delivery'
     | 'recovery'
 
 /** 日历角标颜色语义，保持和全局交易终端配色一致。 */
@@ -55,10 +53,9 @@ interface UseCalendarEventsOptions {
 /** 日历顶部筛选项；顺序即 UI 展示顺序。 */
 export const calendarEventTypes: CalendarEventTypeMeta[] = [
   { id: 'all', get label() { return t('ui.all') }, tone: 'gold' },
-  { id: 'order', get label() { return t('ui.placeOrder') }, tone: 'gold' },
+  { id: 'position', get label() { return t('ui.openShortPositions') }, tone: 'gold' },
   { id: 'expiry', get label() { return t('ui.expiry') }, tone: 'purple' },
-  { id: 'settlement', get label() { return t('ui.settlement') }, tone: 'green' },
-  { id: 'rebalance', get label() { return t('ui.rebalancing') }, tone: 'green' },
+  { id: 'delivery', get label() { return t('ui.deliveryEvent') }, tone: 'green' },
   { id: 'recovery', get label() { return t('ui.recovery') }, tone: 'gray' },
 ]
 
@@ -75,9 +72,12 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
     const end = startOfDay(toValue(options.endDate))
     const rows: CalendarEvent[] = []
 
-    // 日历事件是快照的展示索引，不持久化；刷新后会重新从订单/恢复记录生成。
-    for (const order of store.orders) {
-      rows.push(...eventsFromOrder(order))
+    // 净仓按完整合约代码唯一，一份义务只有一个到期事件。
+    for (const position of store.positions) {
+      rows.push(...eventsFromPosition(position))
+    }
+    for (const task of store.deliveries) {
+      rows.push(eventFromDelivery(task))
     }
 
     for (const attempt of store.orderAttempts) {
@@ -104,63 +104,52 @@ export function useCalendarEvents(options: UseCalendarEventsOptions) {
   }
 }
 
-/** 从策略订单派生下单、到期、结算和现货补齐事件。 */
-function eventsFromOrder(order: StrategyOrder): CalendarEvent[] {
-  const direction = order.direction === 'sellPut' ? t('ui.buyBtcLow') : t('ui.sellBtcHigh2')
+/** 登记和到期以净仓为准；已提前平仓的合约不再展示到期义务。 */
+function eventsFromPosition(position: TrackedPosition): CalendarEvent[] {
+  const direction = position.direction === 'sellPut' ? t('ui.buyBtcLow') : t('ui.sellBtcHigh2')
   const rows: CalendarEvent[] = [
     {
-      id: `order-${order.id}`,
-      type: 'order',
-      date: localDateKey(order.createdAt),
-      timeLabel: localTimeLabel(order.createdAt),
-      title: t('ui.order', { p0: direction }),
-      detail: t('ui.filledContractsPremiumUsdt', { p0: order.optionSymbol, p1: order.filledQuantity, p2: order.premium }),
+      id: `position-${position.optionSymbol}`,
+      type: 'position',
+      date: localDateKey(position.trackedAt),
+      timeLabel: localTimeLabel(position.trackedAt),
+      title: t('ui.positionTracked'),
+      detail: t('ui.positionEventDetail', { p0: position.optionSymbol, p1: position.quantity, p2: positionStatusText(position.status) }),
       tone: 'gold',
-      targetView: 'orders',
+      targetView: 'portfolio',
       priority: 30,
-    },
-    {
-      id: `expiry-${order.id}`,
-      type: 'expiry',
-      date: localDateKey(order.expiryAt),
-      timeLabel: localTimeLabel(order.expiryAt),
-      title: t('ui.expiry2', { p0: direction }),
-      detail: t('ui.strikeStatus', { p0: order.optionSymbol, p1: order.strike, p2: strategyStatusText(order.status) }),
-      tone: 'purple',
-      targetView: 'orders',
-      priority: 70,
     },
   ]
 
-  if (order.settledAt) {
+  if (position.status !== 'closed') {
     rows.push({
-      id: `settlement-${order.id}`,
-      type: 'settlement',
-      date: localDateKey(order.settledAt),
-      timeLabel: localTimeLabel(order.settledAt),
-      get title() { return t('ui.orderSettled') },
-      detail: messageText(order.rebalanceMessage) || t('ui.hasCompletedExpirySettlement', { p0: order.optionSymbol }),
-      tone: 'green',
-      targetView: 'orders',
-      priority: 60,
+      id: `expiry-${position.optionSymbol}`,
+      type: 'expiry',
+      date: localDateKey(position.expiryAt),
+      timeLabel: localTimeLabel(position.expiryAt),
+      title: t('ui.expiry2', { p0: direction }),
+      detail: t('ui.strikeStatus', { p0: position.optionSymbol, p1: position.strike, p2: positionStatusText(position.status) }),
+      tone: 'purple',
+      targetView: position.status === 'expired' ? 'orders' : 'portfolio',
+      priority: 70,
     })
   }
-
-  if (hasRebalanceEvent(order)) {
-    rows.push({
-      id: `rebalance-${order.id}`,
-      type: 'rebalance',
-      date: localDateKey(order.settledAt ?? order.updatedAt),
-      timeLabel: localTimeLabel(order.settledAt ?? order.updatedAt),
-      title: order.status === 'rebalanceFailed' ? t('ui.spotRebalancingFailed') : t('ui.spotRebalancing'),
-      detail: messageText(order.rebalanceMessage) || t('ui.spotRebalancingStatus', { p0: order.optionSymbol, p1: order.spotOrderStatus || '--' }),
-      tone: order.status === 'rebalanceFailed' ? 'red' : 'green',
-      targetView: order.status === 'rebalanceFailed' ? 'orders' : 'portfolio',
-      priority: order.status === 'rebalanceFailed' ? 90 : 65,
-    })
-  }
-
   return rows
+}
+
+function eventFromDelivery(task: DeliveryTask): CalendarEvent {
+  const timestamp = task.completedAt ?? task.updatedAt
+  return {
+    id: `delivery-${task.id}`,
+    type: 'delivery',
+    date: localDateKey(timestamp),
+    timeLabel: localTimeLabel(timestamp),
+    title: deliveryStatusText(task.status),
+    detail: `${task.optionSymbol} · ${messageText(task.message)}`,
+    tone: task.status === 'failed' ? 'red' : task.status === 'completed' ? 'green' : 'gold',
+    targetView: 'orders',
+    priority: task.status === 'failed' ? 90 : 65,
+  }
 }
 
 /** 从恢复记录派生日历事件；已持久化成功的记录不再提示待办。 */
@@ -199,15 +188,6 @@ function eventFromFundingAttempt(attempt: FundingAttemptView): CalendarEvent | u
     targetView: 'orders',
     priority: attempt.status === 'blocked' ? 94 : 54,
   }
-}
-
-function hasRebalanceEvent(order: StrategyOrder) {
-  // 只要出现过现货补齐订单引用或成交数量，就展示补齐事件，方便追踪 ITM 后续动作。
-  return order.status === 'rebalanceFailed'
-    || Boolean(order.spotOrderId)
-    || Boolean(order.spotOrderStatus)
-    || Boolean(order.spotClientOrderId)
-    || decimalStringHasValue(order.spotFilledQuantity)
 }
 
 /** 同日事件按优先级高的先展示。 */

@@ -13,8 +13,8 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 
 use crate::domain::{
-    AppError, AppResult, FundingAttempt, FundingAttemptKind, FundingAttemptStatus, OrderAttempt,
-    OrderAttemptStatus, SettlementBatch, StrategyOrder,
+    AppError, AppResult, DeliveryTask, FundingAttempt, FundingAttemptKind, FundingAttemptStatus,
+    OrderAttempt, OrderAttemptStatus, SettlementBatch, StrategyOrder, TrackedPosition,
 };
 
 const ORDER_ATTEMPT_COLUMNS: &str =
@@ -56,6 +56,17 @@ impl Persistence {
 
                 CREATE TABLE IF NOT EXISTS strategy_orders (
                     id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS option_positions (
+                    option_symbol TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS delivery_tasks (
+                    id TEXT PRIMARY KEY,
+                    option_symbol TEXT NOT NULL UNIQUE,
                     payload TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -143,7 +154,7 @@ impl Persistence {
 
     /// 保存本地策略订单快照。
     ///
-    /// 订单必须来自本机下单、恢复查询，或 Binance 当前持仓接管；不能由前端凭空创建。
+    /// 订单必须来自本机下单或恢复查询；净持仓与交割义务单独保存。
     pub fn save_order(&self, order: &StrategyOrder) -> AppResult<()> {
         let payload = serde_json::to_string(order)
             .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
@@ -240,17 +251,17 @@ impl Persistence {
     }
 
     /// 最后一笔状态和收尾计划一起保存；已有批次记录也可从成交事实重建该步骤。
-    pub fn save_batch_and_orders(
+    pub fn save_batch_and_deliveries(
         &self,
         batch: &SettlementBatch,
-        orders: &[StrategyOrder],
+        tasks: &[DeliveryTask],
     ) -> AppResult<()> {
         let transaction = self
             .connection
             .unchecked_transaction()
             .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
-        for order in orders {
-            self.save_order(order)?;
+        for task in tasks {
+            self.save_delivery_task(task)?;
         }
         self.save_settlement_batch(batch)?;
         transaction
@@ -258,15 +269,92 @@ impl Persistence {
             .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
     }
 
-    /// 删除本地策略订单快照。
-    pub fn delete_order(&self, order_id: &str) -> AppResult<()> {
-        self.connection
-            .execute(
-                "DELETE FROM strategy_orders WHERE id = ?1",
-                params![order_id],
-            )
+    pub fn list_positions(&self) -> AppResult<Vec<TrackedPosition>> {
+        self.read_payloads("SELECT payload FROM option_positions ORDER BY option_symbol")
+    }
+
+    pub fn list_delivery_tasks(&self) -> AppResult<Vec<DeliveryTask>> {
+        self.read_payloads("SELECT payload FROM delivery_tasks ORDER BY updated_at DESC")
+    }
+
+    fn read_payloads<T: serde::de::DeserializeOwned>(&self, sql: &str) -> AppResult<Vec<T>> {
+        let mut statement = self
+            .connection
+            .prepare(sql)
             .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        rows.map(|row| {
+            let payload =
+                row.map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+            serde_json::from_str(&payload)
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
+        })
+        .collect()
+    }
+
+    /// 净仓快照与首次到期义务一起提交；重复扫描不会重置已有交割任务。
+    pub fn save_position_sync(
+        &self,
+        positions: &[TrackedPosition],
+        tasks: &[DeliveryTask],
+    ) -> AppResult<()> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        for position in positions {
+            let payload = serde_json::to_string(position)
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+            self.connection
+                .execute(
+                    "INSERT INTO option_positions (option_symbol, payload) VALUES (?1, ?2)
+                 ON CONFLICT(option_symbol) DO UPDATE SET payload=excluded.payload",
+                    params![position.option_symbol, payload],
+                )
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        }
+        for task in tasks {
+            let payload = serde_json::to_string(task)
+                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+            self.connection.execute(
+                "INSERT INTO delivery_tasks (id, option_symbol, payload, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(id) DO NOTHING",
+                params![task.id, task.option_symbol, payload, task.updated_at.to_rfc3339()],
+            ).map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
+    }
+
+    pub fn save_delivery_task(&self, task: &DeliveryTask) -> AppResult<()> {
+        let payload = serde_json::to_string(task)
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        self.connection.execute(
+            "INSERT INTO delivery_tasks (id, option_symbol, payload, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
+            params![task.id, task.option_symbol, payload, task.updated_at.to_rfc3339()],
+        ).map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
         Ok(())
+    }
+
+    /// 固定现货客户端订单号与恢复记录必须在发送请求前原子落库。
+    pub fn save_delivery_and_attempt(
+        &self,
+        task: &DeliveryTask,
+        attempt: &OrderAttempt,
+    ) -> AppResult<()> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
+        self.save_delivery_task(task)?;
+        self.save_order_attempt(attempt)?;
+        transaction
+            .commit()
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))
     }
 
     /// 按更新时间倒序读取订单。

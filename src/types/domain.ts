@@ -11,24 +11,20 @@ export type DecimalString = string
 
 /** 双币赢策略方向，来自 Rust `StrategyDirection` 的 camelCase 序列化。 */
 export type StrategyDirection = 'sellPut' | 'sellCall'
-/** 本地订单状态，包含交易所状态归一化和现货补齐失败等本地状态。 */
+/** 本机订单的交易所状态，不代表当前持仓或交割进度。 */
 export type StrategyStatus
   = | 'pending'
-    | 'running'
-    | 'settled'
+    | 'filled'
     | 'cancelled'
     | 'rejected'
     | 'expired'
     | 'partiallyFilled'
-    | 'rebalanceFailed'
 /** 文件日志等级；日志内容必须是后端脱敏摘要。 */
 export type LogLevel = 'info' | 'warn' | 'error'
 /** 手动下单进度阶段，和 Rust 发出的脱敏进度事件保持一致。 */
 export type OrderProgressStage = 'validate' | 'funding' | 'risk' | 'submit' | 'persist'
 /** 手动下单进度状态，仅用于 UI 反馈，不作为订单事实。 */
 export type OrderProgressStatus = 'running' | 'success' | 'error'
-/** 本地跟踪订单来源；接管仓位和本机下单不能用订单号是否存在来推断。 */
-export type StrategyOrderSource = 'liveOrder' | 'adoptedPosition'
 /** 订单与现货补齐恢复记录的持久化状态。 */
 export type OrderAttemptStatus
   = | 'attempted'
@@ -108,7 +104,6 @@ export interface StrategyCandidate {
 /** 本地保存的真实策略订单。 */
 export interface StrategyOrder {
   id: string
-  source: StrategyOrderSource
   exchangeOrderId: string | null
   clientOrderId: string
   symbol: string
@@ -117,6 +112,7 @@ export interface StrategyOrder {
   status: StrategyStatus
   expiryAt: string
   strike: DecimalString
+  unit: DecimalString
   quantity: DecimalString
   filledQuantity: DecimalString
   avgPrice: DecimalString
@@ -126,44 +122,65 @@ export interface StrategyOrder {
   exchangeStatus: string
   createdAt: string
   updatedAt: string
-  settlementAction: LocalizedMessage
-  settlementPrice: DecimalString
-  settledAt: string | null
-  spotOrderId: string | null
-  spotClientOrderId: string
-  spotOrderStatus: string
-  rebalanceMessage: LocalizedMessage
-  spotFilledQuantity: DecimalString
-  spotAvgPrice: DecimalString
 }
 
-/** 可由本机接管监控的 Binance 当前期权持仓。 */
-export interface AdoptableOptionPositionView {
+export type PositionStatus = 'open' | 'closed' | 'expired'
+
+/** 完整合约代码对应账户的卖方净仓，数量以合约张数表示。 */
+export interface TrackedPosition {
+  optionSymbol: string
   symbol: string
   direction: StrategyDirection
+  status: PositionStatus
   expiryAt: string
   strike: DecimalString
+  unit: DecimalString
   quantity: DecimalString
   entryPrice: DecimalString
   markPrice: DecimalString
-  premium: DecimalString
-  alreadyTracked: boolean
-  adoptable: boolean
-  reason: LocalizedMessage
+  unrealizedPnl: DecimalString
+  trackedAt: string
+  lastSyncedAt: string
 }
 
-/** 接管 Binance 当前期权持仓请求。 */
-export interface AdoptOptionPositionsRequest {
-  symbols: string[]
-  confirmLive: boolean
+export interface PositionSyncStatus {
+  updatedAt: string | null
+  error: LocalizedMessage | null
 }
 
-/** 收益报告，图表构成由前端再派生。 */
+export type DeliveryStatus = 'waitingExercise' | 'ready' | 'executing' | 'completed' | 'failed'
+
+/** 仅为到期前已登记净仓生成的交割任务；行权事实未确认时保留 null。 */
+export interface DeliveryTask {
+  id: string
+  symbol: string
+  optionSymbol: string
+  direction: StrategyDirection
+  status: DeliveryStatus
+  expiryAt: string
+  trackedAt: string
+  strike: DecimalString
+  unit: DecimalString
+  lastPositionQuantity: DecimalString
+  quantity: DecimalString | null
+  settlementPrice: DecimalString | null
+  cashSettlement: DecimalString | null
+  exerciseRecordIds: string[]
+  spotOrderId: string | null
+  spotClientOrderId: string
+  spotOrderStatus: string
+  spotFilledQuantity: DecimalString
+  spotAvgPrice: DecimalString
+  message: LocalizedMessage
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+}
+
+/** 本机卖出权利金汇总，不代表账户累计收益。 */
 export interface PnlReport {
-  cumulative: DecimalString
-  today: DecimalString
-  optionPremium: DecimalString
-  floatingSpot: DecimalString
+  recordedPremium: DecimalString
+  todayRecordedPremium: DecimalString
   sellPutPremium: DecimalString
   sellCallPremium: DecimalString
 }
@@ -284,6 +301,9 @@ export interface AppSnapshot {
   account: AccountSnapshot
   candidates: StrategyCandidate[]
   orders: StrategyOrder[]
+  positions: TrackedPosition[]
+  deliveries: DeliveryTask[]
+  positionSync: PositionSyncStatus
   pnl: PnlReport
   portfolio: PortfolioSummary
   orderAttempts: OrderAttempt[]

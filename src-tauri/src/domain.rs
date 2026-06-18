@@ -41,31 +41,16 @@ impl StrategyDirection {
     }
 }
 
-/// 本地策略订单状态。
-///
-/// 状态既包含 Binance 期权订单状态的归一化，也包含到期补齐失败这类本地风控状态。
+/// 本机期权订单的交易所状态，不代表当前持仓或交割进度。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StrategyStatus {
     Pending,
-    Running,
-    Settled,
+    Filled,
     Cancelled,
     Rejected,
     Expired,
     PartiallyFilled,
-    RebalanceFailed,
-}
-
-/// 本地策略订单来源。
-///
-/// 接管持仓没有原始订单号，必须显式标记来源，避免启动加载和同步逻辑继续假设
-/// 所有可跟踪订单都来自本机下单响应。
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum StrategyOrderSource {
-    LiveOrder,
-    AdoptedPosition,
 }
 
 /// 前端设置页和导航状态需要展示的运行配置，不包含 API Key 或 Secret。
@@ -197,14 +182,11 @@ pub struct StrategyCandidate {
     pub strike_distance_percent: Decimal,
 }
 
-/// 本地持久化的真实策略订单。
-///
-/// 订单必须来自 Binance 接单结果或恢复查询结果，不能由前端或本地推断凭空创建。
+/// 本机提交的期权订单记录；成交历史不作为持仓或交割数量。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StrategyOrder {
     pub id: String,
-    pub source: StrategyOrderSource,
     pub exchange_order_id: Option<String>,
     pub client_order_id: String,
     pub symbol: String,
@@ -214,6 +196,8 @@ pub struct StrategyOrder {
     pub expiry_at: DateTime<Utc>,
     #[serde(with = "rust_decimal::serde::str")]
     pub strike: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub unit: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub quantity: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
@@ -229,38 +213,121 @@ pub struct StrategyOrder {
     pub exchange_status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    pub settlement_action: Message,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PositionStatus {
+    Open,
+    Closed,
+    Expired,
+}
+
+/// 一份数据库已绑定一个账户；完整合约代码唯一标识该账户的卖方净仓。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrackedPosition {
+    pub option_symbol: String,
+    pub symbol: String,
+    pub direction: StrategyDirection,
+    pub status: PositionStatus,
+    pub expiry_at: DateTime<Utc>,
     #[serde(with = "rust_decimal::serde::str")]
-    pub settlement_price: Decimal,
-    pub settled_at: Option<DateTime<Utc>>,
+    pub strike: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub unit: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub quantity: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub entry_price: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub mark_price: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub unrealized_pnl: Decimal,
+    pub tracked_at: DateTime<Utc>,
+    pub last_synced_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionSyncStatus {
+    pub updated_at: Option<DateTime<Utc>>,
+    pub error: Option<Message>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeliveryStatus {
+    WaitingExercise,
+    Ready,
+    Executing,
+    Completed,
+    Failed,
+}
+
+/// 仅从到期前已登记且未平仓的净仓创建。成交任务不随当前持仓消失而删除。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeliveryTask {
+    pub id: String,
+    pub symbol: String,
+    pub option_symbol: String,
+    pub direction: StrategyDirection,
+    pub status: DeliveryStatus,
+    pub expiry_at: DateTime<Utc>,
+    pub tracked_at: DateTime<Utc>,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub strike: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub unit: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub last_position_quantity: Decimal,
+    #[serde(with = "rust_decimal::serde::str_option")]
+    pub quantity: Option<Decimal>,
+    #[serde(with = "rust_decimal::serde::str_option")]
+    pub settlement_price: Option<Decimal>,
+    #[serde(with = "rust_decimal::serde::str_option")]
+    pub cash_settlement: Option<Decimal>,
+    pub exercise_record_ids: Vec<String>,
     pub spot_order_id: Option<String>,
     pub spot_client_order_id: String,
     pub spot_order_status: String,
-    pub rebalance_message: Message,
     #[serde(with = "rust_decimal::serde::str")]
     pub spot_filled_quantity: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub spot_avg_price: Decimal,
+    pub message: Message,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
 }
 
-/// 收益汇总。
-///
-/// 金额和按策略方向的合计均由 Rust 计算；前端只将这些结果转换为图形比例。
+impl DeliveryTask {
+    pub fn base_quantity(&self) -> AppResult<Decimal> {
+        self.quantity
+            .map(|quantity| quantity * self.unit)
+            .ok_or_else(|| AppError::Storage(crate::msg!("backend.deliveryFactsNotConfirmed")))
+    }
+
+    pub fn exercise_price(&self) -> AppResult<Decimal> {
+        self.settlement_price
+            .ok_or_else(|| AppError::Storage(crate::msg!("backend.deliveryFactsNotConfirmed")))
+    }
+}
+
+/// 本机卖出权利金汇总，不代表完整账户累计收益。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_field_names, reason = "IPC 字段明确标注权利金口径")]
 pub struct PnlReport {
     #[serde(with = "rust_decimal::serde::str")]
-    pub cumulative: Decimal,
+    pub recorded_premium: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
-    pub today: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub option_premium: Decimal,
+    pub today_recorded_premium: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub sell_put_premium: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub sell_call_premium: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub floating_spot: Decimal,
 }
 
 /// 下单恢复记录的状态机。
@@ -470,14 +537,14 @@ pub struct SettlementOptionFunding {
     pub expected_spot: Decimal,
 }
 
-/// 同一精确到期时间的持久化结算任务。成员按本地订单 ID 关联。
+/// 同一精确到期时间的持久化结算批次，成员是交割任务。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettlementBatch {
     pub id: String,
     pub symbol: String,
     pub expiry_at: DateTime<Utc>,
-    pub order_ids: Vec<String>,
+    pub task_ids: Vec<String>,
     pub stage: SettlementStage,
     pub message: Message,
     pub required: SettlementAssets,
@@ -840,46 +907,39 @@ pub struct ExchangeOrderAck {
     pub update_time: Option<DateTime<Utc>>,
 }
 
-/// Binance 期权当前持仓。
-///
-/// 接管外部订单时以当前持仓为事实来源；它不一定能反查到原始下单订单号。
+/// Binance 当前持仓数量保留符号：负数为卖方，正数为买方。
 #[derive(Clone, Debug)]
 pub struct OptionPosition {
     pub symbol: String,
-    pub side: String,
     pub quantity: Decimal,
     pub entry_price: Decimal,
     pub mark_price: Decimal,
-    pub update_time: Option<DateTime<Utc>>,
-}
-
-/// 可接管的 Binance 期权持仓视图。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AdoptableOptionPositionView {
-    pub symbol: String,
-    pub direction: StrategyDirection,
-    pub expiry_at: DateTime<Utc>,
-    #[serde(with = "rust_decimal::serde::str")]
+    pub unrealized_pnl: Decimal,
     pub strike: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub quantity: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub entry_price: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub mark_price: Decimal,
-    #[serde(with = "rust_decimal::serde::str")]
-    pub premium: Decimal,
-    pub already_tracked: bool,
-    pub adoptable: bool,
-    pub reason: Message,
+    pub expiry_at: DateTime<Utc>,
+    pub option_side: String,
+    pub quote_asset: String,
 }
 
-/// 期权行权记录中的结算价格。
+/// 账户行权事实；只读取交割与收益所需字段，不解析手续费。
 #[derive(Clone, Debug)]
 pub struct ExerciseRecord {
+    pub id: String,
     pub symbol: String,
     pub settlement_price: Decimal,
+    pub quantity: Decimal,
+    pub amount: Decimal,
+    pub created_at: DateTime<Utc>,
+    pub option_side: String,
+    pub position_side: String,
+}
+
+/// 同标的、同到期时刻共享的公开结算价；不提供任何账户结算数量。
+#[derive(Clone, Debug)]
+pub struct ExercisePrice {
+    pub underlying: String,
+    pub settlement_price: Decimal,
+    pub expiry_at: DateTime<Utc>,
 }
 
 /// 本地订单和恢复事实，加上最近一次成功刷新的账户展示缓存。
@@ -890,6 +950,9 @@ pub struct AppSnapshot {
     pub account: AccountSnapshot,
     pub candidates: Vec<StrategyCandidate>,
     pub orders: Vec<StrategyOrder>,
+    pub positions: Vec<TrackedPosition>,
+    pub deliveries: Vec<DeliveryTask>,
+    pub position_sync: PositionSyncStatus,
     pub pnl: PnlReport,
     pub portfolio: PortfolioSummary,
     pub order_attempts: Vec<OrderAttempt>,
@@ -950,14 +1013,4 @@ pub struct StrategyPreview {
     pub premium: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
     pub breakeven: Decimal,
-}
-
-/// 接管 Binance 当前期权持仓的请求。
-///
-/// 接管不会立即下单，但后续到期 ITM 时可能触发现货补齐，因此仍要求显式确认。
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AdoptOptionPositionsRequest {
-    pub symbols: Vec<String>,
-    pub confirm_live: bool,
 }

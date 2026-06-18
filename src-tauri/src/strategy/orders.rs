@@ -1,32 +1,33 @@
 //! 策略订单快照构造。
 //!
-//! 本模块把用户请求、Binance 订单回报或当前期权持仓转换成本地 `StrategyOrder`。
+//! 本模块把用户请求和 Binance 订单回报转换成本机成交历史，不创建净仓或交割任务。
 //! 权利金、年化和保本价统一从已保存的成交字段派生，构造、同步和读库展示使用同一口径。
-
-use crate::messages::Message;
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use uuid::Uuid;
 
-use super::candidates::{
-    breakeven_from_entry, direction_from_option_side, estimate_annualized, status_from_exchange,
-};
-use crate::domain::{
-    ExchangeOrderAck, OptionContract, OptionPosition, StrategyDirection, StrategyOrder,
-    StrategyOrderSource, StrategyRequest, StrategyStatus,
-};
+use super::candidates::{breakeven_from_entry, estimate_annualized, status_from_exchange};
+use crate::domain::{ExchangeOrderAck, StrategyOrder, StrategyRequest};
 
 /// 从下单请求和 Binance 订单回报构造本地订单。
 ///
 /// 成交数量、均价和交易所状态以 `ack` 为准；请求只提供策略方向和用户确认的参数。
-pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> StrategyOrder {
+pub fn order_from_request(
+    request: &StrategyRequest,
+    ack: &ExchangeOrderAck,
+    unit: Decimal,
+) -> StrategyOrder {
     let now = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
     let opened_at = ack.create_time.or(ack.update_time).unwrap_or(now);
-    let status = status_from_exchange(&ack.status, ack.executed_qty, ack.quantity);
+    let quantity = if ack.quantity > Decimal::ZERO {
+        ack.quantity
+    } else {
+        request.quantity
+    };
+    let status = status_from_exchange(&ack.status, ack.executed_qty, quantity);
     let mut order = StrategyOrder {
-        id: format!("LIVE-{}", Uuid::new_v4().simple()),
-        source: StrategyOrderSource::LiveOrder,
+        // 一份数据库只属于一个账户；同合约、同交易所订单的恢复必须复用原身份。
+        id: format!("OPTION-{}-{}", ack.symbol, ack.order_id),
         exchange_order_id: Some(ack.order_id.clone()),
         client_order_id: ack.client_order_id.clone(),
         symbol: request.symbol.clone(),
@@ -35,7 +36,8 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         status,
         expiry_at: request.expiry_at,
         strike: request.strike,
-        quantity: request.quantity,
+        unit,
+        quantity,
         filled_quantity: ack.executed_qty,
         avg_price: ack.avg_price,
         premium: Decimal::ZERO,
@@ -44,76 +46,17 @@ pub fn order_from_request(request: &StrategyRequest, ack: &ExchangeOrderAck) -> 
         exchange_status: ack.status.clone(),
         created_at: opened_at,
         updated_at: now,
-        settlement_action: match request.direction {
-            StrategyDirection::SellPut => {
-                crate::msg!("backend.ifExpiryPriceIsBelowStrikeAutomatically")
-            }
-            StrategyDirection::SellCall => {
-                crate::msg!("backend.ifExpiryPriceIsAboveStrikeAutomatically")
-            }
-        },
-        settlement_price: Decimal::ZERO,
-        settled_at: None,
-        spot_order_id: None,
-        spot_client_order_id: String::new(),
-        spot_order_status: String::new(),
-        rebalance_message: Message::default(),
-        spot_filled_quantity: Decimal::ZERO,
-        spot_avg_price: Decimal::ZERO,
     };
     refresh_order_metrics(&mut order);
     order
 }
 
-/// 从 Binance 当前期权持仓构造本地接管订单。
-///
-/// 接管订单可能没有原始订单号；后续同步会继续以当前持仓和到期行权记录为事实来源。
-pub fn order_from_adopted_position(
-    position: &OptionPosition,
-    contract: &OptionContract,
-) -> StrategyOrder {
-    let direction = direction_from_option_side(&contract.side)
-        .expect("validated option contract side before adoption");
-    let now = position.update_time.unwrap_or_else(Utc::now);
-    let mut order = StrategyOrder {
-        id: format!("ADOPT-{}", Uuid::new_v4().simple()),
-        source: StrategyOrderSource::AdoptedPosition,
-        exchange_order_id: None,
-        client_order_id: String::new(),
-        symbol: contract.underlying.clone(),
-        option_symbol: position.symbol.clone(),
-        direction,
-        status: StrategyStatus::Running,
-        expiry_at: contract.expiry_at,
-        strike: contract.strike_price,
-        quantity: position.quantity,
-        filled_quantity: position.quantity,
-        avg_price: position.entry_price,
-        premium: Decimal::ZERO,
-        annualized: Decimal::ZERO,
-        breakeven: Decimal::ZERO,
-        exchange_status: "POSITION".to_string(),
-        created_at: now,
-        updated_at: now,
-        settlement_action: match direction {
-            StrategyDirection::SellPut => {
-                crate::msg!("backend.adoptedPositionIfExpiryPriceIsBelow")
-            }
-            StrategyDirection::SellCall => {
-                crate::msg!("backend.adoptedPositionIfExpiryPriceIsAbove")
-            }
-        },
-        settlement_price: Decimal::ZERO,
-        settled_at: None,
-        spot_order_id: None,
-        spot_client_order_id: String::new(),
-        spot_order_status: String::new(),
-        rebalance_message: crate::msg!("backend.tookOverTheCurrentBinanceOptionPosition"),
-        spot_filled_quantity: Decimal::ZERO,
-        spot_avg_price: Decimal::ZERO,
-    };
-    refresh_order_metrics(&mut order);
-    order
+/// 只计算实际成交权利金；委托量或委托价不能替代成交事实。
+pub(super) fn filled_premium(order: &StrategyOrder) -> Decimal {
+    if order.filled_quantity <= Decimal::ZERO || order.avg_price <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+    (order.avg_price * order.filled_quantity).round_dp(2)
 }
 
 /// 刷新金融展示指标，不改写订单身份、成交数量或结算事实。
@@ -126,12 +69,17 @@ pub fn refresh_order_metrics(order: &mut StrategyOrder) {
         order.breakeven = Decimal::ZERO;
         return;
     }
-    order.premium = (order.avg_price * order.filled_quantity).round_dp(2);
-    order.breakeven = breakeven_from_entry(order.strike, order.avg_price, order.direction);
+    order.premium = filled_premium(order);
+    order.breakeven = if order.unit > Decimal::ZERO {
+        // 成交均价按合约张报价，执行价按 BTC 报价，先统一为每 BTC 权利金。
+        breakeven_from_entry(order.strike, order.avg_price / order.unit, order.direction)
+    } else {
+        Decimal::ZERO
+    };
     order.annualized = annualized_from_order_terms(
         order.premium,
         order.strike,
-        order.filled_quantity,
+        order.filled_quantity * order.unit,
         order.created_at,
         order.expiry_at,
     );

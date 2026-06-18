@@ -9,9 +9,8 @@ use rust_decimal_macros::dec;
 
 use super::funding::{spot_asset_free, spot_rebalance_required_asset};
 use crate::domain::{
-    AppError, AppResult, OptionAccountSnapshot, OptionContract, OptionMarkPrice,
-    SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyOrderSource, StrategyRequest,
-    StrategyStatus,
+    AppError, AppResult, DeliveryTask, OptionAccountSnapshot, OptionContract, OptionMarkPrice,
+    SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus,
 };
 use crate::strategy;
 
@@ -229,7 +228,7 @@ pub(super) fn enforce_risk_rules(
 
 /// 校验到期 ITM 后的现货补齐能力。
 pub(super) fn validate_spot_rebalance(
-    order: &StrategyOrder,
+    order: &DeliveryTask,
     account: &SpotAccountSnapshot,
 ) -> AppResult<()> {
     if !account.can_trade {
@@ -237,7 +236,7 @@ pub(super) fn validate_spot_rebalance(
             "backend.spotAccountCannotTradeExpiryRebalancingStopped"
         )));
     }
-    let (asset, required) = spot_rebalance_required_asset(order);
+    let (asset, required) = spot_rebalance_required_asset(order)?;
     let available = spot_asset_free(account, asset);
     if available < required {
         return Err(AppError::RiskRejected(crate::msg!(
@@ -259,31 +258,19 @@ pub(super) fn has_exchange_order_ref(order: &StrategyOrder) -> bool {
         || !order.client_order_id.trim().is_empty()
 }
 
-/// 判断订单是否可继续跟踪；接管订单可以没有交易所订单号。
-pub(super) fn is_trackable_order(order: &StrategyOrder) -> bool {
-    has_exchange_order_ref(order) || order.source == StrategyOrderSource::AdoptedPosition
-}
-
-/// 判断期权订单是否仍需要向交易所同步。
+/// 只轮询尚未终结的期权委托；成交后的净仓由独立同步负责。
 pub(super) fn should_sync_option_order(order: &StrategyOrder) -> bool {
-    is_trackable_order(order)
-        && order.settlement_price <= Decimal::ZERO
-        && order.spot_client_order_id.is_empty()
-        && !matches!(
+    has_exchange_order_ref(order)
+        && matches!(
             order.status,
-            StrategyStatus::Settled
-                | StrategyStatus::Rejected
-                | StrategyStatus::Expired
-                | StrategyStatus::Cancelled
-                | StrategyStatus::RebalanceFailed
+            StrategyStatus::Pending | StrategyStatus::PartiallyFilled
         )
 }
 
-/// 判断订单到期是否 ITM。
-pub(super) fn is_in_the_money(order: &StrategyOrder, settlement_price: Decimal) -> bool {
-    match order.direction {
-        StrategyDirection::SellPut => settlement_price < order.strike,
-        StrategyDirection::SellCall => settlement_price > order.strike,
+pub(super) fn is_in_the_money(task: &DeliveryTask, settlement_price: Decimal) -> bool {
+    match task.direction {
+        StrategyDirection::SellPut => settlement_price < task.strike,
+        StrategyDirection::SellCall => settlement_price > task.strike,
     }
 }
 

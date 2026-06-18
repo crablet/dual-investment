@@ -3,9 +3,11 @@
 // 这里只维护 UI 标签和组件 tone。Rust 侧返回日志与错误提示的消息代码和参数。
 
 import type {
+  DeliveryStatus,
   FundingAttemptStatus,
   LogLevel,
   OrderAttemptStatus,
+  PositionStatus,
   StrategyDirection,
   StrategyStatus,
 } from '@/types/domain'
@@ -25,24 +27,54 @@ export const directionToneMap: Record<StrategyDirection, 'success' | 'error'> = 
 
 export const statusTextMap: Record<StrategyStatus, string> = {
   get pending() { return t('ui.pendingFill') },
-  get running() { return t('ui.inProgress') },
-  get settled() { return t('ui.settled') },
+  get filled() { return t('ui.filled') },
   get cancelled() { return t('ui.cancelled') },
   get rejected() { return t('ui.rejected') },
   get expired() { return t('ui.expired') },
   get partiallyFilled() { return t('ui.partiallyFilled') },
-  get rebalanceFailed() { return t('ui.rebalancingFailed') },
 }
 
 export const statusToneMap: Record<StrategyStatus, 'default' | 'error' | 'info' | 'success' | 'warning'> = {
   pending: 'warning',
-  running: 'success',
-  settled: 'info',
+  filled: 'success',
   cancelled: 'default',
   rejected: 'error',
   expired: 'default',
   partiallyFilled: 'warning',
-  rebalanceFailed: 'error',
+}
+
+const positionStatusMessages: Record<PositionStatus, string> = {
+  open: 'ui.positionOpen',
+  closed: 'ui.positionClosed',
+  expired: 'ui.expired',
+}
+
+const deliveryStatusMessages: Record<DeliveryStatus, string> = {
+  waitingExercise: 'ui.deliveryWaitingExercise',
+  ready: 'ui.deliveryReady',
+  executing: 'ui.deliveryExecuting',
+  completed: 'ui.deliveryCompleted',
+  failed: 'ui.deliveryFailed',
+}
+
+const deliveryStatusTones: Record<DeliveryStatus, 'info' | 'success' | 'warning' | 'error'> = {
+  waitingExercise: 'warning',
+  ready: 'info',
+  executing: 'info',
+  completed: 'success',
+  failed: 'error',
+}
+
+export function positionStatusText(status: PositionStatus) {
+  return t(positionStatusMessages[status])
+}
+
+export function deliveryStatusText(status: DeliveryStatus) {
+  return t(deliveryStatusMessages[status])
+}
+
+export function deliveryStatusTone(status: DeliveryStatus) {
+  return deliveryStatusTones[status]
 }
 
 export const attemptStatusTextMap: Record<OrderAttemptStatus, string> = {

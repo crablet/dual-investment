@@ -41,8 +41,8 @@ export function buildMetrics(
     },
     {
       id: 'premium',
-      title: t('ui.todaySPremium'),
-      value: formatMetricMoney(pnl?.today),
+      title: t('ui.todayRecordedPremium'),
+      value: formatMetricMoney(pnl?.todayRecordedPremium),
       icon: 'coins',
       tone: 'gold',
     },

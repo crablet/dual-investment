@@ -16,11 +16,10 @@ mod strategy;
 
 use app_state::AppState;
 use commands::{
-    adopt_option_positions, clear_log_files, connect_binance, connect_saved_binance,
-    finish_settlement_sweep, forget_binance_credentials, get_app_snapshot, get_log_snapshot,
-    list_adoptable_option_positions, open_current_log_file, open_log_folder, place_manual_strategy,
-    preview_strategy, recover_funding_attempt, recover_order_attempt, resolve_funding_attempt,
-    run_settlement_scan, scan_candidates, sync_live_state,
+    clear_log_files, connect_binance, connect_saved_binance, finish_settlement_sweep,
+    forget_binance_credentials, get_app_snapshot, get_log_snapshot, open_current_log_file,
+    open_log_folder, place_manual_strategy, preview_strategy, recover_funding_attempt,
+    recover_order_attempt, resolve_funding_attempt, scan_candidates, sync_live_state,
 };
 use tauri::Manager;
 
@@ -46,10 +45,7 @@ pub fn run() {
             recover_funding_attempt,
             resolve_funding_attempt,
             finish_settlement_sweep,
-            list_adoptable_option_positions,
-            adopt_option_positions,
             sync_live_state,
-            run_settlement_scan,
             get_log_snapshot,
             open_current_log_file,
             open_log_folder,

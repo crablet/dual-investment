@@ -12,12 +12,12 @@ mod preview;
 
 pub use balances::{
     account_snapshot_from_balances, build_balances, build_simple_earn_balances,
-    build_spot_balances, pnl_report_from_orders_with_spot, portfolio_summary_from_orders,
+    build_spot_balances, pnl_report, portfolio_summary_from_positions,
 };
 pub use candidates::{
     CandidateBuildInputs, build_candidates, decimal_matches_step,
     option_sell_taker_limit_price_for_quantity, required_margin, status_from_exchange,
 };
 pub use margin::{DEFAULT_MARGIN_USAGE_TOLERANCE_POINTS, DEFAULT_MAX_MARGIN_USAGE};
-pub use orders::{order_from_adopted_position, order_from_request, refresh_order_metrics};
+pub use orders::{order_from_request, refresh_order_metrics};
 pub use preview::preview_strategy;

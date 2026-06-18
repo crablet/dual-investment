@@ -5,8 +5,6 @@
 
 import type { LocalizedMessage } from '@/i18n'
 import type {
-  AdoptableOptionPositionView,
-  AdoptOptionPositionsRequest,
   AppSettings,
   AppSnapshot,
   ConnectBinanceRequest,
@@ -47,9 +45,7 @@ type RequestKey
     | 'credentials'
     | 'scan'
     | 'sync'
-    | 'settlement'
     | 'recover'
-    | 'adopt'
     | 'order'
 
 /** 请求包装选项。silent 请求用于后台轮询，不清空前台错误提示。 */
@@ -80,9 +76,7 @@ function emptyPending(): Record<RequestKey, number> {
     credentials: 0,
     scan: 0,
     sync: 0,
-    settlement: 0,
     recover: 0,
-    adopt: 0,
     order: 0,
   }
 }
@@ -97,7 +91,6 @@ export const useAppStore = defineStore('app', () => {
   const activeView = shallowRef<AppViewId>('overview')
   const orderProgress = shallowRef<OrderProgressView>()
   const orderNotice = shallowRef<OrderProgressNotice>()
-  const adoptableOptionPositions = shallowRef<AdoptableOptionPositionView[]>([])
   const unlistenOrderProgress = shallowRef<(() => void)>()
   const autoReconnectState = shallowRef<AutoReconnectState>('idle')
   const autoReconnectAttempts = shallowRef(0)
@@ -110,15 +103,17 @@ export const useAppStore = defineStore('app', () => {
   const account = computed(() => snapshot.value?.account)
   const candidates = computed(() => snapshot.value?.candidates ?? [])
   const orders = computed(() => snapshot.value?.orders ?? [])
+  const positions = computed(() => snapshot.value?.positions ?? [])
+  const deliveries = computed(() => snapshot.value?.deliveries ?? [])
+  const positionSync = computed(() => snapshot.value?.positionSync)
   const pnl = computed(() => snapshot.value?.pnl)
   const portfolio = computed(() => snapshot.value?.portfolio)
   const orderAttempts = computed(() => snapshot.value?.orderAttempts ?? [])
   const fundingAttempts = computed(() => snapshot.value?.fundingAttempts ?? [])
   const settlementRecoveries = computed(() => snapshot.value?.settlementRecoveries ?? [])
-  const runningOrders = computed(() =>
-    orders.value.filter(order =>
-      (order.status === 'running' || order.status === 'partiallyFilled')
-      && isPositiveDecimalString(order.filledQuantity),
+  const openPositions = computed(() =>
+    positions.value.filter(position =>
+      position.status === 'open' && isPositiveDecimalString(position.quantity),
     ),
   )
   // 指标卡从快照派生，避免再通过 IPC 请求 Rust 做轻量 UI 聚合。
@@ -435,11 +430,6 @@ export const useAppStore = defineStore('app', () => {
     await refresh({ silent: true })
   }
 
-  async function runSettlementScan() {
-    await run('settlement', () => api.runSettlementScan())
-    await refresh({ silent: true })
-  }
-
   async function recoverAttempt(attemptId: string) {
     await run('recover', () => api.recoverOrderAttempt(attemptId))
     await refresh({ silent: true })
@@ -465,25 +455,6 @@ export const useAppStore = defineStore('app', () => {
       batchId,
       confirmManual: true,
     }))
-    await refresh({ silent: true })
-  }
-
-  async function loadAdoptableOptionPositions() {
-    const rows = await run('adopt', () => api.listAdoptableOptionPositions())
-    if (rows) {
-      adoptableOptionPositions.value = rows
-    }
-  }
-
-  async function adoptOptionPositions(request: AdoptOptionPositionsRequest) {
-    const orders = await run('adopt', () => api.adoptOptionPositions(request))
-    if (orders) {
-      adoptableOptionPositions.value = adoptableOptionPositions.value.map(row =>
-        request.symbols.includes(row.symbol)
-          ? { ...row, adoptable: false, alreadyTracked: true, reason: localized('ui.alreadyTrackedLocally') }
-          : row,
-      )
-    }
     await refresh({ silent: true })
   }
 
@@ -538,18 +509,20 @@ export const useAppStore = defineStore('app', () => {
     activeView,
     orderProgress,
     orderNotice,
-    adoptableOptionPositions,
     settings,
     metrics,
     account,
     candidates,
     orders,
+    positions,
+    deliveries,
+    positionSync,
     pnl,
     portfolio,
     orderAttempts,
     fundingAttempts,
     settlementRecoveries,
-    runningOrders,
+    openPositions,
     isLoading,
     bindOrderProgressEvents,
     disposeOrderProgressEvents,
@@ -562,13 +535,10 @@ export const useAppStore = defineStore('app', () => {
     forgetCredentials,
     scan,
     syncLiveState,
-    runSettlementScan,
     recoverAttempt,
     recoverFundingAttempt,
     resolveFundingAttempt,
     finishSettlementSweep,
-    loadAdoptableOptionPositions,
-    adoptOptionPositions,
     placeStrategy,
     openView,
     refreshViewData,

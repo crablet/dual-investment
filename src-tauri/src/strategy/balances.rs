@@ -1,33 +1,25 @@
 //! 账户资产和收益快照派生。
 //!
 //! 这里把期权保证金、现货和 Simple Earn 的真实账户快照转换成前端展示行，并按已保存订单
-//! 派生收益报告。无法估值的资产保留数量事实，但不参与 USDT 汇总。
+//! 汇总本机实际成交的卖出权利金。净仓与订单成交历史不能相互累加为同一义务。
+//! 无法估值的资产保留数量事实，但不参与 USDT 汇总。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use chrono::Local;
+use chrono::{Local, Utc};
 use rust_decimal::Decimal;
 
 use crate::domain::{
     AccountSnapshot, AssetBalance, BalanceRow, OptionAccountSnapshot, PnlReport, PortfolioSummary,
-    SimpleEarnSnapshot, SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyStatus,
+    PositionStatus, SimpleEarnSnapshot, SpotAccountSnapshot, StrategyDirection, StrategyOrder,
+    TrackedPosition,
 };
+
+use super::orders::filled_premium;
 
 struct BalanceValuation {
     usdt_value: Decimal,
     known: bool,
-}
-
-/// 构造空收益报告。
-fn empty_pnl_report() -> PnlReport {
-    PnlReport {
-        cumulative: Decimal::ZERO,
-        today: Decimal::ZERO,
-        option_premium: Decimal::ZERO,
-        sell_put_premium: Decimal::ZERO,
-        sell_call_premium: Decimal::ZERO,
-        floating_spot: Decimal::ZERO,
-    }
 }
 
 /// 按资产聚合各账户来源，缺少估值的整组不计入总额，和前端比例图保持相同口径。
@@ -73,24 +65,24 @@ pub fn account_snapshot_from_balances(balances: Vec<BalanceRow>) -> AccountSnaps
     }
 }
 
-/// 义务仓只累计真实成交数量；未成交的委托数量不形成持仓或名义本金。
-pub fn portfolio_summary_from_orders(orders: &[StrategyOrder]) -> PortfolioSummary {
+/// 当前义务只取未到期的卖方净仓，合约张数按 unit 折算为 BTC。
+pub fn portfolio_summary_from_positions(positions: &[TrackedPosition]) -> PortfolioSummary {
     let mut summary = PortfolioSummary::default();
-    for order in orders.iter().filter(|order| {
-        matches!(
-            order.status,
-            StrategyStatus::Running | StrategyStatus::PartiallyFilled
-        ) && order.filled_quantity > Decimal::ZERO
-    }) {
-        match order.direction {
+    let now = Utc::now();
+    for position in positions
+        .iter()
+        .filter(|position| position.status == PositionStatus::Open && position.expiry_at > now)
+    {
+        let base_quantity = position.quantity * position.unit;
+        match position.direction {
             StrategyDirection::SellPut => {
                 summary.put_count += 1;
-                summary.put_quantity += order.filled_quantity;
-                summary.put_notional += order.strike * order.filled_quantity;
+                summary.put_quantity += base_quantity;
+                summary.put_notional += position.strike * base_quantity;
             }
             StrategyDirection::SellCall => {
                 summary.call_count += 1;
-                summary.call_quantity += order.filled_quantity;
+                summary.call_quantity += base_quantity;
             }
         }
     }
@@ -247,56 +239,28 @@ fn simple_earn_ledger_assets(earn: &SimpleEarnSnapshot) -> HashSet<String> {
         .collect()
 }
 
-/// 从真实订单和现货价格派生收益报告。
+/// 汇总本机实际成交的卖出权利金，按日期和方向拆分。
 ///
-/// 权利金和现货补齐浮动盈亏都来自已保存订单字段；没有订单时返回空报告。
-pub fn pnl_report_from_orders_with_spot(
-    orders: &[StrategyOrder],
-    spot_price: Option<Decimal>,
-) -> PnlReport {
-    if orders.is_empty() {
-        return empty_pnl_report();
-    }
-
+/// 净仓均价不能倒推历史权利金。
+pub fn pnl_report(orders: &[StrategyOrder]) -> PnlReport {
     let mut sell_put_premium = Decimal::ZERO;
     let mut sell_call_premium = Decimal::ZERO;
+    let mut today_recorded_premium = Decimal::ZERO;
+    let today = Local::now().date_naive();
     for order in orders {
+        let premium = filled_premium(order);
         match order.direction {
-            StrategyDirection::SellPut => sell_put_premium += order.premium,
-            StrategyDirection::SellCall => sell_call_premium += order.premium,
+            StrategyDirection::SellPut => sell_put_premium += premium,
+            StrategyDirection::SellCall => sell_call_premium += premium,
+        }
+        if order.created_at.with_timezone(&Local).date_naive() == today {
+            today_recorded_premium += premium;
         }
     }
-    let option_premium = sell_put_premium + sell_call_premium;
-    let today = today_option_premium(orders);
-    let floating_spot = spot_price.map_or(Decimal::ZERO, |price| {
-        orders
-            .iter()
-            .filter(|order| {
-                order.direction == StrategyDirection::SellPut
-                    && order.spot_filled_quantity > Decimal::ZERO
-                    && order.spot_avg_price > Decimal::ZERO
-            })
-            .map(|order| (price - order.spot_avg_price) * order.spot_filled_quantity)
-            .sum::<Decimal>()
-            .round_dp(2)
-    });
-    let cumulative = option_premium + floating_spot;
     PnlReport {
-        cumulative,
-        today,
-        option_premium,
+        recorded_premium: sell_put_premium + sell_call_premium,
+        today_recorded_premium,
         sell_put_premium,
         sell_call_premium,
-        floating_spot,
     }
-}
-
-/// 按系统本地日期统计当天订单权利金，与前端日历的日期口径一致。
-fn today_option_premium(orders: &[StrategyOrder]) -> Decimal {
-    let today = Local::now().date_naive();
-    orders
-        .iter()
-        .filter(|order| order.created_at.with_timezone(&Local).date_naive() == today)
-        .map(|order| order.premium)
-        .sum::<Decimal>()
 }

@@ -9,27 +9,24 @@ use chrono::Utc;
 use rust_decimal::Decimal;
 
 use crate::domain::{
-    AppError, AppResult, BalanceRow, ExchangeOrderAck, OptionAccountSnapshot, OptionContract,
-    OptionPosition, OrderAttempt, OrderAttemptStatus, SettlementBatch, SimpleEarnSnapshot,
-    SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyRequest, StrategyStatus,
+    AppError, AppResult, BalanceRow, DeliveryStatus, DeliveryTask, ExchangeOrderAck,
+    OptionAccountSnapshot, OptionContract, OrderAttempt, OrderAttemptStatus, SettlementBatch,
+    SimpleEarnSnapshot, SpotAccountSnapshot, StrategyDirection, StrategyOrder, StrategyRequest,
 };
 use crate::strategy;
 
 /// 批次保留在后端，等待和收尾说明复用订单详情中的补齐结果。
-pub(super) fn apply_settlement_progress(orders: &mut [StrategyOrder], batches: &[SettlementBatch]) {
+pub(super) fn apply_settlement_progress(orders: &mut [DeliveryTask], batches: &[SettlementBatch]) {
     for batch in batches.iter().filter(|batch| !batch.stage.is_terminal()) {
         for order in orders
             .iter_mut()
-            .filter(|order| batch.order_ids.contains(&order.id))
+            .filter(|order| batch.task_ids.contains(&order.id))
         {
-            if order.rebalance_message.is_empty() {
-                order.rebalance_message.clone_from(&batch.message);
+            if order.message.is_empty() {
+                order.message.clone_from(&batch.message);
             } else {
-                order.rebalance_message = crate::msg!(
-                    "ui.joinSentence",
-                    p0 = order.rebalance_message,
-                    p1 = batch.message
-                );
+                order.message =
+                    crate::msg!("ui.joinSentence", p0 = order.message, p1 = batch.message);
             }
         }
     }
@@ -99,32 +96,19 @@ pub(super) fn is_unfilled_terminal_option_ack(ack: &ExchangeOrderAck) -> bool {
         )
 }
 
-/// 把 Binance 当前期权持仓应用到接管订单。
-pub(super) fn apply_option_position(order: &mut StrategyOrder, position: &OptionPosition) {
-    order.status = StrategyStatus::Running;
-    order.exchange_status = "POSITION".to_string();
-    order.quantity = position.quantity;
-    order.filled_quantity = position.quantity;
-    if position.entry_price > Decimal::ZERO {
-        order.avg_price = position.entry_price;
-    }
-    strategy::refresh_order_metrics(order);
-    order.updated_at = position.update_time.unwrap_or_else(Utc::now);
-}
-
 /// 把现货补齐订单回报应用到本地订单。
 ///
 /// 活跃现货单继续查询；只有终态成交不足或异常数量才进入失败状态。
-pub(super) fn apply_spot_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) {
+pub(super) fn apply_spot_ack(order: &mut DeliveryTask, ack: &ExchangeOrderAck) -> AppResult<()> {
     order.spot_order_status.clone_from(&ack.status);
     order.spot_filled_quantity = ack.executed_qty;
     order.spot_avg_price = ack.avg_price;
     order.updated_at = ack.update_time.or(ack.create_time).unwrap_or_else(Utc::now);
-    let expected = order.filled_quantity;
+    let expected = order.base_quantity()?;
     if ack.status == "FILLED" && ack.executed_qty == expected {
-        order.status = StrategyStatus::Settled;
-        order.settled_at = Some(Utc::now());
-        order.rebalance_message = crate::msg!(
+        order.status = DeliveryStatus::Completed;
+        order.completed_at = Some(Utc::now());
+        order.message = crate::msg!(
             "backend.spotRebalancingFullyFilledQuantityAverageStatus",
             p0 = ack.executed_qty,
             p1 = ack.avg_price,
@@ -135,8 +119,8 @@ pub(super) fn apply_spot_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) 
         "NEW" | "PARTIALLY_FILLED" | "PENDING_NEW"
     ) && ack.executed_qty < expected
     {
-        order.status = StrategyStatus::Running;
-        order.rebalance_message = crate::msg!(
+        order.status = DeliveryStatus::Executing;
+        order.message = crate::msg!(
             "backend.spotOrderIsStillFillingAwaitingThe",
             p0 = ack.executed_qty,
             p1 = expected
@@ -145,22 +129,23 @@ pub(super) fn apply_spot_ack(order: &mut StrategyOrder, ack: &ExchangeOrderAck) 
         ack.status.as_str(),
         "REJECTED" | "EXPIRED" | "CANCELED" | "CANCELLED"
     ) {
-        order.status = StrategyStatus::RebalanceFailed;
-        order.rebalance_message = crate::msg!(
+        order.status = DeliveryStatus::Failed;
+        order.message = crate::msg!(
             "backend.spotRebalancingIncompleteFilledStatus",
             p0 = ack.executed_qty,
             p1 = expected,
             p2 = ack.status
         );
     } else {
-        order.status = StrategyStatus::RebalanceFailed;
-        order.rebalance_message = crate::msg!(
+        order.status = DeliveryStatus::Failed;
+        order.message = crate::msg!(
             "backend.spotRebalancingNotFullyFilledStatus",
             p0 = ack.executed_qty,
             p1 = expected,
             p2 = ack.status
         );
     }
+    Ok(())
 }
 
 pub(super) fn is_spot_attempt(status: OrderAttemptStatus) -> bool {

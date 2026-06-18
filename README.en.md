@@ -2,7 +2,7 @@
   <img src="src-tauri/icons/128x128.png" width="80" height="80" alt="Dual Investment Assistant icon" />
   <h1>Dual Investment Assistant</h1>
   <p><strong>Manage BTC/USDT dual-investment-style strategies from your desktop.</strong></p>
-  <p>Work with Binance options and spot in one place: filter contracts, review orders, track positions, and manage expiry.</p>
+  <p>Work with Binance options and spot in one place: filter contracts, review orders, track short net positions, and automate delivery.</p>
   <p>Binance · BTC/USDT · 13 interface languages · <a href="LICENSE">AGPL-3.0-only</a></p>
   <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
   <p>
@@ -19,19 +19,20 @@
 
 ## From contract selection to settlement
 
-Dual Investment Assistant is for Binance users who want to select their own contracts, confirm orders, and track what happens through expiry. You choose the direction and quantity; the app brings the subsequent operations and their status into one workspace.
+Dual Investment Assistant is for BTC/USDT short-option strategies on a dedicated Binance account. You select contracts and confirm new orders; the app automatically synchronizes short net positions and handles delivery for obligations registered before expiry.
 
 | Capability | What you can do |
 | --- | --- |
 | Contract selection | Switch between selling puts to buy low and selling calls to sell high. Filter by expiry, annualized estimate, exercise probability, and distance from spot. |
 | Order review | Review estimated premium and breakeven before confirming the contract and quantity. Contracts with an active position are marked. |
-| Strategy tracking | View active strategies, options and spot positions, returns, and an expiry calendar. Manually adopt existing BTC/USDT short-option positions. |
-| Expiry handling | Follow cash settlement, spot rebalancing, and fund sweeps for confirmed strategies. Review exceptions and unconfirmed requests in the recovery center. |
-| Local storage | Store credentials in the system keyring, bind each local SQLite database to one account for orders and recovery records, and inspect logs in the app. |
+| Net position tracking | Automatically synchronize BTC/USDT short net positions on connection. Overview, holding badges, and the expiry calendar use contract positions; order history stays separate. |
+| Automatic delivery | Confirm exercise facts for obligations registered before expiry, then perform the required spot trades and funding steps. Follow delivery tasks and recovery records. |
+| Premium statistics | View locally recorded and today's sell premiums, with a Put/Call breakdown and fill history. |
+| Local storage | Store credentials in the system keyring. Each local SQLite database is bound to one account and stores orders, positions, delivery tasks, and recovery records. |
 | Multiple languages | Use any of 13 interface languages. Switching languages preserves forms and trading state. |
 
 > [!IMPORTANT]
-> **This is a live-trading client.** It currently supports Binance and BTC/USDT only, using options and spot trades; there is no paper-trading mode. New strategies require manual confirmation. Recovery, settlement, and funding steps for confirmed strategies may then continue in the background. Read the [trading safety guide](docs/trading-safety.md) before use.
+> **This is a live-trading client. Use a dedicated account.** Connecting automatically tracks BTC/USDT short net positions, excluding long positions. Obligations registered before expiry can trigger real spot orders in the background to replicate physical delivery. New option orders still require manual confirmation. Do not manually fulfill the same delivery through another terminal: the app may execute it again. Read the [trading safety guide](docs/trading-safety.md) before use.
 
 ## Quick start
 
@@ -70,12 +71,12 @@ The [build workflow](.github/workflows/build-desktop.yml) creates installers for
 
 ## Workflow
 
-1. **Connect your account** — Enter API credentials under **Settings → Binance connection**. Disable withdrawals and configure the required read, trading, Simple Earn, and Universal Transfer permissions.
+1. **Connect a dedicated account** — Enter API credentials under **Settings → Binance connection**. Disable withdrawals and configure the required read, trading, Simple Earn, and Universal Transfer permissions. The app automatically synchronizes unexpired BTC/USDT short net positions.
 2. **Choose a strategy** — Open **Dual investment**, choose buy-low or sell-high, filter contracts, and enter a quantity.
 3. **Review and submit** — Check the estimated premium and breakeven, then confirm in the review dialog to send a live order.
-4. **Track expiry handling** — Follow status in **Strategy orders** and **Overview**. Keep the app running and connected so it can process settlement and final funding steps. Use the recovery center to review exceptions.
+4. **Follow automatic delivery** — See net positions in **Overview**, and separate local order history and delivery tasks in **Strategy orders**. Keep the app running and connected to handle registered obligations. Use the recovery center to review exceptions.
 
-Options are cash-settled; the client performs any spot trades required by the strategy separately. Displayed annualized returns and premiums are estimates, not final fills or promised returns. The [usage guide](docs/usage.md) explains the workflow and calculation conventions.
+Binance options are cash-settled; the client executes separate real spot trades to replicate physical delivery. Registered obligations can resume after the app was offline across expiry. Positions or exercise history first discovered after expiry do not trigger retrospective delivery. Displayed annualized returns and premium estimates are not final fills or promised returns. See the [usage guide](docs/usage.md) for details.
 
 ## Use your preferred language
 

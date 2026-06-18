@@ -4,9 +4,9 @@
 //! 它负责实盘连接、快照聚合、下单门禁、订单恢复、到期结算、现货补齐和后台轮询。
 //! 业务计算放在 `strategy.rs`，交易所请求放在 `binance.rs`，凭据读写放在 `secrets.rs`。
 
-mod adoption;
 mod funding;
 mod orders;
+mod positions;
 mod progress;
 mod runtime;
 mod settlement;
@@ -33,36 +33,31 @@ use tauri::AppHandle;
 use tokio::sync::{Mutex as AsyncMutex, RwLock};
 use uuid::Uuid;
 
-use self::adoption::{
-    adoptable_position_view, ensure_position_can_be_adopted, is_short_position,
-    normalized_unique_symbols,
-};
 use self::funding::{
     option_funding_shortfall, option_idle_usdt_sweep_amount, round_down_funding_amount,
     round_up_funding_amount, spot_asset_free,
 };
 use self::orders::{
-    apply_option_ack, apply_option_position, apply_settlement_progress, apply_spot_ack,
-    combined_balances, is_spot_attempt, is_unfilled_terminal_option_ack,
-    request_from_option_attempt,
+    apply_option_ack, apply_settlement_progress, apply_spot_ack, combined_balances,
+    is_spot_attempt, is_unfilled_terminal_option_ack, request_from_option_attempt,
 };
 use self::progress::OrderProgressEmitter;
 use self::runtime::{make_client_order_id, make_spot_client_order_id, verify_binance_access};
 use self::validation::{
-    enforce_risk_rules, has_exchange_order_ref, is_in_the_money, is_trackable_order,
-    resolve_contract, should_sync_option_order, validate_contract_terms, validate_option_margin,
-    validate_request, validate_spot_rebalance,
+    enforce_risk_rules, is_in_the_money, resolve_contract, should_sync_option_order,
+    validate_contract_terms, validate_option_margin, validate_request, validate_spot_rebalance,
 };
 use crate::binance::BinanceClient;
 use crate::domain::{
-    AccountSnapshot, AdoptOptionPositionsRequest, AdoptableOptionPositionView, AppError, AppResult,
-    AppSettings, AppSnapshot, ConnectBinanceRequest, FundingAttempt, FundingAttemptKind,
+    AccountSnapshot, AppError, AppResult, AppSettings, AppSnapshot, ConnectBinanceRequest,
+    DeliveryStatus, DeliveryTask, FundingAttempt, FundingAttemptKind,
     FundingAttemptManualResolution, FundingAttemptStatus, FundingAttemptView, LogLevel,
-    LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OptionPosition,
-    OrderAttempt, OrderAttemptStatus, OrderProgressStage, OrderProgressStatus,
-    ResolveFundingAttemptRequest, SettlementBatch, SettlementStage, SimpleEarnRedemptionRecord,
-    SimpleEarnSnapshot, SimpleEarnSubscriptionRecord, SpotAccountSnapshot, StrategyCandidate,
-    StrategyOrder, StrategyRequest, StrategyStatus, UniversalTransferRecord,
+    LogSnapshot, OptionAccountSnapshot, OptionContract, OptionMarkPrice, OrderAttempt,
+    OrderAttemptStatus, OrderProgressStage, OrderProgressStatus, PositionStatus,
+    PositionSyncStatus, ResolveFundingAttemptRequest, SettlementBatch, SettlementStage,
+    SimpleEarnRedemptionRecord, SimpleEarnSnapshot, SimpleEarnSubscriptionRecord,
+    SpotAccountSnapshot, StrategyCandidate, StrategyOrder, StrategyRequest, TrackedPosition,
+    UniversalTransferRecord,
 };
 use crate::logs::LogStore;
 use crate::persistence::Persistence;
@@ -315,7 +310,7 @@ fn unique_history_match<T>(
 struct RuntimeConfig {
     client: Option<Arc<BinanceClient>>,
     account: AccountSnapshot,
-    spot_price: Option<Decimal>,
+    position_sync: PositionSyncStatus,
     /// 系统 keyring 是否存在完整凭据。
     saved_credentials: bool,
 }
@@ -325,7 +320,7 @@ impl Default for RuntimeConfig {
         Self {
             client: None,
             account: AccountSnapshot::default(),
-            spot_price: None,
+            position_sync: PositionSyncStatus::default(),
             saved_credentials: secrets::has_binance_credentials(),
         }
     }
@@ -347,11 +342,6 @@ impl RuntimeConfig {
         }
         match accounts {
             Ok(accounts) => {
-                self.spot_price = accounts
-                    .spot_prices
-                    .get("BTCUSDT")
-                    .copied()
-                    .filter(|price| *price > Decimal::ZERO);
                 let balances = combined_balances(
                     &accounts.option,
                     &accounts.spot,
@@ -387,6 +377,8 @@ pub struct AppState {
     runtime: Arc<RwLock<RuntimeConfig>>,
     candidates: Arc<RwLock<Vec<StrategyCandidate>>>,
     orders: Arc<RwLock<Vec<StrategyOrder>>>,
+    positions: Arc<RwLock<Vec<TrackedPosition>>>,
+    deliveries: Arc<RwLock<Vec<DeliveryTask>>>,
     persistence: Arc<Mutex<Persistence>>,
     logs: Arc<LogStore>,
     worker_started: Arc<AtomicBool>,
@@ -396,20 +388,20 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// 从 Tauri 应用数据目录创建状态，只加载仍可跟踪的订单。
+    /// 从应用数据目录加载委托、净仓和交割任务；不查询交易所或执行交易。
     pub fn new_in(data_dir: impl AsRef<Path>) -> AppResult<Self> {
         let data_dir = data_dir.as_ref();
         let persistence = Persistence::open_app_data(data_dir)?;
         let logs = LogStore::open_app_data(data_dir);
-        let orders = persistence
-            .list_orders()?
-            .into_iter()
-            .filter(is_trackable_order)
-            .collect();
+        let orders = persistence.list_orders()?;
+        let positions = persistence.list_positions()?;
+        let deliveries = persistence.list_delivery_tasks()?;
         let state = Self {
             runtime: Arc::new(RwLock::new(RuntimeConfig::default())),
             candidates: Arc::new(RwLock::new(Vec::new())),
             orders: Arc::new(RwLock::new(orders)),
+            positions: Arc::new(RwLock::new(positions)),
+            deliveries: Arc::new(RwLock::new(deliveries)),
             persistence: Arc::new(Mutex::new(persistence)),
             logs: Arc::new(logs),
             worker_started: Arc::new(AtomicBool::new(false)),
@@ -428,17 +420,19 @@ impl AppState {
     ///
     /// 只读取本地记录与最近一次账户展示缓存；账户接口失败不妨碍查看订单和恢复记录。
     pub async fn snapshot(&self) -> AppResult<AppSnapshot> {
-        let (settings, account, spot_price) = {
+        let (settings, account, position_sync) = {
             let runtime = self.runtime.read().await;
             (
                 runtime.settings(),
                 runtime.account.clone(),
-                runtime.spot_price,
+                runtime.position_sync.clone(),
             )
         };
         let candidates = self.candidates.read().await.clone();
-        let mut orders = self.orders.read().await.clone();
-        apply_settlement_progress(&mut orders, &self.settlement_batches()?);
+        let orders = self.orders.read().await.clone();
+        let positions = self.positions.read().await.clone();
+        let mut deliveries = self.deliveries.read().await.clone();
+        apply_settlement_progress(&mut deliveries, &self.settlement_batches()?);
         let (order_attempts, funding_attempts) = {
             let persistence = self
                 .persistence
@@ -455,10 +449,13 @@ impl AppState {
         Ok(AppSnapshot {
             account,
             candidates,
-            pnl: strategy::pnl_report_from_orders_with_spot(&orders, spot_price),
-            portfolio: strategy::portfolio_summary_from_orders(&orders),
+            pnl: strategy::pnl_report(&orders),
+            portfolio: strategy::portfolio_summary_from_positions(&positions),
             settings,
             orders,
+            positions,
+            deliveries,
+            position_sync,
             order_attempts,
             funding_attempts,
             settlement_recoveries: self.settlement_recoveries()?,
@@ -468,7 +465,7 @@ impl AppState {
     /// 使用用户输入凭据连接 Binance，并保存到系统 keyring。
     ///
     /// 连接阶段同时验证期权和现货账户权限，因为到期 ITM 后需要真实现货补齐能力。
-    /// 连接只验证账户并缓存客户端；独立的后台维护按既有订单事实推进到期处理。
+    /// 连接验证账户并同步净仓；独立的后台维护推进已登记义务的到期处理。
     pub async fn connect_binance(&self, request: ConnectBinanceRequest) -> AppResult<AppSettings> {
         let result = self.connect_binance_inner(request).await;
         if let Err(error) = &result {
@@ -498,10 +495,11 @@ impl AppState {
         let mut runtime = self.runtime.write().await;
         runtime.client = Some(Arc::new(client));
         runtime.account = AccountSnapshot::default();
-        runtime.spot_price = None;
+        runtime.position_sync = PositionSyncStatus::default();
         runtime.saved_credentials = true;
         let settings = runtime.settings();
         drop(runtime);
+        self.sync_positions_best_effort().await;
         self.record_log(
             "account.connected",
             &crate::msg!("backend.connectedToBinanceAccount"),
@@ -511,7 +509,7 @@ impl AppState {
 
     /// 使用系统 keyring 中的凭据连接 Binance。
     ///
-    /// 凭据只恢复连接；此前已确认订单的结算由应用后台定时推进，无需再次授权。
+    /// 恢复连接后同步卖方净仓；已登记义务由后台推进，无需再次授权。
     pub async fn connect_saved_binance(&self) -> AppResult<AppSettings> {
         let result = self.connect_saved_binance_inner().await;
         if let Err(error) = &result {
@@ -534,10 +532,11 @@ impl AppState {
         let mut runtime = self.runtime.write().await;
         runtime.client = Some(Arc::new(client));
         runtime.account = AccountSnapshot::default();
-        runtime.spot_price = None;
+        runtime.position_sync = PositionSyncStatus::default();
         runtime.saved_credentials = true;
         let settings = runtime.settings();
         drop(runtime);
+        self.sync_positions_best_effort().await;
         self.record_log(
             "account.connected.saved",
             &crate::msg!("backend.connectedToBinanceUsingSystemKeyringCredentials"),
@@ -562,7 +561,7 @@ impl AppState {
         let mut runtime = self.runtime.write().await;
         runtime.client = None;
         runtime.account = AccountSnapshot::default();
-        runtime.spot_price = None;
+        runtime.position_sync = PositionSyncStatus::default();
         runtime.saved_credentials = false;
         let settings = runtime.settings();
         drop(runtime);
@@ -650,7 +649,7 @@ impl AppState {
     /// 根据恢复记录重新查询 Binance 并恢复本地订单状态。
     ///
     /// 这里不会信任恢复记录里的本地状态来创建订单，必须重新查询交易所事实。
-    pub async fn recover_order_attempt(&self, attempt_id: String) -> AppResult<StrategyOrder> {
+    pub async fn recover_order_attempt(&self, attempt_id: String) -> AppResult<()> {
         let _trade_guard = self.trade_lock.lock().await;
         let attempt = self
             .persistence
@@ -660,16 +659,18 @@ impl AppState {
             .ok_or_else(|| AppError::Storage(crate::msg!("backend.recoveryRecordNotFound")))?;
 
         let linked_spot = self
-            .orders
+            .deliveries
             .read()
             .await
             .iter()
             .any(|order| order.spot_client_order_id == attempt.client_order_id);
         if is_spot_attempt(attempt.status) || linked_spot {
-            self.recover_spot_attempt(attempt).await
+            self.recover_spot_attempt(attempt).await?;
         } else {
-            self.recover_option_attempt(attempt).await
+            self.recover_option_attempt(attempt).await?;
+            self.sync_positions_best_effort().await;
         }
+        Ok(())
     }
 
     /// 根据资金恢复记录重新查询 Binance 历史并推进状态。
@@ -749,106 +750,17 @@ impl AppState {
         Ok(FundingAttemptView::from(attempt))
     }
 
-    /// 列出当前 Binance 期权持仓中可由本机接管监控的记录。
-    pub async fn list_adoptable_option_positions(
-        &self,
-    ) -> AppResult<Vec<AdoptableOptionPositionView>> {
-        let client = self.live_client().await?;
-        let contracts = client.exchange_info().await?;
-        let positions = client.option_positions().await?;
-        let orders = self.orders.read().await.clone();
-        let mut rows = positions
-            .iter()
-            .filter_map(|position| {
-                contracts
-                    .iter()
-                    .find(|contract| contract.symbol == position.symbol)
-                    .map(|contract| adoptable_position_view(position, contract, &orders))
-            })
-            .collect::<AppResult<Vec<_>>>()?;
-        rows.sort_by(|left, right| {
-            left.expiry_at
-                .cmp(&right.expiry_at)
-                .then_with(|| left.symbol.cmp(&right.symbol))
-        });
-        Ok(rows)
-    }
-
-    /// 把选中的 Binance 当前期权持仓接管为本地策略订单。
-    ///
-    /// 接管不发送交易所订单，但之后会进入本机同步、结算和现货补齐流程。
-    pub async fn adopt_option_positions(
-        &self,
-        request: AdoptOptionPositionsRequest,
-    ) -> AppResult<Vec<StrategyOrder>> {
-        if !request.confirm_live {
-            return Err(AppError::RiskRejected(crate::msg!(
-                "backend.takingOverOptionsRequiresExplicitConfirmationOf"
-            )));
-        }
-        let symbols = normalized_unique_symbols(&request.symbols)?;
-        let _maintenance_guard = self.maintenance_lock.lock().await;
-        let client = self.live_client().await?;
-        let contracts = client.exchange_info().await?;
-        let positions = client.option_positions().await?;
-        let mut adopted = Vec::new();
-
-        for symbol in symbols {
-            let position = positions
-                .iter()
-                .find(|position| position.symbol == symbol)
-                .ok_or_else(|| {
-                    AppError::RiskRejected(crate::msg!(
-                        "backend.notFoundInCurrentBinanceOptionPositions",
-                        p0 = symbol
-                    ))
-                })?;
-            let contract = contracts
-                .iter()
-                .find(|contract| contract.symbol == symbol)
-                .ok_or_else(|| {
-                    AppError::RiskRejected(crate::msg!(
-                        "backend.isNoLongerInBinanceExchangeinfoAnd",
-                        p0 = symbol
-                    ))
-                })?;
-            {
-                let orders = self.orders.read().await;
-                ensure_position_can_be_adopted(position, contract, &orders)?;
-            }
-            let order = strategy::order_from_adopted_position(position, contract);
-            self.save_order(&order).await?;
-            self.record_log(
-                "strategy.order.adopted",
-                &crate::msg!(
-                    "backend.tookOverFromCurrentBinanceOptionPositions",
-                    p0 = order.option_symbol,
-                    p1 = order.filled_quantity
-                ),
-            );
-            adopted.push(order);
-        }
-        Ok(adopted)
-    }
-
     /// 刷新订单和结算计划。页面刷新与重连不会发送资金动作。
     pub async fn sync_live_state(&self) -> AppResult<()> {
         {
             let _maintenance_guard = self.maintenance_lock.lock().await;
             let _trade_guard = self.trade_lock.lock().await;
             self.sync_live_orders().await?;
+            self.sync_option_positions().await?;
             self.discover_settlement_batches().await?;
         }
         // 估值只服务展示，等待账户接口时不持有交易和维护锁。
         self.refresh_accounts().await
-    }
-
-    /// 手动扫描与后台维护共用同一套既有订单结算流程。
-    pub async fn run_settlement_scan(&self) -> AppResult<Vec<StrategyOrder>> {
-        let _maintenance_guard = self.maintenance_lock.lock().await;
-        self.live_client().await?;
-        self.background_tick().await?;
-        Ok(self.orders.read().await.clone())
     }
 
     /// 返回设置页日志快照。
@@ -1249,8 +1161,11 @@ impl AppState {
             return Err(AppError::response(message));
         }
 
-        let order = strategy::order_from_request(&request, &ack);
-        if let Err(error) = self.save_order(&order).await {
+        let order = strategy::order_from_request(&request, &ack, contract.unit);
+        attempt.status = OrderAttemptStatus::Persisted;
+        attempt.message = crate::msg!("backend.exchangeOrderAndLocalOrderRecordBoth");
+        attempt.updated_at = Utc::now();
+        if let Err(error) = self.save_option_and_attempt(&order, &attempt).await {
             attempt.status = OrderAttemptStatus::PersistFailed;
             attempt.message = crate::msg!("backend.exchangeOrderCreatedButLocalOrderSave");
             attempt.updated_at = Utc::now();
@@ -1270,19 +1185,6 @@ impl AppState {
             )));
         }
 
-        attempt.status = OrderAttemptStatus::Persisted;
-        attempt.message = crate::msg!("backend.exchangeOrderAndLocalOrderRecordBoth");
-        attempt.updated_at = Utc::now();
-        if let Err(error) = self.save_order_attempt(&attempt) {
-            progress.emit(
-                OrderProgressStage::Persist,
-                OrderProgressStatus::Error,
-                error.message(),
-                Some(&contract.symbol),
-                Some(&ack.order_id),
-            );
-            return Err(error);
-        }
         self.record_log(
             "strategy.order.manual.created",
             &crate::msg!(
@@ -1304,6 +1206,7 @@ impl AppState {
             Some(&contract.symbol),
             Some(&ack.order_id),
         );
+        self.sync_positions_best_effort().await;
         self.sweep_option_idle_usdt_best_effort(
             &client,
             &crate::msg!("backend.fundSweepAfterOptionOrder"),
@@ -1348,13 +1251,12 @@ impl AppState {
                 AppError::RiskRejected(crate::msg!("backend.theRecoveryContractIsNoLongerIn"))
             })?;
         let request = request_from_option_attempt(&attempt, &ack, contract)?;
-        let order = strategy::order_from_request(&request, &ack);
-        self.save_order(&order).await?;
+        let order = strategy::order_from_request(&request, &ack, contract.unit);
         attempt.status = OrderAttemptStatus::Persisted;
         attempt.exchange_order_id = Some(ack.order_id.clone());
         attempt.message = crate::msg!("backend.queriedBinanceAndRestoredTheOrderRecord");
         attempt.updated_at = Utc::now();
-        self.save_order_attempt(&attempt)?;
+        self.save_option_and_attempt(&order, &attempt).await?;
         self.record_log(
             "strategy.order.recovered",
             &crate::msg!(
@@ -1367,8 +1269,8 @@ impl AppState {
 
     /// 恢复现货补齐尝试记录。
     ///
-    /// 现货补齐必须找到对应期权订单，不能单独生成一条脱离策略的现货记录。
-    async fn recover_spot_attempt(&self, mut attempt: OrderAttempt) -> AppResult<StrategyOrder> {
+    /// 现货补齐必须找到对应交割任务，不能单独生成一条脱离交割任务的现货记录。
+    async fn recover_spot_attempt(&self, mut attempt: OrderAttempt) -> AppResult<DeliveryTask> {
         let client = self.live_client().await?;
         let ack = client
             .query_spot_order(
@@ -1378,7 +1280,7 @@ impl AppState {
             )
             .await?;
         let mut order = {
-            let orders = self.orders.read().await;
+            let orders = self.deliveries.read().await;
             orders
                 .iter()
                 .find(|order| order.spot_client_order_id == attempt.client_order_id)
@@ -1390,12 +1292,12 @@ impl AppState {
 
         order.spot_order_id = Some(ack.order_id.clone());
         order.spot_client_order_id = attempt.client_order_id.clone();
-        apply_spot_ack(&mut order, &ack);
+        apply_spot_ack(&mut order, &ack)?;
         attempt.status = OrderAttemptStatus::SpotPersisted;
         attempt.exchange_order_id = Some(ack.order_id.clone());
         attempt.message = crate::msg!("backend.queriedBinanceSpotOrderAndRestoredRebalancing");
         attempt.updated_at = Utc::now();
-        self.save_settlement_order(&order, &attempt).await?;
+        self.save_delivery_and_attempt(&order, &attempt).await?;
         self.record_log(
             "strategy.rebalance.recovered",
             &crate::msg!(
@@ -1417,28 +1319,8 @@ impl AppState {
             .filter(|order| should_sync_option_order(order))
             .cloned()
             .collect::<Vec<_>>();
-        // 接管单共享同一轮持仓事实；查询失败时保留旧状态，不把失败当作持仓消失。
-        let positions = if orders.iter().any(|order| !has_exchange_order_ref(order)) {
-            match client.option_positions().await {
-                Ok(positions) => Some(positions),
-                Err(error) => {
-                    self.record_warning("strategy.position.sync_failed", &error.message());
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        for mut order in orders {
-            let result = if has_exchange_order_ref(&order) {
-                self.sync_single_order(&client, order.clone()).await
-            } else if let Some(positions) = &positions {
-                Self::sync_adopted_position_order(&mut order, positions);
-                self.save_order(&order).await
-            } else {
-                continue;
-            };
-            if let Err(error) = result {
+        for order in orders {
+            if let Err(error) = self.sync_single_order(&client, order.clone()).await {
                 self.record_warning(
                     "strategy.order.sync_failed",
                     &crate::msg!("backend.syncFailed", p0 = order.option_symbol, p1 = error),
@@ -1461,35 +1343,8 @@ impl AppState {
                 Some(&order.client_order_id),
             )
             .await?;
-        if is_unfilled_terminal_option_ack(&ack) {
-            self.delete_order(&order.id).await?;
-            self.record_log(
-                "strategy.order.unfilled_removed",
-                &crate::msg!(
-                    "backend.exchangeStatusWithNoFillRemovedFrom",
-                    p0 = order.option_symbol,
-                    p1 = ack.status
-                ),
-            );
-            return Ok(());
-        }
         apply_option_ack(&mut order, &ack);
         self.save_order(&order).await
-    }
-
-    /// 未到期持仓消失才停止接管；到期后的持仓移除仍须等行权记录确认。
-    fn sync_adopted_position_order(order: &mut StrategyOrder, positions: &[OptionPosition]) {
-        let position = positions
-            .iter()
-            .find(|position| position.symbol == order.option_symbol && is_short_position(position));
-        if let Some(position) = position {
-            apply_option_position(order, position);
-        } else if Utc::now() < order.expiry_at {
-            order.status = StrategyStatus::Cancelled;
-            order.exchange_status = "POSITION_CLOSED".to_string();
-            order.updated_at = Utc::now();
-            order.rebalance_message = crate::msg!("backend.theBinanceOptionPositionNoLongerExists");
-        }
     }
 
     /// 后台轮询任务的一次 tick。
@@ -1503,6 +1358,7 @@ impl AppState {
         self.recover_pending_settlement_orders().await?;
         let _trade_guard = self.trade_lock.lock().await;
         self.sync_live_orders().await?;
+        self.sync_positions_best_effort().await;
         self.discover_settlement_batches().await?;
         self.advance_settlement_batches().await?;
         Ok(())
@@ -1567,17 +1423,21 @@ impl AppState {
         Ok(())
     }
 
-    /// 删除本地订单快照，并同步更新内存缓存。
-    async fn delete_order(&self, order_id: &str) -> AppResult<()> {
-        {
-            let persistence = self
-                .persistence
-                .lock()
-                .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?;
-            persistence.delete_order(order_id)?;
-        }
+    async fn save_option_and_attempt(
+        &self,
+        order: &StrategyOrder,
+        attempt: &OrderAttempt,
+    ) -> AppResult<()> {
+        self.persistence
+            .lock()
+            .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
+            .save_order_and_attempt(order, attempt)?;
         let mut orders = self.orders.write().await;
-        orders.retain(|order| order.id != order_id);
+        if let Some(stored) = orders.iter_mut().find(|stored| stored.id == order.id) {
+            *stored = order.clone();
+        } else {
+            orders.insert(0, order.clone());
+        }
         Ok(())
     }
 

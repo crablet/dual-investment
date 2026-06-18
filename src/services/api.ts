@@ -5,8 +5,6 @@
 
 import type { LocalizedMessage } from '@/i18n'
 import type {
-  AdoptableOptionPositionView,
-  AdoptOptionPositionsRequest,
   AppSettings,
   AppSnapshot,
   CommandErrorPayload,
@@ -88,19 +86,14 @@ export const api = {
   placeManualStrategy: (request: StrategyRequest) =>
     call<StrategyOrder>('place_manual_strategy', { request }),
   recoverOrderAttempt: (attemptId: string) =>
-    call<StrategyOrder>('recover_order_attempt', { attemptId }),
+    call<void>('recover_order_attempt', { attemptId }),
   recoverFundingAttempt: (attemptId: string) =>
     call<FundingAttemptView>('recover_funding_attempt', { attemptId }),
   resolveFundingAttempt: (request: ResolveFundingAttemptRequest) =>
     call<FundingAttemptView>('resolve_funding_attempt', { request }),
   finishSettlementSweep: (request: FinishSettlementSweepRequest) =>
     call<SettlementRecoveryView>('finish_settlement_sweep', { request }),
-  listAdoptableOptionPositions: () =>
-    call<AdoptableOptionPositionView[]>('list_adoptable_option_positions'),
-  adoptOptionPositions: (request: AdoptOptionPositionsRequest) =>
-    call<StrategyOrder[]>('adopt_option_positions', { request }),
   syncLiveState: () => call<void>('sync_live_state'),
-  runSettlementScan: () => call<StrategyOrder[]>('run_settlement_scan'),
   getLogSnapshot: () => call<LogSnapshot>('get_log_snapshot'),
   openCurrentLogFile: () => call<void>('open_current_log_file'),
   openLogFolder: () => call<void>('open_log_folder'),

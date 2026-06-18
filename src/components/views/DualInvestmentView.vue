@@ -43,7 +43,7 @@ interface ManualOrderReview {
 
 const store = useAppStore()
 // 完整合约代码区分到期日、执行价和 Put/Call，避免把同价的其他合约也标成持仓。
-const heldOptionSymbols = computed(() => new Set(store.runningOrders.map(order => order.optionSymbol)))
+const heldOptionSymbols = computed(() => new Set(store.openPositions.map(position => position.optionSymbol)))
 const { money, percent, signedPercent } = useFormat()
 const {
   form,

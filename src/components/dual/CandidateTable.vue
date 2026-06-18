@@ -1,7 +1,7 @@
 <!--
 候选机会表格。
 
-展示父级传入的候选和策略持仓标识；排序切换和选中操作通过事件交回父级。
+展示父级传入的候选和卖方净仓标识；排序切换和选中操作通过事件交回父级。
 -->
 <script setup lang="ts">
 import type {
@@ -76,7 +76,7 @@ const { money, percent, signedPercent } = useFormat()
             size="small"
             type="warning"
             :bordered="false"
-            :title="t('ui.thisContractAlreadyHasAnActiveStrategy')"
+            :title="t('ui.openShortPositions')"
           > {{ t('ui.position') }} </NTag>
         </span>
         <em> {{ t('ui.fromSpot') }} {{ signedPercent(candidate.strikeDistancePercent) }}

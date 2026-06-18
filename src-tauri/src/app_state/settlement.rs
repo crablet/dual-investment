@@ -7,24 +7,17 @@ use std::collections::BTreeMap;
 
 use super::funding::{settlement_required_assets, spot_has_settlement_assets};
 use super::{
-    AppError, AppResult, AppState, BinanceClient, Decimal, Duration,
+    AppError, AppResult, AppState, BinanceClient, Decimal, DeliveryStatus, DeliveryTask, Duration,
     OPTION_IDLE_USDT_SWEEP_MIN_AMOUNT, OrderAttempt, OrderAttemptStatus,
-    SETTLEMENT_SWEEP_DELAY_MINUTES, SettlementBatch, SettlementStage, SpotAccountSnapshot,
-    StrategyOrder, StrategyStatus, Utc, Uuid, apply_spot_ack, is_in_the_money,
-    make_spot_client_order_id, option_idle_usdt_sweep_amount, round_down_funding_amount,
-    spot_asset_free, validate_spot_rebalance,
+    SETTLEMENT_SWEEP_DELAY_MINUTES, SettlementBatch, SettlementStage, SpotAccountSnapshot, Utc,
+    Uuid, apply_spot_ack, is_in_the_money, make_spot_client_order_id,
+    option_idle_usdt_sweep_amount, round_down_funding_amount, spot_asset_free,
+    validate_spot_rebalance,
 };
 use crate::domain::SettlementAssets;
 
-fn needs_settlement(order: &StrategyOrder) -> bool {
-    order.filled_quantity > Decimal::ZERO
-        && matches!(
-            order.status,
-            StrategyStatus::Running
-                | StrategyStatus::PartiallyFilled
-                | StrategyStatus::Pending
-                | StrategyStatus::RebalanceFailed
-        )
+fn needs_settlement(task: &DeliveryTask) -> bool {
+    task.status != DeliveryStatus::Completed
 }
 
 fn spot_assets(spot: &SpotAccountSnapshot) -> SettlementAssets {
@@ -36,6 +29,64 @@ fn spot_assets(spot: &SpotAccountSnapshot) -> SettlementAssets {
 
 fn sweep_started(batch: &SettlementBatch) -> bool {
     batch.option_sweep_usdt.is_some() || batch.spot_sweep.is_some()
+}
+
+struct ExerciseFacts {
+    quantity: Decimal,
+    price: Decimal,
+    cash: Decimal,
+    ids: Vec<String>,
+}
+
+fn exercise_facts(
+    task: &DeliveryTask,
+    records: &[crate::domain::ExerciseRecord],
+) -> AppResult<Option<ExerciseFacts>> {
+    let mut unique = BTreeMap::<String, &crate::domain::ExerciseRecord>::new();
+    for record in records.iter().filter(|record| {
+        record.symbol == task.option_symbol
+            && record.position_side == "SHORT"
+            && record.option_side == task.direction.option_type()
+            && record.created_at >= task.expiry_at
+            && record.created_at <= task.expiry_at + Duration::days(2)
+    }) {
+        if record.quantity == Decimal::ZERO
+            || record.settlement_price <= Decimal::ZERO
+            || record.id.is_empty()
+        {
+            return Err(AppError::response(crate::msg!(
+                "backend.exerciseFactsInconsistent"
+            )));
+        }
+        if let Some(old) = unique.insert(record.id.clone(), record)
+            && (old.quantity != record.quantity
+                || old.settlement_price != record.settlement_price
+                || old.amount != record.amount
+                || old.created_at != record.created_at)
+        {
+            return Err(AppError::response(crate::msg!(
+                "backend.exerciseFactsInconsistent"
+            )));
+        }
+    }
+    let Some(first) = unique.values().next() else {
+        return Ok(None);
+    };
+    let price = first.settlement_price;
+    if unique
+        .values()
+        .any(|record| record.settlement_price != price)
+    {
+        return Err(AppError::response(crate::msg!(
+            "backend.exerciseFactsInconsistent"
+        )));
+    }
+    Ok(Some(ExerciseFacts {
+        quantity: unique.values().map(|record| record.quantity.abs()).sum(),
+        cash: unique.values().map(|record| record.amount).sum(),
+        price,
+        ids: unique.into_keys().collect(),
+    }))
 }
 
 impl AppState {
@@ -76,8 +127,10 @@ impl AppState {
     /// 已到期的义务和待完成批次都会预留资产，包括等待人工处理的批次。
     pub(super) async fn settlement_reserves_assets(&self) -> AppResult<bool> {
         let now = Utc::now();
-        Ok(self
-            .orders
+        Ok(self.positions.read().await.iter().any(|position| {
+            position.status == super::PositionStatus::Open && position.expiry_at <= now
+        }) || self
+            .deliveries
             .read()
             .await
             .iter()
@@ -89,7 +142,7 @@ impl AppState {
     }
 
     pub(super) async fn discover_settlement_batches(&self) -> AppResult<()> {
-        let orders = self.orders.read().await.clone();
+        let orders = self.deliveries.read().await.clone();
         let mut groups = BTreeMap::<_, Vec<String>>::new();
         for order in orders
             .iter()
@@ -105,15 +158,15 @@ impl AppState {
             ids.sort();
             let id = format!("settlement-{symbol}-{}", expiry_at.timestamp_millis());
             if let Some(batch) = existing.iter().find(|batch| batch.id == id) {
-                if ids.iter().any(|id| !batch.order_ids.contains(id)) {
+                if ids.iter().any(|id| !batch.task_ids.contains(id)) {
                     let mut batch = batch.clone();
                     if batch.stage == SettlementStage::WaitingExercise {
                         for id in ids {
-                            if !batch.order_ids.contains(&id) {
-                                batch.order_ids.push(id);
+                            if !batch.task_ids.contains(&id) {
+                                batch.task_ids.push(id);
                             }
                         }
-                        batch.order_ids.sort();
+                        batch.task_ids.sort();
                         self.save_batch(&mut batch)?;
                     } else {
                         self.update_batch(
@@ -130,7 +183,7 @@ impl AppState {
                 id,
                 symbol,
                 expiry_at,
-                order_ids: ids,
+                task_ids: ids,
                 stage: SettlementStage::WaitingExercise,
                 message: crate::msg!("backend.waitingForExpiryAndBinanceExerciseRecords"),
                 required: SettlementAssets::default(),
@@ -147,10 +200,10 @@ impl AppState {
         Ok(())
     }
 
-    async fn batch_orders(&self, batch: &SettlementBatch) -> AppResult<Vec<StrategyOrder>> {
-        let orders = self.orders.read().await;
+    async fn batch_tasks(&self, batch: &SettlementBatch) -> AppResult<Vec<DeliveryTask>> {
+        let orders = self.deliveries.read().await;
         batch
-            .order_ids
+            .task_ids
             .iter()
             .map(|id| {
                 orders
@@ -241,10 +294,10 @@ impl AppState {
         client: &BinanceClient,
         batch: &mut SettlementBatch,
     ) -> AppResult<()> {
-        let mut orders = self.batch_orders(batch).await?;
+        let mut orders = self.batch_tasks(batch).await?;
         if orders
             .iter()
-            .any(|order| order.status == StrategyStatus::RebalanceFailed)
+            .any(|order| order.status == DeliveryStatus::Failed)
         {
             return self.update_batch(
                 batch,
@@ -255,7 +308,7 @@ impl AppState {
         // 即使上轮在保存最后一笔成交后退出，也能从持久化成员事实恢复收尾。
         if orders
             .iter()
-            .all(|order| order.status == StrategyStatus::Settled)
+            .all(|order| order.status == DeliveryStatus::Completed)
         {
             self.schedule_batch_sweep(batch, &orders)?;
             return self.sweep_settlement_batch(client, batch).await;
@@ -272,12 +325,10 @@ impl AppState {
         }
         // 先查询已发送的原单。不能用尚未确认的成交数量重新计算赎回缺口。
         for order in orders.iter().filter(|order| {
-            order.status != StrategyStatus::Settled && !order.spot_client_order_id.is_empty()
+            order.status != DeliveryStatus::Completed && !order.spot_client_order_id.is_empty()
         }) {
-            let updated = self
-                .rebalance_settlement_order(client, order.clone())
-                .await?;
-            if updated.status != StrategyStatus::Settled {
+            let updated = self.rebalance_delivery_task(client, order.clone()).await?;
+            if updated.status != DeliveryStatus::Completed {
                 return self.update_batch(
                     batch,
                     SettlementStage::ConfirmingOrders,
@@ -285,8 +336,8 @@ impl AppState {
                 );
             }
         }
-        orders = self.batch_orders(batch).await?;
-        batch.required = settlement_required_assets(&orders);
+        orders = self.batch_tasks(batch).await?;
+        batch.required = settlement_required_assets(&orders)?;
         if !self.prepare_batch_funding(client, batch).await? {
             return Ok(());
         }
@@ -297,13 +348,13 @@ impl AppState {
         )?;
         for order in orders
             .into_iter()
-            .filter(|order| order.status != StrategyStatus::Settled)
+            .filter(|order| order.status != DeliveryStatus::Completed)
         {
             if self.pending_recovery_count()? > 0 {
                 break;
             }
             let account = client.spot_account().await?;
-            let remaining = settlement_required_assets(&self.batch_orders(batch).await?);
+            let remaining = settlement_required_assets(&self.batch_tasks(batch).await?)?;
             if !spot_has_settlement_assets(&account, &remaining) {
                 return self.update_batch(
                     batch,
@@ -311,8 +362,8 @@ impl AppState {
                     &crate::msg!("backend.actualFillsOrExternalBalanceChangesLeft"),
                 );
             }
-            let updated = self.rebalance_settlement_order(client, order).await?;
-            if updated.status != StrategyStatus::Settled {
+            let updated = self.rebalance_delivery_task(client, order).await?;
+            if updated.status != DeliveryStatus::Completed {
                 return self.update_batch(
                     batch,
                     SettlementStage::ConfirmingOrders,
@@ -320,10 +371,10 @@ impl AppState {
                 );
             }
         }
-        let orders = self.batch_orders(batch).await?;
+        let orders = self.batch_tasks(batch).await?;
         if orders
             .iter()
-            .all(|order| order.status == StrategyStatus::Settled)
+            .all(|order| order.status == DeliveryStatus::Completed)
         {
             self.schedule_batch_sweep(batch, &orders)?;
         }
@@ -333,28 +384,59 @@ impl AppState {
     async fn confirm_batch_exercise(
         &self,
         client: &BinanceClient,
-        orders: &mut [StrategyOrder],
+        tasks: &mut [DeliveryTask],
     ) -> AppResult<bool> {
         let mut ready = true;
-        for order in orders
+        for task in tasks
             .iter_mut()
-            .filter(|order| order.status != StrategyStatus::Settled)
+            .filter(|task| task.status == DeliveryStatus::WaitingExercise)
         {
-            if order.settlement_price <= Decimal::ZERO {
-                let Some(price) = self.settlement_price(client, order).await? else {
+            let records = client
+                .exercise_records(
+                    &task.option_symbol,
+                    task.expiry_at.timestamp_millis(),
+                    (task.expiry_at + Duration::days(2))
+                        .min(Utc::now())
+                        .timestamp_millis(),
+                )
+                .await?;
+            if let Some(facts) = exercise_facts(task, &records)? {
+                task.quantity = Some(facts.quantity);
+                task.settlement_price = Some(facts.price);
+                task.cash_settlement = Some(facts.cash);
+                task.exercise_record_ids = facts.ids;
+                if is_in_the_money(task, facts.price) {
+                    task.status = DeliveryStatus::Ready;
+                    task.message = crate::msg!("backend.deliveryFactsConfirmed");
+                } else {
+                    task.status = DeliveryStatus::Completed;
+                    task.completed_at = Some(Utc::now());
+                    task.message = crate::msg!("backend.binanceExerciseRecordsConfirmOutOfThe");
+                }
+            } else if let Some(price) = client
+                .exercise_history(&task.symbol, task.expiry_at)
+                .await?
+            {
+                if price.underlying != task.symbol || price.expiry_at != task.expiry_at {
+                    return Err(AppError::response(crate::msg!(
+                        "backend.exerciseFactsInconsistent"
+                    )));
+                }
+                if is_in_the_money(task, price.settlement_price) {
+                    // 市场结算价不能证明本账户的最终数量，价内时必须等账户记录。
                     ready = false;
                     continue;
-                };
-                order.settlement_price = price;
-                order.updated_at = Utc::now();
-                if !is_in_the_money(order, price) {
-                    order.status = StrategyStatus::Settled;
-                    order.settled_at = Some(Utc::now());
-                    order.rebalance_message =
-                        crate::msg!("backend.binanceExerciseRecordsConfirmOutOfThe");
                 }
-                self.save_order(order).await?;
+                task.settlement_price = Some(price.settlement_price);
+                task.status = DeliveryStatus::Completed;
+                task.completed_at = Some(Utc::now());
+                task.message = crate::msg!("backend.publicSettlementConfirmsNoDelivery");
+            } else {
+                ready = false;
+                continue;
             }
+            task.updated_at = Utc::now();
+            self.save_delivery(task).await?;
         }
         Ok(ready)
     }
@@ -362,7 +444,7 @@ impl AppState {
     fn schedule_batch_sweep(
         &self,
         batch: &mut SettlementBatch,
-        orders: &[StrategyOrder],
+        orders: &[DeliveryTask],
     ) -> AppResult<()> {
         if batch.sweep_after_at.is_some() {
             return Ok(());
@@ -376,61 +458,34 @@ impl AppState {
         self.persistence
             .lock()
             .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
-            .save_batch_and_orders(batch, orders)
+            .save_batch_and_deliveries(batch, orders)
     }
 
-    async fn settlement_price(
+    pub(super) async fn save_delivery_and_attempt(
         &self,
-        client: &BinanceClient,
-        order: &StrategyOrder,
-    ) -> AppResult<Option<Decimal>> {
-        let records = client
-            .exercise_records(
-                &order.option_symbol,
-                (order.expiry_at - Duration::hours(1)).timestamp_millis(),
-                (order.expiry_at + Duration::days(2)).timestamp_millis(),
-            )
-            .await?;
-        let mut prices = records
-            .into_iter()
-            .filter(|record| {
-                record.symbol == order.option_symbol && record.settlement_price > Decimal::ZERO
-            })
-            .map(|record| record.settlement_price);
-        let first = prices.next();
-        if prices.any(|price| Some(price) != first) {
-            return Err(AppError::response(crate::msg!(
-                "backend.exerciseRecordsHaveInconsistentSettlementPricesManual"
-            )));
-        }
-        Ok(first)
-    }
-
-    pub(super) async fn save_settlement_order(
-        &self,
-        order: &StrategyOrder,
+        order: &DeliveryTask,
         attempt: &OrderAttempt,
     ) -> AppResult<()> {
         self.persistence
             .lock()
             .map_err(|error| AppError::Storage(Message::diagnostic(error.to_string())))?
-            .save_order_and_attempt(order, attempt)?;
-        let mut orders = self.orders.write().await;
+            .save_delivery_and_attempt(order, attempt)?;
+        let mut orders = self.deliveries.write().await;
         let stored = orders
             .iter_mut()
             .find(|stored| stored.id == order.id)
             .ok_or_else(|| {
-                AppError::Storage(crate::msg!("backend.theStrategyOrderForThisSpotRebalance"))
+                AppError::Storage(crate::msg!("backend.theDeliveryTaskForThisSpotRebalance"))
             })?;
         *stored = order.clone();
         Ok(())
     }
 
-    async fn rebalance_settlement_order(
+    async fn rebalance_delivery_task(
         &self,
         client: &BinanceClient,
-        mut order: StrategyOrder,
-    ) -> AppResult<StrategyOrder> {
+        mut order: DeliveryTask,
+    ) -> AppResult<DeliveryTask> {
         if !order.spot_client_order_id.is_empty() {
             let ack = client
                 .query_spot_order(
@@ -452,20 +507,21 @@ impl AppState {
                     ))
                 })?;
             order.spot_order_id = Some(ack.order_id.clone());
-            apply_spot_ack(&mut order, &ack);
+            apply_spot_ack(&mut order, &ack)?;
             attempt.status = OrderAttemptStatus::SpotPersisted;
             attempt.exchange_order_id = Some(ack.order_id);
             attempt.updated_at = Utc::now();
-            attempt.message.clone_from(&order.rebalance_message);
-            self.save_settlement_order(&order, &attempt).await?;
+            attempt.message.clone_from(&order.message);
+            self.save_delivery_and_attempt(&order, &attempt).await?;
             return Ok(order);
         }
-        // 下单或接管时已确认后续到期处理；这里只能补齐已有的到期价内订单。
-        if !needs_settlement(&order)
+        // 任务只来自到期前已登记的卖方净仓，执行数量必须已经由账户行权记录确认。
+        if order.status != DeliveryStatus::Ready
             || order.symbol != "BTCUSDT"
             || order.expiry_at > Utc::now()
-            || order.settlement_price <= Decimal::ZERO
-            || !is_in_the_money(&order, order.settlement_price)
+            || order.tracked_at >= order.expiry_at
+            || order.base_quantity()? <= Decimal::ZERO
+            || !is_in_the_money(&order, order.exercise_price()?)
         {
             return Err(AppError::RiskRejected(crate::msg!(
                 "backend.onlyRegisteredBtcusdtOrdersThatExpiredIn"
@@ -478,6 +534,7 @@ impl AppState {
         }
         validate_spot_rebalance(&order, &client.spot_account().await?)?;
         order.spot_client_order_id = make_spot_client_order_id();
+        order.status = DeliveryStatus::Executing;
         order.updated_at = Utc::now();
         let mut attempt = OrderAttempt {
             id: Uuid::new_v4().to_string(),
@@ -489,13 +546,13 @@ impl AppState {
             message: crate::msg!("backend.spotRebalancingIntentRecordedLinkingTheStrategy"),
             updated_at: Utc::now(),
         };
-        self.save_settlement_order(&order, &attempt).await?;
+        self.save_delivery_and_attempt(&order, &attempt).await?;
         let side = crate::binance::spot_rebalance_side(order.direction);
         match client
             .place_spot_market_order(
                 "BTCUSDT",
                 side,
-                order.filled_quantity,
+                order.base_quantity()?,
                 &order.spot_client_order_id,
             )
             .await
@@ -503,31 +560,27 @@ impl AppState {
             Ok(ack) => {
                 attempt.exchange_order_id = Some(ack.order_id.clone());
                 order.spot_order_id = Some(ack.order_id.clone());
-                apply_spot_ack(&mut order, &ack);
+                apply_spot_ack(&mut order, &ack)?;
                 attempt.status = OrderAttemptStatus::SpotPersisted;
-                attempt.message.clone_from(&order.rebalance_message);
+                attempt.message.clone_from(&order.message);
             }
             Err(error) => {
                 if !error.is_uncertain_submit() {
-                    order.status = StrategyStatus::RebalanceFailed;
+                    order.status = DeliveryStatus::Failed;
                     attempt.status = OrderAttemptStatus::Failed;
                 }
                 attempt.message = crate::msg!(
                     "backend.spotRebalancingPausedConfirmTheOriginalRequest",
                     p0 = error
                 );
-                order.rebalance_message.clone_from(&attempt.message);
+                order.message.clone_from(&attempt.message);
             }
         }
         attempt.updated_at = Utc::now();
-        self.save_settlement_order(&order, &attempt).await?;
+        self.save_delivery_and_attempt(&order, &attempt).await?;
         self.record_log(
             "settlement.spot",
-            &crate::msg!(
-                "ui.join",
-                p0 = order.option_symbol,
-                p1 = order.rebalance_message
-            ),
+            &crate::msg!("ui.join", p0 = order.option_symbol, p1 = order.message),
         );
         Ok(order)
     }
@@ -546,7 +599,7 @@ impl AppState {
         // 已登记的收尾资金链必须先完成，后续批次不能消耗其固定申购金额。
         if !sweep_started(batch)
             && self
-                .orders
+                .deliveries
                 .read()
                 .await
                 .iter()

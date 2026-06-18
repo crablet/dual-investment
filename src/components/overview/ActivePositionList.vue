@@ -1,86 +1,68 @@
 <!--
-活跃策略摘要。
+账户卖方净仓摘要。
 
 只展示用户在总览中判断当前期权义务所需的关键事实；订单号、合约代码和结算细节
 留在订单页核对。
 -->
 <script setup lang="ts">
-import type { StrategyDirection, StrategyOrder } from '@/types/domain'
+import type { StrategyDirection, TrackedPosition } from '@/types/domain'
 
-import { NTag } from 'naive-ui'
 import { useFormat } from '@/composables/useFormat'
 import { t } from '@/i18n'
 import { localDateTimeLabel } from '@/utils/date'
+import { isNegativeDecimalString } from '@/utils/decimal'
 
 const props = defineProps<{
-  orders: StrategyOrder[]
+  positions: TrackedPosition[]
 }>()
 
-const { money, percent } = useFormat()
+const { money } = useFormat()
 
 function strategyLabel(direction: StrategyDirection) {
   return direction === 'sellPut' ? t('ui.buyBtcLow') : t('ui.sellBtcHigh2')
-}
-
-function quantityLabel(value: string) {
-  const trimmed = value.trim()
-  const normalized = trimmed.includes('.')
-    ? trimmed.replace(/0+$/, '').replace(/\.$/, '')
-    : trimmed
-  return `${normalized || '0'} BTC`
 }
 </script>
 
 <template>
   <div
-    v-if="props.orders.length > 0"
+    v-if="props.positions.length > 0"
     class="active-strategy-list"
     role="region"
-    :aria-label="t('ui.activeStrategies')"
+    :aria-label="t('ui.openShortPositions')"
     tabindex="0"
   >
-    <article v-for="order in props.orders" :key="order.id" class="active-strategy-row">
+    <article v-for="position in props.positions" :key="position.optionSymbol" class="active-strategy-row">
       <header class="active-strategy-identity">
         <div class="active-strategy-title">
           <span
             class="active-strategy-marker"
-            :class="`direction-${order.direction}`"
+            :class="`direction-${position.direction}`"
             aria-hidden="true"
           />
-          <strong>{{ strategyLabel(order.direction) }}</strong>
-          <NTag
-            v-if="order.status === 'partiallyFilled'"
-            size="small"
-            type="warning"
-            :bordered="false"
-          >
-            {{ t('ui.partiallyFilled') }}
-          </NTag>
+          <strong>{{ strategyLabel(position.direction) }}</strong>
         </div>
-        <time :datetime="order.expiryAt">{{ localDateTimeLabel(order.expiryAt) }} {{ t('ui.expiry') }} </time>
+        <time :datetime="position.expiryAt">{{ localDateTimeLabel(position.expiryAt) }} {{ t('ui.expiry') }} </time>
       </header>
 
       <dl class="active-strategy-fact">
         <dt> {{ t('ui.targetPrice') }} </dt>
-        <dd>{{ money(order.strike, 'USDT', 0) }}</dd>
+        <dd>{{ money(position.strike, 'USDT', 0) }}</dd>
       </dl>
 
       <dl class="active-strategy-fact">
         <dt> {{ t('ui.actualPosition') }} </dt>
-        <dd>{{ quantityLabel(order.filledQuantity) }}</dd>
+        <dd>{{ t('ui.contracts', { p0: position.quantity }) }}</dd>
       </dl>
 
       <dl class="active-strategy-fact active-strategy-return">
-        <dt> {{ t('ui.premiumReceived') }} </dt>
-        <dd>{{ money(order.premium) }}</dd>
-        <dd class="active-strategy-annualized"> {{ t('ui.annualizedReturn') }} {{ percent(order.annualized) }}</dd>
+        <dt> {{ t('ui.optionUnrealized') }} </dt>
+        <dd :class="{ negative: isNegativeDecimalString(position.unrealizedPnl) }">{{ money(position.unrealizedPnl) }}</dd>
       </dl>
     </article>
   </div>
 
   <div v-else class="active-strategy-empty">
-    <strong> {{ t('ui.noActiveStrategies') }} </strong>
-    <span> {{ t('ui.onceAnOrderIsFilledItsTarget') }} </span>
+    <strong> {{ t('ui.noShortPositions') }} </strong>
   </div>
 </template>
 
@@ -187,14 +169,12 @@ function quantityLabel(value: string) {
   overflow-wrap: anywhere;
 }
 
-.active-strategy-return > dd:not(.active-strategy-annualized) {
+.active-strategy-return > dd {
   color: var(--green);
 }
 
-.active-strategy-return .active-strategy-annualized {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
+.active-strategy-return > dd.negative {
+  color: var(--red);
 }
 
 .active-strategy-empty {

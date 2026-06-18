@@ -10,15 +10,16 @@ import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import EventCalendarBoard from '@/components/common/EventCalendarBoard.vue'
 import MetricCard from '@/components/common/MetricCard.vue'
 import Panel from '@/components/common/Panel.vue'
-import ActiveStrategyList from '@/components/overview/ActiveStrategyList.vue'
+import PositionSyncFeedback from '@/components/common/PositionSyncFeedback.vue'
+import ActivePositionList from '@/components/overview/ActivePositionList.vue'
 import { t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 
-// 按到期时间展示全部活跃策略，不改变共享订单列表的顺序。
-const activeStrategies = computed(() =>
-  [...store.runningOrders].sort((left, right) => new Date(left.expiryAt).getTime() - new Date(right.expiryAt).getTime()),
+// 合约净仓只展示一次，不按本机订单历史累计义务。
+const activePositions = computed(() =>
+  [...store.openPositions].sort((left, right) => new Date(left.expiryAt).getTime() - new Date(right.expiryAt).getTime()),
 )
 </script>
 
@@ -30,8 +31,9 @@ const activeStrategies = computed(() =>
       <AccountBalanceList :account="store.account" />
     </Panel>
 
-    <Panel :title="t('ui.activeStrategies2')" class="span-6">
-      <ActiveStrategyList :orders="activeStrategies" />
+    <Panel :title="t('ui.openShortPositions')" class="span-6">
+      <PositionSyncFeedback :sync="store.positionSync" />
+      <ActivePositionList :positions="activePositions" />
     </Panel>
 
     <Panel :title="t('ui.eventCalendar')" class="span-12">

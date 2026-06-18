@@ -13,10 +13,11 @@ import { t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import { relativeBarWidth } from '@/utils/bars'
 import { localDateKey } from '@/utils/date'
-import { decimalStringToDisplayNumber } from '@/utils/decimal'
+import { decimalStringToDisplayNumber, isPositiveDecimalString } from '@/utils/decimal'
 
 const store = useAppStore()
 const { directionText, money, percent } = useFormat()
+const recordedOrders = computed(() => store.orders.filter(order => isPositiveDecimalString(order.filledQuantity)))
 
 const strategyPerformance = computed(() => {
   // 金额已经由 Rust 按方向汇总；number 只参与图形宽度计算。
@@ -35,32 +36,31 @@ const strategyPerformance = computed(() => {
 
 <template>
   <div class="view-grid">
-    <Panel :title="t('ui.returnsSummary')" class="span-6">
+    <Panel :title="t('ui.recordedPremium')" class="span-6">
       <div v-if="store.pnl" class="summary-cards pnl-summary-cards">
-        <article><span> {{ t('ui.cumulativeReturns') }} </span><strong>{{ money(store.pnl.cumulative) }}</strong></article>
-        <article><span> {{ t('ui.totalPremium') }} </span><strong>{{ money(store.pnl.optionPremium) }}</strong></article>
-        <article><span> {{ t('ui.unrealizedPLOnRebalancedBtc') }} </span><strong>{{ money(store.pnl.floatingSpot) }}</strong></article>
+        <article><span> {{ t('ui.recordedPremium') }} </span><strong>{{ money(store.pnl.recordedPremium) }}</strong></article>
+        <article><span> {{ t('ui.todayRecordedPremium') }} </span><strong>{{ money(store.pnl.todayRecordedPremium) }}</strong></article>
       </div>
     </Panel>
 
-    <Panel :title="t('ui.strategyPerformance')" class="span-6">
+    <Panel :title="t('ui.recordedPremiumDetails')" class="span-6">
       <BarList :items="strategyPerformance" />
     </Panel>
 
-    <Panel :title="t('ui.returnsDetails')" class="span-12">
+    <Panel :title="t('ui.recordedPremiumDetails')" class="span-12">
       <div class="table-wrap">
         <table class="data-table">
           <thead>
             <tr>
               <th> {{ t('ui.date') }} </th>
               <th> {{ t('ui.strategy') }} </th>
-              <th> {{ t('ui.returnAmount') }} </th>
+              <th> {{ t('ui.premium2') }} </th>
               <th> {{ t('ui.annualizedReturn') }} </th>
               <th> {{ t('ui.notes') }} </th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="order in store.orders" :key="order.id">
+            <tr v-for="order in recordedOrders" :key="order.id">
               <td>{{ localDateKey(order.createdAt) }}</td>
               <td>{{ directionText(order.direction) }}</td>
               <td class="positive">{{ money(order.premium) }}</td>
@@ -69,7 +69,7 @@ const strategyPerformance = computed(() => {
             </tr>
           </tbody>
         </table>
-        <p v-if="store.orders.length === 0" class="empty-state"> {{ t('ui.noReturnsToDisplay') }} </p>
+        <p v-if="recordedOrders.length === 0" class="empty-state"> {{ t('ui.noReturnsToDisplay') }} </p>
       </div>
     </Panel>
   </div>
