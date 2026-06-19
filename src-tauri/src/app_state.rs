@@ -1093,6 +1093,10 @@ impl AppState {
                         }
                     }
                 } else {
+                    attempt.status = OrderAttemptStatus::Failed;
+                    attempt.message = error.message();
+                    attempt.updated_at = Utc::now();
+                    self.save_order_attempt(&attempt)?;
                     progress.emit(
                         OrderProgressStage::Submit,
                         OrderProgressStatus::Error,

@@ -156,7 +156,7 @@ function orderAttemptRecoveryRow(attempt: OrderAttempt): RecoveryRow {
     factSource: attempt.exchangeOrderId
       ? t('ui.binanceOrder', { p0: attempt.exchangeOrderId })
       : t('ui.clientOrder', { p0: attempt.clientOrderId }),
-    nextAction: attempt.status === 'persisted' || attempt.status === 'spot_persisted'
+    nextAction: ['persisted', 'spot_persisted', 'failed'].includes(attempt.status)
       ? t('ui.noActionNeeded')
       : t('ui.queryBinanceOrderAgain'),
     message: messageText(attempt.message),
