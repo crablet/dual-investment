@@ -6,6 +6,7 @@
   <p>Binance · BTC/USDT · 13 interface languages · <a href="LICENSE">AGPL-3.0-only</a></p>
   <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
   <p>
+    <a href="#real-quotes-measurable-differences">Compare returns</a> ·
     <a href="#quick-start">Quick start</a> ·
     <a href="#workflow">Workflow</a> ·
     <a href="#documentation">Documentation</a> ·
@@ -16,6 +17,55 @@
 ![The strategy workbench, with contract filters on the left and order estimates on the right](docs/images/workbench-en.webp)
 
 <p align="center">Strategy workbench · Contract selection and order estimates</p>
+
+## Real quotes, measurable differences
+
+Selling a put directly lets you collect the option buyer's premium for taking on a buy-low obligation. Dual Investment Assistant brings that route into a desktop workflow: compare quotes, confirm orders, and automate delivery for positions registered before expiry.
+
+**Across all 66 pairs, the median gross income uplift is +33.44%, and the median gross annualized gap is +12.41 percentage points.** The capture covers eight expiries, from 1 to 74 days. All 66 gross income differences were positive. The annualized-gap interquartile range is **6.46–24.61 percentage points**, with a full range of **2.48–84.12 percentage points**.
+
+These Binance quotes were captured on **16 November 2026, 10:52:31–10:52:40 UTC**. Each pair matches the target/strike and expiry, uses the same notional principal, and sizes the option at 0.10 contracts. **All comparisons use gross income: trading costs and the capital buffer are excluded, with no exercise or currency conversion assumed.**
+
+![All 66 matched quotes across eight expiry groups. Each dot is a pair; gold diamonds are group medians. Overall median gross income uplift: 33.44%. Median gross annualized gap: 12.41 percentage points, with a 6.46–24.61 percentage point interquartile range. Costs and capital buffer excluded; no exercise assumed.](docs/images/yield-overview-en.svg)
+
+Every pair is plotted. Gold diamonds and the numbers to the right show group medians:
+
+| Term | Pairs | Median gross income uplift | Median annualized gap, pp | Annualized gap range, pp |
+| --- | ---: | ---: | ---: | ---: |
+| 1 day | 10 | +49.01% | +45.67 | +10.95–84.12 |
+| 2 days | 13 | +26.73% | +26.71 | +6.61–45.55 |
+| 3 days | 7 | +32.42% | +19.86 | +6.31–31.06 |
+| 4 days | 8 | +33.99% | +17.28 | +5.85–24.49 |
+| 11 days | 7 | +31.05% | +9.55 | +3.22–16.78 |
+| 18 days | 7 | +26.52% | +7.72 | +2.97–12.45 |
+| 39 days | 8 | +29.61% | +3.89 | +2.48–8.31 |
+| 74 days | 6 | +46.40% | +5.80 | +3.06–6.66 |
+
+These equally weighted quote statistics are **neither a trading win rate nor a portfolio return**. See the [low, middle and high examples and strike-distance breakdown (Chinese)](docs/yield-comparison.md#样本分布与分组), or inspect [all 66 pairs individually (Chinese)](docs/yield-comparison-samples.md).
+
+<details>
+<summary>See the maximum case: +84.12 percentage points in gross annualized return</summary>
+
+**The largest gross annualized gain among the 66 eligible pairs: on the same 6,425 USDT notional principal, this one-day sample has 14.81 USDT more gross income (+37.78%), a gross annualized difference of 84.12 percentage points.** The comparison excludes trading costs and the capital buffer, and assumes no exercise or currency conversion at expiry. It is the maximum observed in this capture.
+
+![Largest gross annualized gain among 66 eligible pairs. Same 6,425 USDT notional: Dual Investment term reward of 39.19 USDT versus 54.00 USDT gross put premium. Extra gross income: 14.81 USDT, or 37.78%. Gross annualized: 222.65% versus 306.77%, an 84.12 percentage point gain. Quotes from 16 November 2026; no exercise assumed. Trading costs and the capital buffer are excluded.](docs/images/yield-comparison-en.svg)
+
+Captured from Binance on **16 November 2026, 10:52:31–10:52:40 UTC**. Both quotes have a **64,250 USDT** target/strike and expire on **17 November 2026 at 08:00 UTC**, using a **one-day** term.
+
+| Same notional principal, gross income comparison | Binance Dual Investment: Buy Low BTC | Sell the put through this app |
+| --- | --- | --- |
+| Notional principal | Subscribe 6,425 USDT | Strike × BTC amount = 6,425 USDT |
+| BTC amount, excluding rewards | 0.10 BTC | 0.10 BTC, or 0.10 contracts |
+| Term reward / gross premium | 39.19 USDT | **54.00 USDT** |
+| Simple gross annualized return on notional | 222.65% | **306.77%** |
+
+The put's best bid was 540 USDT, giving **54.00 USDT gross premium** for 0.10 contracts. Dual Investment quoted 223.55% APR; the table annualizes its term reward after the official [rounding rule](https://www.binance.com/en/dual-investment). Differences use unrounded values. Actual trading costs and funding requirements are covered in the [calculation notes (Chinese)](docs/yield-comparison.md#实际费用与备资).
+
+</details>
+
+**This measures a gross quoted income difference.** Binance describes Dual Investment as having [no trading fees](https://www.binance.com/en/support/faq/detail/09911be9f5754c34806bd3ab4a427e0e); these observations do not establish an embedded commission. Cashflows at exercise differ, and actual fees and slippage affect net returns. Quotes move, and short-term annualized rates are not promised year-round returns.
+
+Of 67 pairs with matching terms, one had less than 0.10 contracts at the best bid and was excluded under the same size rule, leaving 66. Read the [selection and calculations (Chinese)](docs/yield-comparison.md). No trades were executed during collection.
 
 ## From contract selection to settlement
 
@@ -71,6 +121,8 @@ The [build workflow](.github/workflows/build-desktop.yml) creates installers for
 
 ## Workflow
 
+If you're signing up for Binance, you're welcome to [use our referral link](https://www.bsmkweb.net/register?ref=ZEABG36I) or enter referral code `ZEABG36I` to receive the applicable trading fee discounts.
+
 1. **Connect a dedicated account** — Enter API credentials under **Settings → Binance connection**. Disable withdrawals and configure the required read, trading, Simple Earn, and Universal Transfer permissions. The app automatically synchronizes unexpired BTC/USDT short net positions.
 2. **Choose a strategy** — Open **Dual investment**, choose buy-low or sell-high, filter contracts, and enter a quantity.
 3. **Review and submit** — Check the estimated premium and breakeven, then confirm in the review dialog to send a live order.
@@ -90,6 +142,7 @@ The detailed guides are currently in Chinese; this README covers the essential s
 
 | Learn about | Guide |
 | --- | --- |
+| Real quote comparisons, costs, and calculation methods | [Return comparison and data notes](docs/yield-comparison.md) |
 | Connecting, selecting contracts, tracking orders, and viewing returns | [Usage guide](docs/usage.md) |
 | Authorization, reserved funds, unconfirmed requests, and recovery | [Trading safety](docs/trading-safety.md) |
 | Running from source, builds, architecture, and localization | [Development guide](docs/development.md) |
