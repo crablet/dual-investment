@@ -75,8 +75,10 @@ async function forgetCredentials() {
         </div>
 
         <form class="settings-connect-form" method="post" @submit.prevent="connect">
-          <NInput v-model:value="form.apiKey" :input-props="{ 'id': 'binance-api-key', 'name': 'apiKey', 'aria-label': t('ui.apiKey'), 'required': true, 'autocomplete': 'off', 'spellcheck': false, 'autocapitalize': 'none', 'autocorrect': 'off' }" :placeholder="t('ui.apiKey')" />
-          <NInput v-model:value="form.apiSecret" type="password" :input-props="{ 'id': 'binance-api-secret', 'name': 'apiSecret', 'aria-label': t('ui.apiSecret'), 'required': true, 'autocomplete': 'off', 'spellcheck': false, 'autocapitalize': 'none', 'autocorrect': 'off' }" :placeholder="t('ui.apiSecret')" show-password-on="click" />
+          <label for="binance-api-key">{{ t('ui.apiKey') }}</label>
+          <NInput v-model:value="form.apiKey" :input-props="{ 'id': 'binance-api-key', 'name': 'apiKey', 'aria-label': t('ui.apiKey'), 'required': true, 'autocomplete': 'off', 'spellcheck': false, 'autocapitalize': 'none', 'autocorrect': 'off' }" />
+          <label for="binance-api-secret">{{ t('ui.apiSecret') }}</label>
+          <NInput v-model:value="form.apiSecret" type="password" :input-props="{ 'id': 'binance-api-secret', 'name': 'apiSecret', 'aria-label': t('ui.apiSecret'), 'required': true, 'autocomplete': 'off', 'spellcheck': false, 'autocapitalize': 'none', 'autocorrect': 'off' }" show-password-on="click" />
           <div class="settings-connect-actions">
             <NButton type="primary" attr-type="submit" :disabled="!canConnect" :loading="store.isLoading('connect')">
               <template #icon><NIcon aria-hidden="true" :component="KeyRound" /></template> {{ t('ui.connectBinance') }}
@@ -118,7 +120,7 @@ async function forgetCredentials() {
 
 .settings-connection {
   display: grid;
-  grid-template-columns: minmax(300px, 1fr) minmax(190px, 0.68fr);
+  grid-template-columns: minmax(300px, 1.4fr) minmax(190px, 0.8fr);
   gap: 20px;
   align-items: start;
 }
@@ -178,6 +180,12 @@ async function forgetCredentials() {
   gap: 12px;
 }
 
+.settings-connect-form label {
+  margin-bottom: -7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .settings-connect-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -204,8 +212,9 @@ async function forgetCredentials() {
   display: grid;
   gap: 12px;
   min-width: 0;
-  padding-left: 24px;
-  border-left: 1px solid var(--line);
+  padding: 16px 20px;
+  border-radius: 10px;
+  background: var(--inset);
 }
 
 .settings-permissions h3 {

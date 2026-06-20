@@ -3,6 +3,7 @@
 import { computed } from 'vue'
 
 import BarList from '@/components/common/BarList.vue'
+import PageHeading from '@/components/common/PageHeading.vue'
 import Panel from '@/components/common/Panel.vue'
 import { useFormat } from '@/composables/useFormat'
 import { t } from '@/i18n'
@@ -16,12 +17,15 @@ const { directionText, money, percent } = useFormat()
 const recordedOrders = computed(() => store.orders.filter(order => isPositiveDecimalString(order.filledQuantity)))
 
 const strategyPerformance = computed(() => {
+  const pnl = store.pnl
+  if (!pnl)
+    return []
   // 金额已经由 Rust 按方向汇总；number 只参与图形宽度计算。
   const rows = [
-    { label: directionText('sellPut'), value: store.pnl?.sellPutPremium ?? '0' },
-    { label: directionText('sellCall'), value: store.pnl?.sellCallPremium ?? '0' },
+    { label: directionText('sellPut'), value: pnl.sellPutPremium },
+    { label: directionText('sellCall'), value: pnl.sellCallPremium },
   ]
-  const max = Math.max(...rows.map(row => decimalStringToDisplayNumber(row.value)), 1)
+  const max = Math.max(...rows.map(row => decimalStringToDisplayNumber(row.value)))
   return rows.map(row => ({
     label: row.label,
     value: money(row.value),
@@ -31,16 +35,19 @@ const strategyPerformance = computed(() => {
 </script>
 
 <template>
-  <div class="view-grid">
+  <PageHeading :title="t('ui.returns')" />
+  <div class="view-grid analytics-grid">
     <Panel :title="t('ui.recordedPremium')" class="span-6">
       <div v-if="store.pnl" class="summary-cards pnl-summary-cards">
-        <article><span> {{ t('ui.recordedPremium') }} </span><strong>{{ money(store.pnl.recordedPremium) }}</strong></article>
+        <article><span> {{ t('ui.totalPremium') }} </span><strong>{{ money(store.pnl.recordedPremium) }}</strong></article>
         <article><span> {{ t('ui.todayRecordedPremium') }} </span><strong>{{ money(store.pnl.todayRecordedPremium) }}</strong></article>
       </div>
+      <p v-else class="empty-state">{{ t('ui.noReturnsToDisplay') }}</p>
     </Panel>
 
-    <Panel :title="t('ui.recordedPremiumDetails')" class="span-6">
-      <BarList :items="strategyPerformance" />
+    <Panel :title="t('ui.premiumByStrategy')" class="span-6">
+      <BarList v-if="store.pnl" :items="strategyPerformance" />
+      <p v-else class="empty-state">{{ t('ui.noReturnsToDisplay') }}</p>
     </Panel>
 
     <Panel :title="t('ui.recordedPremiumDetails')" class="span-12">
@@ -50,8 +57,8 @@ const strategyPerformance = computed(() => {
             <tr>
               <th scope="col"> {{ t('ui.date') }} </th>
               <th scope="col"> {{ t('ui.strategy') }} </th>
-              <th scope="col"> {{ t('ui.premium2') }} </th>
-              <th scope="col"> {{ t('ui.annualizedReturn') }} </th>
+              <th class="numeric" scope="col"> {{ t('ui.premium2') }} </th>
+              <th class="numeric" scope="col"> {{ t('ui.annualizedReturn') }} </th>
               <th scope="col"> {{ t('ui.notes') }} </th>
             </tr>
           </thead>
@@ -59,8 +66,8 @@ const strategyPerformance = computed(() => {
             <tr v-for="order in recordedOrders" :key="order.id">
               <td>{{ localDateKey(order.createdAt) }}</td>
               <td>{{ directionText(order.direction) }}</td>
-              <td class="positive">{{ money(order.premium) }}</td>
-              <td>{{ percent(order.annualized) }}</td>
+              <td class="positive numeric">{{ money(order.premium) }}</td>
+              <td class="numeric">{{ percent(order.annualized) }}</td>
               <td>{{ order.optionSymbol }} {{ t('ui.premiumReceived2') }} </td>
             </tr>
           </tbody>

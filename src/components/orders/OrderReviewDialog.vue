@@ -3,7 +3,7 @@ Rust 提交前会重新查询买一价和数量，更新下单限价。 -->
 <script setup lang="ts">
 import type { StrategyCandidate } from '@/types/domain'
 
-import { X } from '@lucide/vue'
+import { ClipboardCheck, X } from '@lucide/vue'
 import {
   NButton,
   NIcon,
@@ -74,7 +74,6 @@ function confirm() {
     :show="props.show"
     :mask-closable="false"
     :close-on-esc="false"
-    :auto-focus="false"
     @after-leave="emit('afterLeave')"
   >
     <section
@@ -88,7 +87,11 @@ function confirm() {
       </button>
 
       <header class="order-review-header">
-        <h2 id="order-review-title"> {{ t('ui.confirmOrder') }} </h2>
+        <span class="review-icon"><ClipboardCheck :size="23" aria-hidden="true" /></span>
+        <div>
+          <h2 id="order-review-title">{{ t('ui.confirmOrder') }}</h2>
+          <div v-if="props.candidate" class="ticket-symbol">{{ props.candidate.optionSymbol }}</div>
+        </div>
       </header>
 
       <dl class="order-review-facts">
@@ -114,8 +117,8 @@ function confirm() {
   overflow: auto;
   padding: 28px 32px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
+  border-radius: var(--radius);
+  background: #1e2125;
   box-shadow: 0 20px 64px rgba(0, 0, 0, 0.42);
 }
 
@@ -129,7 +132,8 @@ function confirm() {
   height: 30px;
   padding: 0;
   border: 0;
-  color: #d7dee8;
+  border-radius: 6px;
+  color: var(--muted);
   background: transparent;
   cursor: pointer;
 }
@@ -143,45 +147,63 @@ function confirm() {
 }
 
 .order-review-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding-right: 36px;
   margin-bottom: 18px;
 }
 
 .order-review-header h2 {
   margin: 0;
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1.2;
   letter-spacing: -0.03em;
-  color: #f4f7fb;
+  color: var(--text);
+}
+
+.review-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  color: var(--gold);
+  background: var(--gold-tint);
 }
 
 .order-review-facts {
   display: grid;
-  gap: 13px;
+  gap: 0;
   margin: 0;
-  padding: 16px 20px;
+  padding: 4px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--inset);
 }
 
 .order-review-fact {
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
   gap: 18px;
   align-items: baseline;
 }
 
+.order-review-fact:last-child {
+  border-bottom: 0;
+}
+
 .order-review-fact dt {
-  color: #aeb8c5;
-  font-size: 15px;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .order-review-fact dd {
   margin: 0;
   overflow-wrap: anywhere;
-  color: #f4f7fb;
-  font-size: 15px;
+  text-align: end;
+  color: var(--text);
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -198,8 +220,12 @@ function confirm() {
   grid-template-columns: 1fr 1fr;
   gap: 18px;
   justify-content: end;
-  width: min(370px, 100%);
+  width: 100%;
   margin: 22px 0 0 auto;
+}
+
+.order-review-actions :deep(.n-button__content) {
+  white-space: normal;
 }
 
 .order-review-back,

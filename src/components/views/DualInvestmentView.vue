@@ -3,10 +3,13 @@
 import type { StrategyCandidate } from '@/types/domain'
 
 import {
-  ArrowDownCircle,
-  ArrowUpCircle,
+  ArrowDownLeft,
+  ArrowRight,
+  ArrowUpRight,
+  Bitcoin,
+  Check,
   RefreshCw,
-  Zap,
+  Ticket,
 } from '@lucide/vue'
 import {
   NAlert,
@@ -17,6 +20,7 @@ import {
 } from 'naive-ui'
 import { computed, shallowRef } from 'vue'
 import OrderProgressPanel from '@/components/common/OrderProgressPanel.vue'
+import PageHeading from '@/components/common/PageHeading.vue'
 import CandidateTable from '@/components/dual/CandidateTable.vue'
 import OrderReviewDialog from '@/components/orders/OrderReviewDialog.vue'
 import {
@@ -116,50 +120,55 @@ function confirmOrderReview() {
 </script>
 
 <template>
+  <PageHeading :title="t('ui.dualInvestment')">
+    <div class="market-quote">
+      <span class="market-symbol" aria-hidden="true"><Bitcoin :size="20" /></span>
+      <span>{{ t('ui.btcSpot') }}</span>
+      <strong>{{ referenceSpotPrice ? money(referenceSpotPrice) : '—' }}</strong>
+    </div>
+  </PageHeading>
   <div class="dual-workbench">
     <div class="deal-main">
       <section class="direction-switch" role="group" :aria-label="t('ui.direction')">
         <button :class="{ active: form.direction === 'sellPut' }" :aria-pressed="form.direction === 'sellPut'" type="button" @click="selectDirection('sellPut')">
-          <NIcon aria-hidden="true" :component="ArrowDownCircle" />
-          <span> {{ t('ui.buyLow') }} </span>
-          <strong> {{ t('ui.sellPut') }} </strong>
+          <NIcon aria-hidden="true" :component="ArrowDownLeft" />
+          <span class="direction-label"><strong>{{ t('ui.buyLow') }}</strong><small>{{ t('ui.sellPut') }}</small></span>
+          <span class="direction-check" aria-hidden="true"><Check v-if="form.direction === 'sellPut'" :size="12" /></span>
         </button>
         <button :class="{ active: form.direction === 'sellCall' }" :aria-pressed="form.direction === 'sellCall'" type="button" @click="selectDirection('sellCall')">
-          <NIcon aria-hidden="true" :component="ArrowUpCircle" />
-          <span> {{ t('ui.sellHigh') }} </span>
-          <strong> {{ t('ui.sellCall') }} </strong>
+          <NIcon aria-hidden="true" :component="ArrowUpRight" />
+          <span class="direction-label"><strong>{{ t('ui.sellHigh') }}</strong><small>{{ t('ui.sellCall') }}</small></span>
+          <span class="direction-check" aria-hidden="true"><Check v-if="form.direction === 'sellCall'" :size="12" /></span>
         </button>
       </section>
 
       <section class="candidate-board">
         <div class="candidate-toolbar">
-          <div class="expiry-tabs" role="group" :aria-label="t('ui.filterByExpiry')">
-            <button
-              v-for="filter in expiryFilters"
-              :key="filter.id"
-              :class="{ active: expiryFilter === filter.id }"
-              :aria-pressed="expiryFilter === filter.id"
-              type="button"
-              @click="expiryFilter = filter.id"
-            >
-              {{ filter.label }}
-            </button>
-          </div>
+          <h2>{{ t('ui.candidateFilters') }}</h2>
+          <NButton
+            circle
+            secondary
+            size="small"
+            :title="t('ui.refreshCandidates')"
+            :aria-label="t('ui.refreshCandidates')"
+            :loading="store.isLoading('scan')"
+            @click="store.scan()"
+          >
+            <template #icon><NIcon aria-hidden="true" :component="RefreshCw" /></template>
+          </NButton>
+        </div>
 
-          <div class="candidate-toolbar-actions">
-            <span v-if="referenceSpotPrice" class="spot-price"> {{ t('ui.btcSpot') }} {{ money(referenceSpotPrice) }}</span>
-            <NButton
-              circle
-              secondary
-              size="small"
-              :title="t('ui.refreshCandidates')"
-              :aria-label="t('ui.refreshCandidates')"
-              :loading="store.isLoading('scan')"
-              @click="store.scan()"
-            >
-              <template #icon><NIcon aria-hidden="true" :component="RefreshCw" /></template>
-            </NButton>
-          </div>
+        <div class="expiry-tabs" role="group" :aria-label="t('ui.filterByExpiry')">
+          <button
+            v-for="filter in expiryFilters"
+            :key="filter.id"
+            :class="{ active: expiryFilter === filter.id }"
+            :aria-pressed="expiryFilter === filter.id"
+            type="button"
+            @click="expiryFilter = filter.id"
+          >
+            {{ filter.label }}
+          </button>
         </div>
 
         <div class="candidate-filter-bar" role="group" :aria-label="t('ui.candidateFilters')">
@@ -216,14 +225,14 @@ function confirmOrderReview() {
       <section class="order-card">
         <header>
           <div>
-            <span class="order-eyebrow"> {{ t('ui.placeOrder') }} </span>
-            <h3>{{ panelTitle }}</h3>
+            <h2>{{ panelTitle }}</h2>
+            <span v-if="selectedCandidate" class="ticket-symbol">{{ selectedCandidate.optionSymbol }}</span>
           </div>
-          <NIcon aria-hidden="true" :component="Zap" />
+          <NIcon aria-hidden="true" :component="Ticket" />
         </header>
 
         <div class="deal-summary">
-          <article>
+          <article class="ticket-yield">
             <span> {{ t('ui.annualizedReturn') }} </span>
             <strong :class="{ positive: selectedCandidate }">
               {{ selectedCandidate ? percent(selectedCandidate.annualized) : '--' }}
@@ -254,7 +263,7 @@ function confirmOrderReview() {
         <NAlert v-if="previewError" type="error">{{ messageText(previewError) }}</NAlert>
 
         <NButton type="primary" size="large" block :disabled="!canSubmit" :loading="store.isLoading('order')" @click="submit">
-          <template #icon><NIcon aria-hidden="true" :component="Zap" /></template> {{ t('ui.submitOrder') }}
+          {{ t('ui.reviewOrder') }} <ArrowRight :size="16" aria-hidden="true" />
         </NButton>
 
         <OrderProgressPanel

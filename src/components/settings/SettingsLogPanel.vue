@@ -1,6 +1,6 @@
 <!-- 通过 Rust 读取和管理本地日志。删除日志不影响订单、恢复记录和凭据。 -->
 <script setup lang="ts">
-import { FileText, FolderOpen, RefreshCw, Trash2 } from '@lucide/vue'
+import { FileText, FolderOpen, Trash2 } from '@lucide/vue'
 
 import { NAlert, NButton, NIcon, NTag } from 'naive-ui'
 import Panel from '@/components/common/Panel.vue'
@@ -21,12 +21,6 @@ async function clearLogs() {
 
 <template>
   <Panel :title="t('ui.logs')" class="settings-logs">
-    <template #action>
-      <NButton size="small" secondary :loading="logs.pendingAction.value === 'refresh'" @click="logs.refresh">
-        <template #icon><NIcon aria-hidden="true" :component="RefreshCw" /></template> {{ t('ui.refresh') }}
-      </NButton>
-    </template>
-
     <NAlert v-if="logs.error.value" type="error" class="settings-log-error">
       {{ messageText(logs.error.value) }}
     </NAlert>
@@ -34,13 +28,13 @@ async function clearLogs() {
     <NAlert v-if="logs.writeError.value" type="warning" class="settings-log-error"> {{ t('ui.localLogWriteFailed') }} {{ messageText(logs.writeError.value) }} {{ t('ui.orderRecordsRemainTheSourceOfTrading') }} </NAlert>
 
     <div class="settings-log-actions">
-      <NButton secondary :loading="logs.pendingAction.value === 'openFile'" @click="logs.openCurrentFile">
+      <NButton secondary :loading="logs.pendingAction.value === 'openFile'" :disabled="!!logs.pendingAction.value" @click="logs.openCurrentFile">
         <template #icon><NIcon aria-hidden="true" :component="FileText" /></template> {{ t('ui.openTodaySLog') }}
       </NButton>
-      <NButton secondary :loading="logs.pendingAction.value === 'openFolder'" @click="logs.openFolder">
+      <NButton secondary :loading="logs.pendingAction.value === 'openFolder'" :disabled="!!logs.pendingAction.value" @click="logs.openFolder">
         <template #icon><NIcon aria-hidden="true" :component="FolderOpen" /></template> {{ t('ui.openLogFolder') }}
       </NButton>
-      <NButton secondary type="error" :loading="logs.pendingAction.value === 'clear'" :disabled="!logs.hasFiles.value" @click="clearLogs">
+      <NButton secondary type="error" :loading="logs.pendingAction.value === 'clear'" :disabled="!logs.hasFiles.value || !!logs.pendingAction.value" @click="clearLogs">
         <template #icon><NIcon aria-hidden="true" :component="Trash2" /></template> {{ t('ui.deleteLogs') }}
       </NButton>
     </div>
@@ -70,15 +64,15 @@ async function clearLogs() {
 }
 
 .settings-log-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 12px 0;
+  padding: 0 0 18px;
   border-bottom: 1px solid var(--line);
 }
 
-.settings-log-actions :deep(.n-button) {
-  width: 100%;
+.settings-log-actions :deep(.n-button--error-type) {
+  margin-inline-start: auto;
 }
 
 .settings-log-section {
@@ -145,7 +139,7 @@ async function clearLogs() {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 1180px) {
+@container workspace (max-width: 980px) {
   .settings-log-entry {
     grid-template-columns: 142px 54px minmax(0, 1fr);
   }

@@ -51,7 +51,11 @@ const details = computed(() => {
             :class="{ selected: selected?.id === task.id }"
             @click="selectedId = task.id"
           >
-            <td>{{ task.optionSymbol }}</td>
+            <td>
+              <button class="table-select" type="button" :aria-pressed="selected?.id === task.id" @click.stop="selectedId = task.id">
+                {{ task.optionSymbol }}
+              </button>
+            </td>
             <td>{{ directionText(task.direction) }}</td>
             <td>{{ localDateTimeLabel(task.expiryAt) }}</td>
             <td>{{ task.quantity ?? t('ui.awaitingConfirmation') }}</td>

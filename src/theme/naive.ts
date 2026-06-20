@@ -1,31 +1,47 @@
 import type { GlobalThemeOverrides } from 'naive-ui'
 
-const accentColor = '#f5b625'
-const accentColorHover = '#ffcf55'
-const accentColorPressed = '#c58e14'
-const accentFocusShadow = '0 0 0 2px rgba(245, 182, 37, 0.24)'
+const gold = '#f3c542'
+const goldHover = '#ffda68'
+const goldPressed = '#d8ac31'
+const ink = '#211c0c'
 
-// Naive UI 全局主题。
 export const themeOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: accentColor,
-    primaryColorHover: accentColorHover,
-    primaryColorPressed: accentColorPressed,
-    primaryColorSuppl: accentColor,
-    bodyColor: '#071017',
-    cardColor: '#101922',
-    modalColor: '#101922',
-    borderColor: 'rgba(255,255,255,0.09)',
-    textColorBase: '#f4f7fb',
-    textColor1: '#f4f7fb',
-    textColor2: '#c5ced9',
-    textColor3: '#8d98a6',
+    fontFamily: 'inherit',
+    fontSize: '14px',
+    borderRadius: '7px',
+    primaryColor: gold,
+    primaryColorHover: goldHover,
+    primaryColorPressed: goldPressed,
+    primaryColorSuppl: gold,
+    bodyColor: '#111315',
+    cardColor: '#1a1d20',
+    modalColor: '#1e2125',
+    popoverColor: '#292d31',
+    inputColor: '#141618',
+    borderColor: '#35393e',
+    dividerColor: '#303438',
+    textColorBase: '#f3f4f5',
+    textColor1: '#f3f4f5',
+    textColor2: '#d3d5d8',
+    textColor3: '#a3a8ae',
+    placeholderColor: '#91979d',
+    successColor: '#61d7aa',
+    warningColor: gold,
+    errorColor: '#ff9293',
+  },
+  Button: {
+    textColorPrimary: ink,
+    textColorHoverPrimary: ink,
+    textColorPressedPrimary: ink,
+    textColorFocusPrimary: ink,
+    fontWeightStrong: '650',
   },
   Checkbox: {
-    colorChecked: accentColor,
-    borderChecked: `1px solid ${accentColor}`,
-    borderFocus: `1px solid ${accentColor}`,
-    checkMarkColor: '#071017',
-    boxShadowFocus: accentFocusShadow,
+    colorChecked: gold,
+    borderChecked: `1px solid ${gold}`,
+    borderFocus: `1px solid ${gold}`,
+    checkMarkColor: ink,
+    boxShadowFocus: '0 0 0 2px rgba(243, 197, 66, 0.24)',
   },
 }

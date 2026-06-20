@@ -2,8 +2,9 @@
 <script setup lang="ts">
 import type { AccountSnapshot, DecimalString } from '@/types/domain'
 
+import { Bitcoin, CircleDollarSign, Coins } from '@lucide/vue'
 import { NAlert, NTooltip } from 'naive-ui'
-import { computed } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { useFormat } from '@/composables/useFormat'
 import { messageText, t } from '@/i18n'
 import { presentAccountBalances } from '@/utils/balances'
@@ -15,8 +16,20 @@ const props = defineProps<{
 }>()
 
 const { decimal, money } = useFormat()
+const focusedAsset = shallowRef<string>()
+const hoveredAsset = shallowRef<string>()
 
 const balances = computed(() => presentAccountBalances(props.account?.balances ?? []))
+
+function setHoveredAsset(asset: string, show: boolean) {
+  if (show || hoveredAsset.value === asset)
+    hoveredAsset.value = show ? asset : undefined
+}
+
+function dismissDetails() {
+  focusedAsset.value = undefined
+  hoveredAsset.value = undefined
+}
 
 function valuationText(usdtValue: DecimalString, known: boolean): string {
   return known ? money(usdtValue) : t('ui.noValuation')
@@ -32,17 +45,31 @@ function valuationText(usdtValue: DecimalString, known: boolean): string {
       {{ t('ui.accountRefreshFailed') }} {{ messageText(props.account.error) }}
       <template v-if="props.account.updatedAt"> {{ t('ui.showingTheLastSuccessfulQuery') }} </template>
     </NAlert>
-    <p v-if="balances.length === 0 && props.account?.updatedAt" class="empty-state">{{ props.emptyText ?? t('ui.noAssets') }}</p>
+    <p v-if="!props.account?.updatedAt && balances.length === 0" class="empty-state">{{ t('ui.awaitingAccountData') }}</p>
+    <p v-else-if="balances.length === 0" class="empty-state">{{ props.emptyText ?? t('ui.noAssets') }}</p>
     <div v-for="balance in balances" :key="balance.asset" class="account-row">
       <span class="account-asset">
-        <strong>{{ balance.asset }}</strong>
+        <span class="asset-symbol" :class="{ bitcoin: balance.asset === 'BTC', stablecoin: balance.asset === 'USDT' }" aria-hidden="true">
+          <Bitcoin v-if="balance.asset === 'BTC'" :size="18" />
+          <CircleDollarSign v-else-if="balance.asset === 'USDT'" :size="18" />
+          <Coins v-else :size="17" />
+        </span>
+        <span class="asset-name"><strong>{{ balance.asset }}</strong><small>{{ balance.sourceLabel }}</small></span>
       </span>
-      <NTooltip trigger="hover" placement="right">
+      <NTooltip
+        trigger="hover"
+        placement="right"
+        :show="focusedAsset === balance.asset || hoveredAsset === balance.asset"
+        @update:show="show => setHoveredAsset(balance.asset, show)"
+      >
         <template #trigger>
           <span
-            class="account-values account-values--hover"
+            class="account-values"
             tabindex="0"
             :aria-label="balance.detailLabel"
+            @focus="focusedAsset = balance.asset"
+            @blur="focusedAsset = undefined"
+            @keydown.esc="dismissDetails"
           >
             <strong>{{ decimal(balance.free) }}</strong>
             <em>{{ valuationText(balance.usdtValue, balance.usdtValueKnown) }}</em>

@@ -22,7 +22,9 @@ Windows 安装包未签名；macOS 为 ad-hoc 签名、未公证，首次打开�
 
 | 入口 | 职责 |
 | --- | --- |
-| [src/components](../src/components/)、[src/stores](../src/stores/) | 页面与 Pinia 共享状态 |
+| [AppShell.vue](../src/components/layout/AppShell.vue)、[WorkspaceNav.vue](../src/components/layout/WorkspaceNav.vue)、[styles.css](../src/styles.css) | 左侧导航、连接状态和独立滚动的正文工作区 |
+| [页面组件](../src/components/views/)、[src/stores](../src/stores/) | 六个业务页面与 Pinia 共享状态 |
+| [useLogSnapshot.ts](../src/composables/useLogSnapshot.ts)、[logs.rs](../src-tauri/src/logs.rs) | 设置页的日志自动刷新和按日期存储的本地文件 |
 | [src/services/api.ts](../src/services/api.ts)、[commands.rs](../src-tauri/src/commands.rs) | IPC 与错误契约 |
 | [app_state.rs](../src-tauri/src/app_state.rs)、[app_state/](../src-tauri/src/app_state/) | 连接、交易、恢复与后台维护 |
 | [positions.rs](../src-tauri/src/app_state/positions.rs)、[settlement.rs](../src-tauri/src/app_state/settlement.rs) | 净仓同步与交割流程 |
@@ -33,7 +35,9 @@ Windows 安装包未签名；macOS 为 ad-hoc 签名、未公证，首次打开�
 
 ### 状态与消息
 
-前端读取 `get_app_snapshot`；手动同步调用 `sync_live_state` 后重新取快照。后台每分钟尝试维护交易与交割，页面切换不新增交易所轮询。并发、资金预留和恢复规则集中在[实盘交易安全](trading-safety.md)。
+切换页面通常通过 `get_app_snapshot` 读取本地快照。已连接且候选缓存为空时，进入“双币赢”会调用 `scan_candidates` 查询行情。筛选和排序使用已取得的候选列表。“策略订单 → 同步账户”调用 `sync_live_state`，随后重新读取本地快照。Rust 后台每分钟尝试维护交易与交割。并发、资金预留和恢复规则见[实盘交易安全](trading-safety.md)。
+
+设置页可见时立即调用 `get_log_snapshot`，随后每 3 秒读取一次。该命令从本地日志文件尾部读取最近最多 120 条记录，最新一条在前。隐藏窗口或离开设置页会停止定时读取。读取失败时保留上一份快照，文件操作开始前发出的旧查询结果会被丢弃。
 
 | 模型 | 数量和状态的含义 |
 | --- | --- |
@@ -69,6 +73,8 @@ Windows 安装包未签名；macOS 为 ad-hoc 签名、未公证，首次打开�
 交易验证仅用隔离存储与交易所 / IPC 替身，不读取用户真实凭据或数据库，不发送实盘下单、划转或申赎。净仓与交割改动须覆盖重复下单、到期前平仓、离线跨期、首次发现已到期，以及查询失败和未知数量。临时验证产物按 [AGENTS.md](../AGENTS.md)清理。
 
 ### 保持既有界面
+
+桌面窗口默认 1440 × 940，最小 1180 × 760。左侧导航和连接状态在正文滚动时保持可见。宽屏下正文居中，工作区含内边距最大宽度为 1312 px。订单列表和详情按正文容器宽度调整排列。普通文字禁用拖选，`:read-write` 可编辑字段保留原生文本选择。
 
 内部实现优化须保留原有布局、字号、间距、颜色、截断规则、悬停提示、图表与弹窗效果。无障碍名称和状态可通过不影响布局的属性补充；如果改写无法保持显示一致，保留现有组件实现。界面验证使用相同数据、窗口尺寸和语言，与改动前逐页对照。
 
@@ -109,7 +115,7 @@ pnpm tauri:build --target universal-apple-darwin -- --locked
 
 README 介绍功能和操作，本页说明开发和发布，交易规则见[安全文档](trading-safety.md)。其他位置用链接引用，避免重复维护。
 
-更新中英文 README 时同步图文；`docs/images/` 中的产品截图使用可公开的真实界面，不注入或改写行情、订单与收益数据。
+中英文 README 的文字和配图同步更新。当前界面截图使用相同页面、窗口尺寸和连接状态。可以用浏览器预览拍摄空状态并注明来源，带历史报价的旧版截图单独标注。`docs/images/` 中的产品截图使用可公开的真实界面，不注入或改写行情、订单与收益数据。
 
 ## 常见环境问题
 

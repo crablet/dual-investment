@@ -5,6 +5,7 @@ import type { PnlBreakdownItem } from '@/types/view'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
 import AccountBalanceList from '@/components/common/AccountBalanceList.vue'
 import DonutChart from '@/components/common/DonutChart.vue'
+import PageHeading from '@/components/common/PageHeading.vue'
 import Panel from '@/components/common/Panel.vue'
 import PositionSyncFeedback from '@/components/common/PositionSyncFeedback.vue'
 import { useFormat } from '@/composables/useFormat'
@@ -12,6 +13,7 @@ import { t } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import { presentAccountBalances } from '@/utils/balances'
 import { localDateTimeLabel } from '@/utils/date'
+import { isNegativeDecimalString } from '@/utils/decimal'
 
 const store = useAppStore()
 const { decimal, money } = useFormat()
@@ -57,12 +59,13 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
 </script>
 
 <template>
-  <div class="view-grid">
+  <PageHeading :title="t('ui.positionsSpot')" />
+  <div class="view-grid portfolio-grid">
     <Panel :title="t('ui.accountOverview')" class="span-4">
       <AccountBalanceList :account="store.account" class="large" :empty-text="t('ui.noPositions')" />
     </Panel>
 
-    <Panel :title="t('ui.openShortPositions')" class="span-4">
+    <Panel :title="t('ui.openShortPositions')" class="portfolio-obligations">
       <div class="obligation-list">
         <article>
           <strong> {{ t('ui.shortPutPositions') }} </strong>
@@ -77,7 +80,7 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
       </div>
     </Panel>
 
-    <Panel :title="t('ui.fundsMargin')" class="span-4">
+    <Panel :title="t('ui.fundsMargin')" class="portfolio-composition">
       <DonutChart
         :items="balanceBreakdown"
         :total-value="store.account?.updatedAt ? store.account.totalUsdtValue : null"
@@ -86,7 +89,7 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
       />
     </Panel>
 
-    <Panel :title="t('ui.positionDetails')" class="span-8">
+    <Panel :title="t('ui.positionDetails')" class="span-12">
       <PositionSyncFeedback :sync="store.positionSync" />
       <div class="table-wrap">
         <table class="data-table" :aria-label="t('ui.positionDetails')">
@@ -94,11 +97,11 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
             <tr>
               <th scope="col"> {{ t('ui.optionContract') }} </th>
               <th scope="col"> {{ t('ui.positionType') }} </th>
-              <th scope="col"> {{ t('ui.netPositionQuantity') }} </th>
-              <th scope="col"> {{ t('ui.strikePrice') }} </th>
-              <th scope="col"> {{ t('ui.averageEntryPrice') }} </th>
-              <th scope="col"> {{ t('ui.markPrice') }} </th>
-              <th scope="col"> {{ t('ui.optionUnrealized') }} </th>
+              <th class="numeric" scope="col"> {{ t('ui.netPositionQuantity') }} </th>
+              <th class="numeric" scope="col"> {{ t('ui.strikePrice') }} </th>
+              <th class="numeric" scope="col"> {{ t('ui.averageEntryPrice') }} </th>
+              <th class="numeric" scope="col"> {{ t('ui.markPrice') }} </th>
+              <th class="numeric" scope="col"> {{ t('ui.optionUnrealized') }} </th>
               <th scope="col"> {{ t('ui.expiryDate') }} </th>
             </tr>
           </thead>
@@ -106,11 +109,11 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
             <tr v-for="position in positions" :key="position.optionSymbol">
               <td>{{ position.optionSymbol }}</td>
               <td>{{ position.direction === 'sellPut' ? t('ui.shortPutObligation') : t('ui.shortCallObligation') }}</td>
-              <td>{{ position.quantity }}</td>
-              <td>{{ money(position.strike, 'USDT', 0) }}</td>
-              <td>{{ money(position.entryPrice) }}</td>
-              <td>{{ money(position.markPrice) }}</td>
-              <td>{{ money(position.unrealizedPnl) }}</td>
+              <td class="numeric">{{ position.quantity }}</td>
+              <td class="numeric">{{ money(position.strike, 'USDT', 0) }}</td>
+              <td class="numeric">{{ money(position.entryPrice) }}</td>
+              <td class="numeric">{{ money(position.markPrice) }}</td>
+              <td class="numeric" :class="isNegativeDecimalString(position.unrealizedPnl) ? 'negative' : 'positive'">{{ money(position.unrealizedPnl) }}</td>
               <td>{{ localDateTimeLabel(position.expiryAt) }}</td>
             </tr>
           </tbody>
@@ -119,7 +122,7 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
       </div>
     </Panel>
 
-    <Panel :title="t('ui.expiryCalendar')" class="span-4">
+    <Panel :title="t('ui.expiryCalendar')" class="portfolio-expiries">
       <div class="calendar-list">
         <p v-if="upcomingPositions.length === 0" class="empty-state"> {{ t('ui.noUpcomingPositions') }} </p>
         <article v-for="position in upcomingPositions" :key="position.optionSymbol">

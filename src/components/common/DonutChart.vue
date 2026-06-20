@@ -103,6 +103,7 @@ function isActive(key: string) {
         type="button"
         class="legend-row"
         :aria-label="item.ariaLabel"
+        :title="item.ariaLabel"
         :class="{ active: isActive(item.key) }"
         @focus="setHover(item.key)"
         @blur="clearHover"
@@ -110,7 +111,7 @@ function isActive(key: string) {
         @pointerleave="clearHover"
       >
         <span :style="{ backgroundColor: item.color }" />
-        <p>{{ item.label }}</p>
+        <p>{{ item.label }}<small>{{ item.percentLabel }}</small></p>
         <strong :class="{ negative: item.negative }">{{ item.valueLabel }}</strong>
       </button>
     </div>
@@ -120,14 +121,14 @@ function isActive(key: string) {
 <style scoped>
 .donut-wrap {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: minmax(100px, 0.85fr) minmax(0, 1fr);
   align-items: center;
-  gap: 18px;
+  gap: 12px;
 }
 
 .donut {
-  width: 164px;
-  height: 164px;
+  width: min(100%, 166px);
+  height: auto;
   justify-self: center;
   overflow: visible;
 }
@@ -188,9 +189,9 @@ function isActive(key: string) {
 
 .legend-row {
   display: grid;
-  grid-template-columns: 10px minmax(76px, 1fr) auto;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   width: 100%;
   min-width: 0;
   min-height: 28px;
@@ -212,8 +213,8 @@ function isActive(key: string) {
 }
 
 .legend-row span {
-  width: 10px;
-  height: 10px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
 }
 
@@ -226,7 +227,14 @@ function isActive(key: string) {
   min-width: 0;
 }
 
+.legend-row small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .legend-row strong {
+  font-size: 13px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }

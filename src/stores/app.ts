@@ -115,7 +115,6 @@ export const useAppStore = defineStore('app', () => {
   )
   // 指标卡从快照派生，避免再通过 IPC 请求 Rust 做轻量 UI 聚合。
   const metrics = computed<MetricCardModel[]>(() => buildMetrics(
-    settings.value,
     account.value,
     pnl.value,
   ))

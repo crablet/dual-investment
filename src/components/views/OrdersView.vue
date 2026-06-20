@@ -5,6 +5,7 @@ import type { StrategyOrder } from '@/types/domain'
 import { CheckCircle2, RefreshCw, XCircle } from '@lucide/vue'
 import { NButton, NIcon, NTag } from 'naive-ui'
 import { computed, shallowRef, watchEffect } from 'vue'
+import PageHeading from '@/components/common/PageHeading.vue'
 import Panel from '@/components/common/Panel.vue'
 import PositionSyncFeedback from '@/components/common/PositionSyncFeedback.vue'
 import DeliveryTasksPanel from '@/components/orders/DeliveryTasksPanel.vue'
@@ -74,15 +75,13 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
 </script>
 
 <template>
-  <div class="view-grid">
+  <PageHeading :title="t('ui.strategyOrders')">
+    <NButton secondary :loading="store.isLoading('sync')" @click="store.syncLiveState()">
+      <template #icon><NIcon aria-hidden="true" :component="RefreshCw" /></template> {{ t('ui.syncAccount') }}
+    </NButton>
+  </PageHeading>
+  <div class="view-grid orders-grid">
     <Panel :title="t('ui.orderStatistics')" class="span-12">
-      <template #action>
-        <div class="button-row compact">
-          <NButton size="small" secondary :loading="store.isLoading('sync')" @click="store.syncLiveState()">
-            <template #icon><NIcon aria-hidden="true" :component="RefreshCw" /></template> {{ t('ui.syncAccount') }}
-          </NButton>
-        </div>
-      </template>
       <div class="summary-cards order-summary-cards">
         <article><span> {{ t('ui.totalOrders') }} </span><strong>{{ store.orders.length }}</strong></article>
         <article><span> {{ t('ui.openShortPositions') }} </span><strong>{{ store.openPositions.length }}</strong></article>
@@ -92,60 +91,66 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
       <PositionSyncFeedback :sync="store.positionSync" />
     </Panel>
 
-    <Panel :title="t('ui.orderHistory')" class="span-8">
-      <div class="table-wrap">
-        <table class="data-table" :aria-label="t('ui.orderHistory')">
-          <thead>
-            <tr>
-              <th scope="col"> {{ t('ui.orderId') }} </th>
-              <th scope="col"> {{ t('ui.direction') }} </th>
-              <th scope="col"> {{ t('ui.underlying') }} </th>
-              <th scope="col"> {{ t('ui.strikePrice') }} </th>
-              <th scope="col"> {{ t('ui.expiryDate') }} </th>
-              <th scope="col"> {{ t('ui.quantity') }} </th>
-              <th scope="col"> {{ t('ui.premium2') }} </th>
-              <th scope="col"> {{ t('ui.status') }} </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="order in store.orders"
-              :key="order.id"
-              :class="{ selected: order.id === selected?.id }"
-              @click="selectedId = order.id"
-            >
-              <td>{{ order.id }}</td>
-              <td><NTag :type="directionTone(order.direction)" size="small">{{ directionText(order.direction) }}</NTag></td>
-              <td>{{ order.symbol }}</td>
-              <td>{{ money(order.strike, 'USDT', 0) }}</td>
-              <td>{{ localDateTimeLabel(order.expiryAt) }}</td>
-              <td>{{ order.filledQuantity }} / {{ order.quantity }}</td>
-              <td>{{ money(order.premium) }}</td>
-              <td><NTag :type="statusTone(order.status)" size="small">{{ statusText(order.status) }}</NTag></td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-if="store.orders.length === 0" class="empty-state"> {{ t('ui.noOrders') }} </p>
-      </div>
-    </Panel>
+    <div class="order-ledgers span-12">
+      <Panel :title="t('ui.orderHistory')" class="order-history">
+        <div class="table-wrap">
+          <table class="data-table" :aria-label="t('ui.orderHistory')">
+            <thead>
+              <tr>
+                <th scope="col"> {{ t('ui.orderId') }} </th>
+                <th scope="col"> {{ t('ui.direction') }} </th>
+                <th scope="col"> {{ t('ui.underlying') }} </th>
+                <th class="numeric" scope="col"> {{ t('ui.strikePrice') }} </th>
+                <th scope="col"> {{ t('ui.expiryDate') }} </th>
+                <th class="numeric" scope="col"> {{ t('ui.quantity') }} </th>
+                <th class="numeric" scope="col"> {{ t('ui.premium2') }} </th>
+                <th scope="col"> {{ t('ui.status') }} </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="order in store.orders"
+                :key="order.id"
+                :class="{ selected: order.id === selected?.id }"
+                @click="selectedId = order.id"
+              >
+                <td>
+                  <button class="table-select" type="button" :aria-pressed="order.id === selected?.id" @click.stop="selectedId = order.id">
+                    {{ order.id }}
+                  </button>
+                </td>
+                <td><NTag :type="directionTone(order.direction)" size="small">{{ directionText(order.direction) }}</NTag></td>
+                <td>{{ order.symbol }}</td>
+                <td class="numeric">{{ money(order.strike, 'USDT', 0) }}</td>
+                <td>{{ localDateTimeLabel(order.expiryAt) }}</td>
+                <td class="numeric">{{ order.filledQuantity }} / {{ order.quantity }}</td>
+                <td class="numeric">{{ money(order.premium) }}</td>
+                <td><NTag :type="statusTone(order.status)" size="small">{{ statusText(order.status) }}</NTag></td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="store.orders.length === 0" class="empty-state"> {{ t('ui.noOrders') }} </p>
+        </div>
+      </Panel>
 
-    <Panel :title="t('ui.orderDetails')" class="span-4">
-      <div v-if="selected" class="detail-list order-detail-list">
-        <header class="order-detail-heading">
-          <h3 :title="selected.id">{{ selected.id }}</h3>
-          <NTag :type="statusTone(selected.status)" size="small" class="detail-status-tag">
-            {{ statusText(selected.status) }}
-          </NTag>
-        </header>
-        <p v-for="row in detailRows" :key="row.label">
-          <span>{{ row.label }}</span>
-          <strong :title="row.value">{{ row.value }}</strong>
-        </p>
-      </div>
-      <p v-else class="empty-state"> {{ t('ui.noOrderDetails') }} </p>
-    </Panel>
+      <Panel :title="t('ui.orderDetails')" class="order-details">
+        <div v-if="selected" class="detail-list order-detail-list">
+          <header class="order-detail-heading">
+            <h3 :title="selected.id">{{ selected.id }}</h3>
+            <NTag :type="statusTone(selected.status)" size="small" class="detail-status-tag">
+              {{ statusText(selected.status) }}
+            </NTag>
+          </header>
+          <p v-for="row in detailRows" :key="row.label">
+            <span>{{ row.label }}</span>
+            <strong :title="row.value">{{ row.value }}</strong>
+          </p>
+        </div>
+        <p v-else class="empty-state"> {{ t('ui.noOrderDetails') }} </p>
+      </Panel>
 
-    <DeliveryTasksPanel class="span-12" />
+      <DeliveryTasksPanel class="delivery-tasks" />
+    </div>
 
     <Panel :title="t('ui.recoveryCenter')" class="span-12">
       <div class="table-wrap">

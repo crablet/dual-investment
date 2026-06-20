@@ -14,7 +14,7 @@
   </p>
 </div>
 
-![Dual Investment screen: filter Put/Call contracts and review quantity and estimated premium](docs/images/workbench-en.webp)
+![Buy low screen showing BTC put quotes, with the 62,500 USDT strike selected and its order panel on the right](docs/images/workbench-en.webp)
 
 ## Dual Investment vs. selling puts
 
@@ -37,12 +37,16 @@ This is `BTC-261117-64250-P`. See the [calculation](docs/yield-comparison.md#最
 
 ## Features
 
-| Feature | What it does |
+Use the left sidebar to switch pages. Settings and the Binance connection status are at the bottom left.
+
+| Page | What you can do |
 | --- | --- |
-| Selection and orders | Sell puts to buy low or calls to sell high. Filter by expiry, annualized estimate, exercise probability and distance from spot, then confirm manually. |
-| Positions and delivery | Track short net positions and handle spot delivery for positions tracked before expiry. Check problems in the recovery center. |
-| Premium tracking | View locally recorded and today's sell premiums, with Put/Call fill history. |
-| Local storage | Keep credentials in the system keyring and records in an account-bound SQLite database. |
+| Overview | Check total asset value, available margin and today’s locally recorded sell premiums. The event calendar shows positions, expiries, deliveries and recovery records by date. |
+| Dual investment | Sell puts to buy low or calls to sell high. Filter contracts by expiry, annualized estimate, exercise probability and distance from spot. |
+| Strategy orders | Inspect fills for locally recorded orders, delivery tasks and recovery records. |
+| Positions & spot | View short net positions, asset valuations and upcoming expiries. Hover over a balance or focus it with Tab for a breakdown by account. |
+| Returns | View total sell premiums recorded on this device, today’s premiums, the put/call breakdown and orders with fills. |
+| Settings | Connect to Binance, change the interface language and view local logs. |
 
 > [!IMPORTANT]
 > **The app places live trades. Use a dedicated account.** It sends spot orders in the background to complete delivery tasks. Do not complete the same delivery manually elsewhere, as the app may execute it again. Positions first found after expiry will not trigger delivery. Read the [trading safety guide](docs/trading-safety.md).
@@ -72,15 +76,15 @@ pnpm install --frozen-lockfile
 pnpm tauri:dev
 ```
 
-`pnpm dev` previews the UI only; trading requires the Tauri desktop client. See [local packaging](docs/development.md#桌面安装包) and [automated releases](docs/development.md#自动构建与发布). CI uses standard runners in public repositories only and skips private repositories.
+For a browser preview, run `pnpm dev` and open `http://127.0.0.1:1420`. Account queries, contract scans, local logs and order submission require the Tauri desktop client. See [local packaging](docs/development.md#桌面安装包) and [automated releases](docs/development.md#自动构建与发布). CI uses standard runners in public repositories only and skips private repositories.
 
 ## Workflow
 
 If you're signing up for Binance, you're welcome to [use our referral link](https://www.bsmkweb.net/register?ref=ZEABG36I) or enter referral code `ZEABG36I` to receive the applicable trading fee discounts.
 
 1. **Connect** — Enter credentials under **Settings → Binance connection**. Disable withdrawals; enable read, spot and options trading, Simple Earn and Universal Transfer permissions.
-2. **Select** — Choose a contract and quantity in **Dual investment**.
-3. **Confirm** — Review premium, breakeven and quantity before submitting the order.
+2. **Select a contract** — Choose **Buy low** or **Sell high** in **Dual investment**. Click a column heading to sort the candidates, select a contract and enter the quantity in contracts on the right.
+3. **Review and submit** — Click **Review order** and check the full contract symbol, expiry, quantity, estimated premium and breakeven. Choose **Back to edit** to make changes or **Confirm order** to submit the live order.
 4. **Follow delivery** — Keep the app running and connected. Check delivery tasks in **Strategy orders** and exceptions in the recovery center.
 
 After Binance cash-settles the option, the app trades spot to replicate physical delivery. It handles short positions only. If a tracked position expires while the app is offline, processing resumes after reconnection. See the [trading safety guide](docs/trading-safety.md).
@@ -88,8 +92,8 @@ After Binance cash-settles the option, the app trades spot to replicate physical
 <details>
 <summary>Account and return calculations</summary>
 
-- Local data is bound to one Binance account. You can replace its API Key; deleting credentials does not remove the binding. Startup attempts to connect with saved credentials.
-- Account sync only reads state and retains the previous result on failure. Holdings reflect net positions, not accumulated order history.
+- Credentials are stored in the system keyring. Orders, net positions and delivery records are stored in a SQLite database bound to one Binance account. You can replace the API key for that account. The binding survives credential deletion. Startup attempts to connect with saved credentials.
+- **Sync account** in **Strategy orders** queries orders, net positions and assets. It records delivery tasks locally for eligible positions as they expire. Failed position or valuation queries retain the last successful result. Each contract shows its net position.
 - After delivery, funds may still be reserved while transfers or Earn subscriptions finish. Do not clear the database to resolve unfinished trades.
 - Premium reporting counts fills from locally recorded sell orders. It excludes external orders and other account gains or losses.
 
@@ -100,9 +104,15 @@ After Binance cash-settles the option, the app trades spot to replicate physical
 | Put / Call breakeven | Strike minus / plus premium per BTC |
 | Simple annualized estimate (%) | Premium ÷ (strike × BTC amount) × 365 ÷ days to expiry × 100 |
 
-Fees are excluded. Today's premium uses the order creation date in the local time zone. The term starts at the candidate scan or order creation, rounding up to at least one day. View logs under **Settings → Logs**; deleting them does not remove orders or credentials.
+Fees are excluded. Today's premium uses the order creation date in the local time zone. The term starts at the candidate scan or order creation, rounding up to at least one day.
 
 </details>
+
+### View local logs
+
+**Settings → Logs** shows up to 120 recent entries, newest first. The list refreshes every 3 seconds while Settings is visible. It pauses when you leave the page or hide the window and refreshes as soon as you return.
+
+Drag selection is disabled for ordinary interface text. Editable fields support selection and paste. To copy a log entry, choose **Open today's log**, or use **Open log folder** to find another date. **Delete logs** asks for confirmation and removes the local log files. Orders and credentials are retained.
 
 ## Interface languages
 

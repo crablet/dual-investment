@@ -140,12 +140,24 @@ function toneClass(tone: CalendarEventTone) {
 </script>
 
 <template>
-  <section class="event-calendar-board">
+  <section class="panel event-calendar-board" aria-labelledby="calendar-title">
     <div class="event-calendar-toolbar">
-      <div class="event-calendar-heading">
-        <div>
-          <strong>{{ monthTitle }}</strong>
-        </div>
+      <h2 id="calendar-title">{{ t('ui.eventCalendar') }}</h2>
+      <strong class="event-calendar-heading">{{ monthTitle }}</strong>
+
+      <div class="event-calendar-filters" role="group" :aria-label="t('ui.filterEvents')">
+        <button
+          v-for="type in calendarEventTypes"
+          :key="type.id"
+          class="event-calendar-filter"
+          :class="{ active: activeType === type.id }"
+          :aria-pressed="activeType === type.id"
+          type="button"
+          @click="activeType = type.id"
+        >
+          <span class="event-filter-dot" :class="toneClass(type.tone)" />
+          <span>{{ type.label }}</span>
+        </button>
       </div>
 
       <div class="event-calendar-controls">
@@ -193,29 +205,12 @@ function toneClass(tone: CalendarEventTone) {
             </span>
           </button>
         </div>
-
-        <div class="event-calendar-filters" role="group" :aria-label="t('ui.filterEvents')">
-          <button
-            v-for="type in calendarEventTypes"
-            :key="type.id"
-            class="event-calendar-filter"
-            :class="{ active: activeType === type.id }"
-            :aria-pressed="activeType === type.id"
-            type="button"
-            @click="activeType = type.id"
-          >
-            <span class="event-filter-dot" :class="toneClass(type.tone)" />
-            <span>{{ type.label }}</span>
-          </button>
-        </div>
       </div>
 
       <aside class="event-calendar-detail">
         <header class="event-detail-header">
-          <div>
-            <span> {{ t('ui.eventDetails') }} </span>
-            <strong>{{ selectedDateTitle }}</strong>
-          </div>
+          <strong>{{ selectedDateTitle }}</strong>
+          <span>{{ t('ui.eventDetails') }}</span>
         </header>
 
         <p v-if="selectedDayEvents.length === 0" class="empty-state"> {{ t('ui.noEventsMatchThisFilter') }} </p>

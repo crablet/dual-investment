@@ -51,9 +51,9 @@ const stableLabelOrder = new Map<string, number>([
 ])
 
 const fixedColors = new Map<string, string>([
-  ['USDT', '#f5b625'],
+  ['USDT', '#57cea8'],
   ['USDC', '#2775ca'],
-  ['BTC', '#f7931a'],
+  ['BTC', '#f49c48'],
   ['BNB', '#f0b90b'],
   ['BNSOL', '#52c66f'],
   ['TON', '#0098ea'],

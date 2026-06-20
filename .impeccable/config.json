@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "files": [
+          "src/styles.css"
+        ],
+        "createdAt": "2026-11-18T16:26:13.878Z",
+        "reason": "设计复核：af0a095 的左栏工作台已选用 Inter 作为西文字体，并启用等宽数字来对齐金额。"
+      }
+    ]
+  }
+}

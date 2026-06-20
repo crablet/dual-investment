@@ -2,61 +2,97 @@
 
 import type { LocalizedMessage } from '@/i18n'
 import type { LogSnapshot } from '@/types/domain'
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { api, commandError } from '@/services/api'
 
-type LogAction = 'refresh' | 'openFile' | 'openFolder' | 'clear'
+type LogAction = 'openFile' | 'openFolder' | 'clear'
+const logRefreshIntervalMs = 3_000
 
 export function useLogSnapshot() {
   const snapshot = shallowRef<LogSnapshot>()
   const pendingAction = shallowRef<LogAction>()
-  const error = shallowRef<LocalizedMessage>()
+  const actionError = shallowRef<LocalizedMessage>()
+  const readError = shallowRef<LocalizedMessage>()
+  const error = computed(() => actionError.value ?? readError.value)
+  let refreshTimer: number | undefined
+  let reading = false
+  let revision = 0
 
   const hasFiles = computed(() => snapshot.value?.hasFiles ?? false)
   const recentEntries = computed(() => snapshot.value?.recentEntries ?? [])
   const writeError = computed(() => snapshot.value?.writeError)
 
-  /** 日志错误只显示在设置页，不覆盖全局交易错误。 */
-  async function run<T>(action: LogAction, task: () => Promise<T>) {
-    pendingAction.value = action
-    error.value = undefined
+  async function refresh() {
+    if (refreshTimer === undefined || pendingAction.value || reading)
+      return
+    const requestedRevision = revision
+    reading = true
     try {
-      return await task()
+      const next = await api.getLogSnapshot()
+      if (revision === requestedRevision) {
+        snapshot.value = next
+        readError.value = undefined
+      }
     }
     catch (caught) {
-      error.value = commandError(caught).message
-      return undefined
+      if (revision === requestedRevision)
+        readError.value = commandError(caught).message
+    }
+    finally {
+      reading = false
+    }
+  }
+
+  async function run(action: LogAction, task: () => Promise<LogSnapshot | void>) {
+    if (pendingAction.value)
+      return
+    // 文件操作前发出的查询可能晚于删除返回，不能用旧快照恢复已删除的日志。
+    revision++
+    pendingAction.value = action
+    actionError.value = undefined
+    try {
+      const next = await task()
+      if (next) {
+        snapshot.value = next
+        readError.value = undefined
+      }
+    }
+    catch (caught) {
+      actionError.value = commandError(caught).message
     }
     finally {
       pendingAction.value = undefined
     }
   }
 
-  async function refresh() {
-    const next = await run('refresh', () => api.getLogSnapshot())
-    if (next) {
-      snapshot.value = next
-    }
-  }
-
   async function openCurrentFile() {
     // 打开外部日志查看器后刷新快照，让删除按钮和最近日志跟随文件系统实际状态。
-    await run('openFile', () => api.openCurrentLogFile())
+    await run('openFile', api.openCurrentLogFile)
     await refresh()
   }
 
-  async function openFolder() {
-    await run('openFolder', () => api.openLogFolder())
+  function stopPolling() {
+    window.clearInterval(refreshTimer)
+    refreshTimer = undefined
   }
 
-  async function clear() {
-    const next = await run('clear', () => api.clearLogFiles())
-    if (next) {
-      snapshot.value = next
+  function updatePolling() {
+    stopPolling()
+    if (!document.hidden) {
+      refreshTimer = window.setInterval(refresh, logRefreshIntervalMs)
+      void refresh()
     }
   }
 
-  onMounted(refresh)
+  onMounted(() => {
+    document.addEventListener('visibilitychange', updatePolling)
+    updatePolling()
+  })
+  onBeforeUnmount(() => {
+    document.removeEventListener('visibilitychange', updatePolling)
+    stopPolling()
+    revision++
+  })
 
   return {
     hasFiles,
@@ -64,9 +100,8 @@ export function useLogSnapshot() {
     pendingAction,
     error,
     writeError,
-    refresh,
     openCurrentFile,
-    openFolder,
-    clear,
+    openFolder: () => run('openFolder', api.openLogFolder),
+    clear: () => run('clear', api.clearLogFiles),
   }
 }

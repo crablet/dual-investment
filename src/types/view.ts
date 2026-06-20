@@ -13,11 +13,9 @@ export type OrderProgressStepStatus = OrderProgressStatus | 'pending'
 
 /** 总览指标卡展示模型。 */
 export interface MetricCardModel {
-  id: string
+  id: 'portfolio' | 'margin' | 'premium'
   title: string
   value: string
-  icon: 'wallet' | 'shield' | 'coins' | 'activity'
-  tone: 'gold' | 'blue' | 'gray'
 }
 
 /** 构成图展示项。 */

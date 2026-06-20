@@ -1,14 +1,17 @@
-<!-- 页面布局：侧边导航、错误提示、加载状态和内容插槽。 -->
+<!-- 页面布局：左侧导航、错误提示、加载状态和内容插槽。 -->
 <script setup lang="ts">
 import { NAlert, NSpin, useMessage } from 'naive-ui'
 
-import { watch } from 'vue'
-import SidebarNav from '@/components/layout/SidebarNav.vue'
+import { useTemplateRef, watch } from 'vue'
+import WorkspaceNav from '@/components/layout/WorkspaceNav.vue'
 import { messageText } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 const message = useMessage()
+const workspace = useTemplateRef<HTMLElement>('workspace')
+
+watch(() => store.activeView, () => workspace.value?.scrollTo(0, 0), { flush: 'post' })
 
 watch(
   () => store.orderNotice,
@@ -26,17 +29,16 @@ watch(
 
 <template>
   <div class="app-shell">
-    <SidebarNav />
-    <main class="workspace">
-      <NAlert v-if="store.error" type="error" closable class="shell-alert">
-        {{ messageText(store.error) }}
-      </NAlert>
-
-      <NSpin :show="store.loading && !store.snapshot">
-        <section class="view-surface">
+    <WorkspaceNav />
+    <main ref="workspace" class="workspace">
+      <div class="workspace-inner">
+        <NAlert v-if="store.error" type="error" closable class="shell-alert">
+          {{ messageText(store.error) }}
+        </NAlert>
+        <NSpin :show="store.loading && !store.snapshot">
           <slot />
-        </section>
-      </NSpin>
+        </NSpin>
+      </div>
     </main>
   </div>
 </template>

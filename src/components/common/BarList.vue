@@ -1,17 +1,14 @@
-<!-- 条形图列表。数值、格式和宽度由调用方提供。 -->
 <script setup lang="ts">
 import type { BarListItem } from '@/types/view'
 
-defineProps<{
-  items: BarListItem[]
-}>()
+defineProps<{ items: BarListItem[] }>()
 </script>
 
 <template>
   <div class="bar-list">
-    <div v-for="item in items" :key="item.label">
-      <span>{{ item.label }}</span>
-      <strong :style="{ width: item.width }">{{ item.value }}</strong>
+    <div v-for="item in items" :key="item.label" class="bar-row">
+      <span>{{ item.label }}</span><strong>{{ item.value }}</strong>
+      <div class="bar-track" aria-hidden="true"><i :style="{ width: item.width }" /></div>
     </div>
   </div>
 </template>
