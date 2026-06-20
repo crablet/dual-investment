@@ -102,6 +102,7 @@ function isActive(key: string) {
         :key="item.key"
         type="button"
         class="legend-row"
+        :aria-label="item.ariaLabel"
         :class="{ active: isActive(item.key) }"
         @focus="setHover(item.key)"
         @blur="clearHover"

@@ -16,7 +16,7 @@
 | Windows 10 / 11 x64 | [Microsoft C++ Build Tools](https://v2.tauri.app/start/prerequisites/#windows)、Windows SDK、Rust MSVC 工具链、WebView2、Git。使用原生 Windows 终端；WSL 生成 Linux 应用。 | Windows 凭据管理器 |
 | macOS 13.3+ | Xcode Command Line Tools（`xcode-select --install`）、Rust、Git。支持 Apple Silicon 与 Intel。 | macOS Keychain |
 
-Windows 安装包未签名；macOS 为 ad-hoc 签名、未公证，首次打开可能需按 [Apple 说明](https://support.apple.com/en-us/102445)允许运行。平台验收状态见 [README](../README.md#安装与平台状态)；Ubuntu 24.04 的 CI 构建不代表兼容所有 Linux 发行版。
+Windows 安装包未签名；macOS 为 ad-hoc 签名、未公证，首次打开可能需按 [Apple 说明](https://support.apple.com/en-us/102445)允许运行。平台验收状态见 [README](../README.md#安装与平台状态)；Ubuntu 26.04 的 CI 构建不代表兼容所有 Linux 发行版。
 
 ## 代码结构
 
@@ -67,6 +67,10 @@ Windows 安装包未签名；macOS 为 ad-hoc 签名、未公证，首次打开�
 | Tauri 启动、图标或窗口 | 隔离数据与凭据后启动验证，不连接真实账户 |
 
 交易验证仅用隔离存储与交易所 / IPC 替身，不读取用户真实凭据或数据库，不发送实盘下单、划转或申赎。净仓与交割改动须覆盖重复下单、到期前平仓、离线跨期、首次发现已到期，以及查询失败和未知数量。临时验证产物按 [AGENTS.md](../AGENTS.md)清理。
+
+### 保持既有界面
+
+内部实现优化须保留原有布局、字号、间距、颜色、截断规则、悬停提示、图表与弹窗效果。无障碍名称和状态可通过不影响布局的属性补充；如果改写无法保持显示一致，保留现有组件实现。界面验证使用相同数据、窗口尺寸和语言，与改动前逐页对照。
 
 ### 桌面安装包
 

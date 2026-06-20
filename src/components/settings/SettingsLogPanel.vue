@@ -23,7 +23,7 @@ async function clearLogs() {
   <Panel :title="t('ui.logs')" class="settings-logs">
     <template #action>
       <NButton size="small" secondary :loading="logs.pendingAction.value === 'refresh'" @click="logs.refresh">
-        <template #icon><NIcon :component="RefreshCw" /></template> {{ t('ui.refresh') }}
+        <template #icon><NIcon aria-hidden="true" :component="RefreshCw" /></template> {{ t('ui.refresh') }}
       </NButton>
     </template>
 
@@ -35,13 +35,13 @@ async function clearLogs() {
 
     <div class="settings-log-actions">
       <NButton secondary :loading="logs.pendingAction.value === 'openFile'" @click="logs.openCurrentFile">
-        <template #icon><NIcon :component="FileText" /></template> {{ t('ui.openTodaySLog') }}
+        <template #icon><NIcon aria-hidden="true" :component="FileText" /></template> {{ t('ui.openTodaySLog') }}
       </NButton>
       <NButton secondary :loading="logs.pendingAction.value === 'openFolder'" @click="logs.openFolder">
-        <template #icon><NIcon :component="FolderOpen" /></template> {{ t('ui.openLogFolder') }}
+        <template #icon><NIcon aria-hidden="true" :component="FolderOpen" /></template> {{ t('ui.openLogFolder') }}
       </NButton>
       <NButton secondary type="error" :loading="logs.pendingAction.value === 'clear'" :disabled="!logs.hasFiles.value" @click="clearLogs">
-        <template #icon><NIcon :component="Trash2" /></template> {{ t('ui.deleteLogs') }}
+        <template #icon><NIcon aria-hidden="true" :component="Trash2" /></template> {{ t('ui.deleteLogs') }}
       </NButton>
     </div>
 

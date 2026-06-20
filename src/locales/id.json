@@ -349,7 +349,10 @@
     "deliveryEvent": "Penyerahan",
     "orderHistory": "Riwayat order lokal",
     "syncAccount": "Sinkronkan akun",
-    "noUpcomingPositions": "Tidak ada posisi neto yang belum jatuh tempo"
+    "noUpcomingPositions": "Tidak ada posisi neto yang belum jatuh tempo",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}; jumlah acara: {count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "Respons akun spot Binance tidak memuat UID yang valid",

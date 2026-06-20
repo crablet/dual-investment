@@ -349,7 +349,10 @@
     "deliveryEvent": "交割",
     "orderHistory": "本机订单历史",
     "syncAccount": "同步账户",
-    "noUpcomingPositions": "暂无未到期净仓"
+    "noUpcomingPositions": "暂无未到期净仓",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}；事件数：{count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "Binance 现货账户响应缺少有效 UID",

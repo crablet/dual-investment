@@ -28,7 +28,7 @@ jobs:
     name: Prepare release draft
     # 在分配 runner 前跳过非公开仓库，避免消耗私有仓库的付费额度。
     if: github.server_url == 'https://github.com' && github.event.repository.visibility == 'public'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -105,13 +105,13 @@ jobs:
       matrix:
         include:
           - platform: Linux x64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
             target: x86_64-unknown-linux-gnu
           - platform: Windows x64
             runner: windows-2025
             target: x86_64-pc-windows-msvc
           - platform: macOS Universal
-            runner: macos-15
+            runner: macos-26
             target: universal-apple-darwin
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90

@@ -64,7 +64,8 @@ const reviewFacts = computed<ReviewFact[]>(() => {
 })
 
 function confirm() {
-  emit('confirm')
+  if (props.show && props.candidate)
+    emit('confirm')
 }
 </script>
 
@@ -83,7 +84,7 @@ function confirm() {
       aria-labelledby="order-review-title"
     >
       <button class="order-review-close" type="button" :aria-label="t('ui.closeOrderReview')" @click="emit('close')">
-        <NIcon :component="X" />
+        <NIcon aria-hidden="true" :component="X" />
       </button>
 
       <header class="order-review-header">

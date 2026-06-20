@@ -349,7 +349,10 @@
     "deliveryEvent": "受渡",
     "orderHistory": "端末内の注文履歴",
     "syncAccount": "アカウントを同期",
-    "noUpcomingPositions": "未満期の純建玉はありません"
+    "noUpcomingPositions": "未満期の純建玉はありません",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}；イベント数：{count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "Binance現物口座の応答に有効なUIDがありません",

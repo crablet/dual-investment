@@ -349,7 +349,10 @@
     "deliveryEvent": "Entrega",
     "orderHistory": "Historial local de órdenes",
     "syncAccount": "Sincronizar cuenta",
-    "noUpcomingPositions": "Sin posiciones netas pendientes de vencimiento"
+    "noUpcomingPositions": "Sin posiciones netas pendientes de vencimiento",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}; eventos: {count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "La respuesta de la cuenta spot de Binance no contiene un UID válido",

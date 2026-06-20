@@ -23,7 +23,7 @@ const credentialStatusClass = computed(() => store.settings?.savedCredentials ? 
 const reconnectAlertType = computed(() => store.autoReconnectPaused ? 'warning' : 'info')
 
 async function connect() {
-  if (!canConnect.value) {
+  if (!canConnect.value || store.isLoading('connect')) {
     return
   }
 
@@ -74,26 +74,27 @@ async function forgetCredentials() {
           </div>
         </div>
 
-        <div class="settings-connect-form">
-          <NInput v-model:value="form.apiKey" placeholder="API Key" />
-          <NInput v-model:value="form.apiSecret" type="password" placeholder="API Secret" show-password-on="click" />
+        <form class="settings-connect-form" method="post" @submit.prevent="connect">
+          <NInput v-model:value="form.apiKey" :input-props="{ 'id': 'binance-api-key', 'name': 'apiKey', 'aria-label': t('ui.apiKey'), 'required': true, 'autocomplete': 'off', 'spellcheck': false, 'autocapitalize': 'none', 'autocorrect': 'off' }" :placeholder="t('ui.apiKey')" />
+          <NInput v-model:value="form.apiSecret" type="password" :input-props="{ 'id': 'binance-api-secret', 'name': 'apiSecret', 'aria-label': t('ui.apiSecret'), 'required': true, 'autocomplete': 'off', 'spellcheck': false, 'autocapitalize': 'none', 'autocorrect': 'off' }" :placeholder="t('ui.apiSecret')" show-password-on="click" />
           <div class="settings-connect-actions">
-            <NButton type="primary" :disabled="!canConnect" :loading="store.isLoading('connect')" @click="connect">
-              <template #icon><NIcon :component="KeyRound" /></template> {{ t('ui.connectBinance') }}
+            <NButton type="primary" attr-type="submit" :disabled="!canConnect" :loading="store.isLoading('connect')">
+              <template #icon><NIcon aria-hidden="true" :component="KeyRound" /></template> {{ t('ui.connectBinance') }}
             </NButton>
             <NButton
               secondary
+              attr-type="button"
               :disabled="!store.settings?.savedCredentials"
               :loading="store.isLoading('connect')"
               @click="connectSaved"
             >
-              <template #icon><NIcon :component="KeyRound" /></template> {{ t('ui.connectWithSavedCredentials') }}
+              <template #icon><NIcon aria-hidden="true" :component="KeyRound" /></template> {{ t('ui.connectWithSavedCredentials') }}
             </NButton>
           </div>
           <NAlert v-if="store.autoReconnectMessage" :type="reconnectAlertType" class="settings-reconnect-alert">
             {{ store.autoReconnectMessage }}
           </NAlert>
-        </div>
+        </form>
       </div>
 
       <section class="settings-permissions" :aria-label="t('ui.apiPermissions')">

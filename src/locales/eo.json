@@ -349,7 +349,10 @@
     "deliveryEvent": "Livero",
     "orderHistory": "Loka historio de ordonoj",
     "syncAccount": "Sinkronigi konton",
-    "noUpcomingPositions": "Neniuj neeksvalidiĝintaj netaj pozicioj"
+    "noUpcomingPositions": "Neniuj neeksvalidiĝintaj netaj pozicioj",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}; eventoj: {count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "En la respondo de la Binance-spotkonto mankas valida UID",

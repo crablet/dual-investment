@@ -79,7 +79,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
       <template #action>
         <div class="button-row compact">
           <NButton size="small" secondary :loading="store.isLoading('sync')" @click="store.syncLiveState()">
-            <template #icon><NIcon :component="RefreshCw" /></template> {{ t('ui.syncAccount') }}
+            <template #icon><NIcon aria-hidden="true" :component="RefreshCw" /></template> {{ t('ui.syncAccount') }}
           </NButton>
         </div>
       </template>
@@ -94,17 +94,17 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
 
     <Panel :title="t('ui.orderHistory')" class="span-8">
       <div class="table-wrap">
-        <table class="data-table">
+        <table class="data-table" :aria-label="t('ui.orderHistory')">
           <thead>
             <tr>
-              <th> {{ t('ui.orderId') }} </th>
-              <th> {{ t('ui.direction') }} </th>
-              <th> {{ t('ui.underlying') }} </th>
-              <th> {{ t('ui.strikePrice') }} </th>
-              <th> {{ t('ui.expiryDate') }} </th>
-              <th> {{ t('ui.quantity') }} </th>
-              <th> {{ t('ui.premium2') }} </th>
-              <th> {{ t('ui.status') }} </th>
+              <th scope="col"> {{ t('ui.orderId') }} </th>
+              <th scope="col"> {{ t('ui.direction') }} </th>
+              <th scope="col"> {{ t('ui.underlying') }} </th>
+              <th scope="col"> {{ t('ui.strikePrice') }} </th>
+              <th scope="col"> {{ t('ui.expiryDate') }} </th>
+              <th scope="col"> {{ t('ui.quantity') }} </th>
+              <th scope="col"> {{ t('ui.premium2') }} </th>
+              <th scope="col"> {{ t('ui.status') }} </th>
             </tr>
           </thead>
           <tbody>
@@ -149,19 +149,19 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
 
     <Panel :title="t('ui.recoveryCenter')" class="span-12">
       <div class="table-wrap">
-        <table class="data-table recovery-table">
+        <table class="data-table recovery-table" :aria-label="t('ui.recoveryCenter')">
           <thead>
             <tr>
-              <th> {{ t('ui.time') }} </th>
-              <th> {{ t('ui.type') }} </th>
-              <th> {{ t('ui.target') }} </th>
-              <th> {{ t('ui.amountUnderlying') }} </th>
-              <th> {{ t('ui.exchangeReference') }} </th>
-              <th> {{ t('ui.status') }} </th>
-              <th> {{ t('ui.sourceOfFacts') }} </th>
-              <th> {{ t('ui.nextStep') }} </th>
-              <th> {{ t('ui.description') }} </th>
-              <th> {{ t('ui.action') }} </th>
+              <th scope="col"> {{ t('ui.time') }} </th>
+              <th scope="col"> {{ t('ui.type') }} </th>
+              <th scope="col"> {{ t('ui.target') }} </th>
+              <th scope="col"> {{ t('ui.amountUnderlying') }} </th>
+              <th scope="col"> {{ t('ui.exchangeReference') }} </th>
+              <th scope="col"> {{ t('ui.status') }} </th>
+              <th scope="col"> {{ t('ui.sourceOfFacts') }} </th>
+              <th scope="col"> {{ t('ui.nextStep') }} </th>
+              <th scope="col"> {{ t('ui.description') }} </th>
+              <th scope="col"> {{ t('ui.action') }} </th>
             </tr>
           </thead>
           <tbody>
@@ -194,7 +194,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
                     :disabled="!canRecover(row)"
                     @click="recoverRow(row)"
                   >
-                    <template #icon><NIcon :component="RefreshCw" /></template>
+                    <template #icon><NIcon aria-hidden="true" :component="RefreshCw" /></template>
                     {{ recoverActionLabel(row) }}
                   </NButton>
                   <NButton
@@ -215,7 +215,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
                       :loading="store.isLoading('recover')"
                       @click="resolveFundingRow(row, 'confirmed')"
                     >
-                      <template #icon><NIcon :component="CheckCircle2" /></template> {{ t('ui.verifySuccess') }}
+                      <template #icon><NIcon aria-hidden="true" :component="CheckCircle2" /></template> {{ t('ui.verifySuccess') }}
                     </NButton>
                     <NButton
                       size="small"
@@ -224,7 +224,7 @@ function createOrderDetailRows(order: StrategyOrder): OrderDetailRow[] {
                       :loading="store.isLoading('recover')"
                       @click="resolveFundingRow(row, 'failed')"
                     >
-                      <template #icon><NIcon :component="XCircle" /></template> {{ t('ui.verifyFailure') }}
+                      <template #icon><NIcon aria-hidden="true" :component="XCircle" /></template> {{ t('ui.verifyFailure') }}
                     </NButton>
                   </template>
                 </div>

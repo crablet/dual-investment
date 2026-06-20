@@ -65,7 +65,7 @@ function stepIcon(step: OrderProgressStepView) {
       <div class="order-progress-actions">
         <NTag :type="statusTone" size="small">{{ statusText }}</NTag>
         <NButton size="tiny" quaternary circle :title="t('ui.closeProgress')" @click="emit('close')">
-          <template #icon><NIcon :component="X" /></template>
+          <template #icon><NIcon aria-hidden="true" :component="X" /></template>
         </NButton>
       </div>
     </header>
@@ -76,7 +76,7 @@ function stepIcon(step: OrderProgressStepView) {
         :key="step.id"
         :class="[`status-${step.status}`]"
       >
-        <NIcon :component="stepIcon(step)" />
+        <NIcon aria-hidden="true" :component="stepIcon(step)" />
         <div>
           <strong>{{ messageText(step.label) }}</strong>
           <span>{{ messageText(step.message) || t('ui.waiting') }}</span>
@@ -91,7 +91,7 @@ function stepIcon(step: OrderProgressStepView) {
     </div>
 
     <div v-else-if="progress.status === 'error'" class="order-progress-result error">
-      <NIcon :component="AlertTriangle" />
+      <NIcon aria-hidden="true" :component="AlertTriangle" />
       <span>{{ messageText(progress.error) || t('ui.orderFailedCheckTheErrorAndRecovery') }}</span>
     </div>
 

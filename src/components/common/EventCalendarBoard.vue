@@ -31,6 +31,7 @@ import {
 interface CalendarDay {
   date: string
   label: number
+  accessibleLabel: string
   inCurrentMonth: boolean
   isToday: boolean
   events: CalendarEvent[]
@@ -85,12 +86,14 @@ const calendarDays = computed<CalendarDay[]>(() => {
   return Array.from({ length: 42 }, (_, index) => {
     const day = addDays(visibleStart.value, index)
     const date = formatDateKey(day)
+    const dayEvents = eventsByDate.value.get(date) ?? []
     return {
       date,
       label: day.getDate(),
+      accessibleLabel: t('ui.calendarDayLabel', { date: calendarDateLabel(day, true), count: dayEvents.length }),
       inCurrentMonth: day.getMonth() === currentMonth.value.getMonth(),
       isToday: date === todayKey.value,
-      events: eventsByDate.value.get(date) ?? [],
+      events: dayEvents,
     }
   })
 })
@@ -147,11 +150,11 @@ function toneClass(tone: CalendarEventTone) {
 
       <div class="event-calendar-controls">
         <NButton circle secondary size="small" :title="t('ui.previousMonth')" :aria-label="t('ui.previousMonth')" @click="previousMonth">
-          <template #icon><NIcon :component="ChevronLeft" /></template>
+          <template #icon><NIcon aria-hidden="true" :component="ChevronLeft" /></template>
         </NButton>
         <NButton size="small" secondary @click="selectToday"> {{ t('ui.today') }} </NButton>
         <NButton circle secondary size="small" :title="t('ui.nextMonth')" :aria-label="t('ui.nextMonth')" @click="nextMonth">
-          <template #icon><NIcon :component="ChevronRight" /></template>
+          <template #icon><NIcon aria-hidden="true" :component="ChevronRight" /></template>
         </NButton>
       </div>
     </div>
@@ -174,6 +177,9 @@ function toneClass(tone: CalendarEventTone) {
               'has-events': day.events.length > 0,
             }"
             type="button"
+            :aria-label="day.accessibleLabel"
+            :aria-pressed="selectedDate === day.date"
+            :aria-current="day.isToday ? 'date' : undefined"
             @click="selectDate(day.date)"
           >
             <span class="event-day-number">{{ day.label }}</span>
@@ -188,12 +194,13 @@ function toneClass(tone: CalendarEventTone) {
           </button>
         </div>
 
-        <div class="event-calendar-filters" :aria-label="t('ui.filterEvents')">
+        <div class="event-calendar-filters" role="group" :aria-label="t('ui.filterEvents')">
           <button
             v-for="type in calendarEventTypes"
             :key="type.id"
             class="event-calendar-filter"
             :class="{ active: activeType === type.id }"
+            :aria-pressed="activeType === type.id"
             type="button"
             @click="activeType = type.id"
           >
@@ -223,7 +230,7 @@ function toneClass(tone: CalendarEventTone) {
             <div class="event-detail-meta">
               <span>{{ typeLabel(event.type) }}</span>
               <em>
-                <NIcon :component="Clock3" />
+                <NIcon aria-hidden="true" :component="Clock3" />
                 {{ event.timeLabel ?? t('ui.allDay') }}
               </em>
             </div>

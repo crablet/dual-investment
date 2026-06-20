@@ -50,6 +50,7 @@ const { money, percent, signedPercent } = useFormat()
       >
         <span>{{ column.label }}</span>
         <NIcon
+          aria-hidden="true"
           :component="props.sortKey === column.key
             ? (props.sortDirection === 'asc' ? ChevronUp : ChevronDown)
             : ArrowUpDown"
@@ -61,6 +62,7 @@ const { money, percent, signedPercent } = useFormat()
       :key="candidate.optionSymbol"
       class="opportunity-row"
       :class="{ selected: props.selectedOptionSymbol === candidate.optionSymbol }"
+      :aria-pressed="props.selectedOptionSymbol === candidate.optionSymbol"
       type="button"
       @click="emit('select', candidate)"
     >

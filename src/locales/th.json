@@ -349,7 +349,10 @@
     "deliveryEvent": "การส่งมอบ",
     "orderHistory": "ประวัติคำสั่งในเครื่อง",
     "syncAccount": "ซิงก์บัญชี",
-    "noUpcomingPositions": "ไม่มีสถานะสุทธิที่ยังไม่หมดอายุ"
+    "noUpcomingPositions": "ไม่มีสถานะสุทธิที่ยังไม่หมดอายุ",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}; จำนวนเหตุการณ์: {count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "การตอบกลับของบัญชีสปอต Binance ไม่มี UID ที่ถูกต้อง",

@@ -32,16 +32,16 @@ const details = computed(() => {
 <template>
   <Panel :title="t('ui.deliveryTasks')">
     <div class="table-wrap">
-      <table class="data-table delivery-table">
+      <table class="data-table delivery-table" :aria-label="t('ui.deliveryTasks')">
         <thead>
           <tr>
-            <th>{{ t('ui.optionContract') }}</th>
-            <th>{{ t('ui.direction') }}</th>
-            <th>{{ t('ui.expiryDate') }}</th>
-            <th>{{ t('ui.confirmedDeliveryQuantity') }}</th>
-            <th>{{ t('ui.spotFilledQuantity') }}</th>
-            <th>{{ t('ui.deliveryStatus') }}</th>
-            <th>{{ t('ui.description') }}</th>
+            <th scope="col">{{ t('ui.optionContract') }}</th>
+            <th scope="col">{{ t('ui.direction') }}</th>
+            <th scope="col">{{ t('ui.expiryDate') }}</th>
+            <th scope="col">{{ t('ui.confirmedDeliveryQuantity') }}</th>
+            <th scope="col">{{ t('ui.spotFilledQuantity') }}</th>
+            <th scope="col">{{ t('ui.deliveryStatus') }}</th>
+            <th scope="col">{{ t('ui.description') }}</th>
           </tr>
         </thead>
         <tbody>

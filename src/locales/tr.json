@@ -349,7 +349,10 @@
     "deliveryEvent": "Teslimat",
     "orderHistory": "Yerel emir geçmişi",
     "syncAccount": "Hesabı senkronize et",
-    "noUpcomingPositions": "Vadesi dolmamış net pozisyon yok"
+    "noUpcomingPositions": "Vadesi dolmamış net pozisyon yok",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}; etkinlik sayısı: {count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "Binance spot hesabı yanıtında geçerli bir UID bulunmuyor",

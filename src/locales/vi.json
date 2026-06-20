@@ -349,7 +349,10 @@
     "deliveryEvent": "Giao nhận",
     "orderHistory": "Lịch sử lệnh cục bộ",
     "syncAccount": "Đồng bộ tài khoản",
-    "noUpcomingPositions": "Không có vị thế ròng chưa đáo hạn"
+    "noUpcomingPositions": "Không có vị thế ròng chưa đáo hạn",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}; số sự kiện: {count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "Phản hồi tài khoản spot Binance không có UID hợp lệ",

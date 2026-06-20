@@ -45,14 +45,14 @@ const strategyPerformance = computed(() => {
 
     <Panel :title="t('ui.recordedPremiumDetails')" class="span-12">
       <div class="table-wrap">
-        <table class="data-table">
+        <table class="data-table" :aria-label="t('ui.recordedPremiumDetails')">
           <thead>
             <tr>
-              <th> {{ t('ui.date') }} </th>
-              <th> {{ t('ui.strategy') }} </th>
-              <th> {{ t('ui.premium2') }} </th>
-              <th> {{ t('ui.annualizedReturn') }} </th>
-              <th> {{ t('ui.notes') }} </th>
+              <th scope="col"> {{ t('ui.date') }} </th>
+              <th scope="col"> {{ t('ui.strategy') }} </th>
+              <th scope="col"> {{ t('ui.premium2') }} </th>
+              <th scope="col"> {{ t('ui.annualizedReturn') }} </th>
+              <th scope="col"> {{ t('ui.notes') }} </th>
             </tr>
           </thead>
           <tbody>

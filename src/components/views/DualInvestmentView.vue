@@ -118,14 +118,14 @@ function confirmOrderReview() {
 <template>
   <div class="dual-workbench">
     <div class="deal-main">
-      <section class="direction-switch">
-        <button :class="{ active: form.direction === 'sellPut' }" type="button" @click="selectDirection('sellPut')">
-          <NIcon :component="ArrowDownCircle" />
+      <section class="direction-switch" role="group" :aria-label="t('ui.direction')">
+        <button :class="{ active: form.direction === 'sellPut' }" :aria-pressed="form.direction === 'sellPut'" type="button" @click="selectDirection('sellPut')">
+          <NIcon aria-hidden="true" :component="ArrowDownCircle" />
           <span> {{ t('ui.buyLow') }} </span>
           <strong> {{ t('ui.sellPut') }} </strong>
         </button>
-        <button :class="{ active: form.direction === 'sellCall' }" type="button" @click="selectDirection('sellCall')">
-          <NIcon :component="ArrowUpCircle" />
+        <button :class="{ active: form.direction === 'sellCall' }" :aria-pressed="form.direction === 'sellCall'" type="button" @click="selectDirection('sellCall')">
+          <NIcon aria-hidden="true" :component="ArrowUpCircle" />
           <span> {{ t('ui.sellHigh') }} </span>
           <strong> {{ t('ui.sellCall') }} </strong>
         </button>
@@ -133,11 +133,12 @@ function confirmOrderReview() {
 
       <section class="candidate-board">
         <div class="candidate-toolbar">
-          <div class="expiry-tabs" :aria-label="t('ui.filterByExpiry')">
+          <div class="expiry-tabs" role="group" :aria-label="t('ui.filterByExpiry')">
             <button
               v-for="filter in expiryFilters"
               :key="filter.id"
               :class="{ active: expiryFilter === filter.id }"
+              :aria-pressed="expiryFilter === filter.id"
               type="button"
               @click="expiryFilter = filter.id"
             >
@@ -156,22 +157,24 @@ function confirmOrderReview() {
               :loading="store.isLoading('scan')"
               @click="store.scan()"
             >
-              <template #icon><NIcon :component="RefreshCw" /></template>
+              <template #icon><NIcon aria-hidden="true" :component="RefreshCw" /></template>
             </NButton>
           </div>
         </div>
 
-        <div class="candidate-filter-bar" :aria-label="t('ui.candidateFilters')">
-          <label> {{ t('ui.annualized') }} <NInputNumber
+        <div class="candidate-filter-bar" role="group" :aria-label="t('ui.candidateFilters')">
+          <label for="annualized-filter"> {{ t('ui.annualized') }} <NInputNumber
             v-model:value="candidateFilter.minAnnualized"
+            :input-props="{ id: 'annualized-filter' }"
             clearable
             :placeholder="t('ui.any')"
             :min="0"
             :step="1"
           />
           </label>
-          <label> {{ t('ui.exerciseProbability2') }} <NInputNumber
+          <label for="probability-filter"> {{ t('ui.exerciseProbability2') }} <NInputNumber
             v-model:value="candidateFilter.maxExerciseProbability"
+            :input-props="{ id: 'probability-filter' }"
             clearable
             :placeholder="t('ui.any')"
             :min="0"
@@ -179,8 +182,9 @@ function confirmOrderReview() {
             :step="1"
           />
           </label>
-          <label> {{ t('ui.distanceFromSpot') }} <NInputNumber
+          <label for="distance-filter"> {{ t('ui.distanceFromSpot') }} <NInputNumber
             v-model:value="candidateFilter.maxDistanceAbs"
+            :input-props="{ id: 'distance-filter' }"
             clearable
             :placeholder="t('ui.any')"
             :min="0"
@@ -215,7 +219,7 @@ function confirmOrderReview() {
             <span class="order-eyebrow"> {{ t('ui.placeOrder') }} </span>
             <h3>{{ panelTitle }}</h3>
           </div>
-          <NIcon :component="Zap" />
+          <NIcon aria-hidden="true" :component="Zap" />
         </header>
 
         <div class="deal-summary">
@@ -243,14 +247,14 @@ function confirmOrderReview() {
         </div>
 
         <div class="order-form">
-          <label> {{ t('ui.quantityContracts') }} <NInput v-model:value="form.quantity" :input-props="{ inputmode: 'decimal' }" :placeholder="t('ui.atLeast')" />
+          <label for="order-quantity"> {{ t('ui.quantityContracts') }} <NInput v-model:value="form.quantity" :input-props="{ id: 'order-quantity', name: 'quantity', inputmode: 'decimal', spellcheck: false }" :placeholder="t('ui.atLeast')" />
           </label>
         </div>
 
         <NAlert v-if="previewError" type="error">{{ messageText(previewError) }}</NAlert>
 
         <NButton type="primary" size="large" block :disabled="!canSubmit" :loading="store.isLoading('order')" @click="submit">
-          <template #icon><NIcon :component="Zap" /></template> {{ t('ui.submitOrder') }}
+          <template #icon><NIcon aria-hidden="true" :component="Zap" /></template> {{ t('ui.submitOrder') }}
         </NButton>
 
         <OrderProgressPanel

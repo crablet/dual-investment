@@ -349,7 +349,10 @@
     "deliveryEvent": "인도",
     "orderHistory": "로컬 주문 내역",
     "syncAccount": "계정 동기화",
-    "noUpcomingPositions": "만기 전 순포지션 없음"
+    "noUpcomingPositions": "만기 전 순포지션 없음",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}; 이벤트 수: {count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "Binance 현물 계정 응답에 유효한 UID가 없습니다",

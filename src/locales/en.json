@@ -349,7 +349,10 @@
     "deliveryEvent": "Delivery",
     "orderHistory": "Local order history",
     "syncAccount": "Sync account",
-    "noUpcomingPositions": "No unexpired net positions"
+    "noUpcomingPositions": "No unexpired net positions",
+    "apiKey": "API Key",
+    "apiSecret": "API Secret",
+    "calendarDayLabel": "{date}; events: {count}"
   },
   "backend": {
     "binanceSpotAccountResponseHasInvalidUid": "Binance spot account response is missing a valid UID",

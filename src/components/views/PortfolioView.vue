@@ -89,17 +89,17 @@ function buildBalanceBreakdown(): PnlBreakdownItem[] {
     <Panel :title="t('ui.positionDetails')" class="span-8">
       <PositionSyncFeedback :sync="store.positionSync" />
       <div class="table-wrap">
-        <table class="data-table">
+        <table class="data-table" :aria-label="t('ui.positionDetails')">
           <thead>
             <tr>
-              <th> {{ t('ui.optionContract') }} </th>
-              <th> {{ t('ui.positionType') }} </th>
-              <th> {{ t('ui.netPositionQuantity') }} </th>
-              <th> {{ t('ui.strikePrice') }} </th>
-              <th> {{ t('ui.averageEntryPrice') }} </th>
-              <th> {{ t('ui.markPrice') }} </th>
-              <th> {{ t('ui.optionUnrealized') }} </th>
-              <th> {{ t('ui.expiryDate') }} </th>
+              <th scope="col"> {{ t('ui.optionContract') }} </th>
+              <th scope="col"> {{ t('ui.positionType') }} </th>
+              <th scope="col"> {{ t('ui.netPositionQuantity') }} </th>
+              <th scope="col"> {{ t('ui.strikePrice') }} </th>
+              <th scope="col"> {{ t('ui.averageEntryPrice') }} </th>
+              <th scope="col"> {{ t('ui.markPrice') }} </th>
+              <th scope="col"> {{ t('ui.optionUnrealized') }} </th>
+              <th scope="col"> {{ t('ui.expiryDate') }} </th>
             </tr>
           </thead>
           <tbody>

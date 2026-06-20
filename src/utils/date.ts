@@ -14,12 +14,12 @@ export function calendarMonthLabel(date: Date) {
   return new Intl.DateTimeFormat(formatLocale(), { year: 'numeric', month: 'long', calendar: 'gregory' }).format(date)
 }
 
-export function calendarDateLabel(date: Date) {
+export function calendarDateLabel(date: Date, includeYear = false) {
   if (i18n.global.locale.value === 'eo') {
     const weekday = dateEo.locale.localize.day(date.getDay() as Parameters<typeof dateEo.locale.localize.day>[0], { width: 'wide' })
-    return `${weekday}, ${date.getDate()} ${esperantoMonth(date)}`
+    return `${weekday}, ${date.getDate()} ${esperantoMonth(date)}${includeYear ? ` ${date.getFullYear()}` : ''}`
   }
-  return new Intl.DateTimeFormat(formatLocale(), { month: 'long', day: 'numeric', weekday: 'long', calendar: 'gregory' }).format(date)
+  return new Intl.DateTimeFormat(formatLocale(), { year: includeYear ? 'numeric' : undefined, month: 'long', day: 'numeric', weekday: 'long', calendar: 'gregory' }).format(date)
 }
 
 /** 按本地时区格式化 YYYY-MM-DD。 */

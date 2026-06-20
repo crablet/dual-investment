@@ -35,10 +35,11 @@ const navItems = [
         :key="item.id"
         class="nav-item"
         :class="{ active: store.activeView === item.id }"
+        :aria-current="store.activeView === item.id ? 'page' : undefined"
         type="button"
         @click="store.openView(item.id)"
       >
-        <NIcon :component="item.icon" />
+        <NIcon aria-hidden="true" :component="item.icon" />
         <span>{{ item.label }}</span>
       </button>
     </nav>
