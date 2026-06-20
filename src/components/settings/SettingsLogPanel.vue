@@ -1,9 +1,4 @@
-<!--
-设置页日志面板。
-
-日志只用于本机排障展示，删除日志不会影响订单、恢复记录或 keyring 凭据。所有文件操作
-都通过 Rust command 执行，普通浏览器环境不提供 fallback。
--->
+<!-- 通过 Rust 读取和管理本地日志。删除日志不影响订单、恢复记录和凭据。 -->
 <script setup lang="ts">
 import { FileText, FolderOpen, RefreshCw, Trash2 } from '@lucide/vue'
 

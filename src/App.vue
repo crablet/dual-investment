@@ -1,8 +1,4 @@
-<!--
-根组件负责全局 UI provider、异步视图路由和后台静默同步。
-
-业务状态全部放在 Pinia store，视图组件只消费当前快照和触发显式操作。
--->
+<!-- 配置全局 UI、按需加载页面，并启动后台同步。共享状态由 Pinia 管理。 -->
 <script setup lang="ts">
 import { darkTheme, dateEnUS, dateEo, dateEsAR, dateFrFR, dateIdID, dateJaJP, dateKoKR, datePtBR, dateThTH, dateTrTR, dateViVN, dateZhCN, dateZhTW, enUS, eo, esAR, frFR, idID, jaJP, koKR, NConfigProvider, NMessageProvider, ptBR, thTH, trTR, viVN, zhCN, zhTW } from 'naive-ui'
 import { computed, defineAsyncComponent, onMounted, onUnmounted } from 'vue'

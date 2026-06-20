@@ -1,8 +1,4 @@
-//! 应用状态编排层。
-//!
-//! 这个模块连接 Tauri command、Binance 客户端、策略计算和 `SQLite` 持久化。
-//! 它负责实盘连接、快照聚合、下单门禁、订单恢复、到期结算、现货补齐和后台轮询。
-//! 业务计算放在 `strategy.rs`，交易所请求放在 `binance.rs`，凭据读写放在 `secrets.rs`。
+//! 管理连接、下单、交割、恢复和后台任务。计算、交易所请求与存储分别交给对应模块。
 
 mod funding;
 mod orders;
@@ -606,7 +602,7 @@ impl AppState {
 
     /// 手动发送真实期权策略订单。
     ///
-    /// `confirm_live` 必须为 true；前端的确认弹窗和 Rust 的门禁缺一不可。
+    /// `confirm_live` 必须为 true，表示用户已在前端确认订单。
     pub async fn place_manual_strategy(
         &self,
         request: StrategyRequest,
@@ -648,7 +644,7 @@ impl AppState {
 
     /// 根据恢复记录重新查询 Binance 并恢复本地订单状态。
     ///
-    /// 这里不会信任恢复记录里的本地状态来创建订单，必须重新查询交易所事实。
+    /// 先查询 Binance 原订单，再更新本地记录，不重新下单。
     pub async fn recover_order_attempt(&self, attempt_id: String) -> AppResult<()> {
         let _trade_guard = self.trade_lock.lock().await;
         let attempt = self
@@ -1625,7 +1621,7 @@ impl AppState {
                 "backend.unconfirmedRecoveryRecordsExistNewFundingActions"
             )));
         }
-        // 先落库再发送真实资金请求，确保请求结果不确定时有可恢复的本地事实。
+        // 发送前保存恢复记录，连接中断后仍可查询原请求。
         let now = Utc::now();
         let message = crate::msg!(
             "backend.sendingBinanceRequestFor",
@@ -1860,7 +1856,7 @@ impl AppState {
                 self.save_funding_attempt(attempt)?;
             }
             FundingHistoryOutcome::Ambiguous => {
-                // 多条匹配比查不到更危险：无法判断哪条是本机请求，继续自动动作可能重复移动资金。
+                // 多条记录匹配时无法确认本次请求，需要人工核对。
                 attempt.status = FundingAttemptStatus::Blocked;
                 attempt.query_after_at = None;
                 attempt.message =
@@ -1946,7 +1942,7 @@ impl AppState {
         asset: &str,
         amount: Decimal,
     ) -> AppResult<()> {
-        // 统一走 execute_funding_request，保证划转前一定有 funding_attempts 可恢复事实。
+        // 划转前由 execute_funding_request 保存 funding_attempts。
         self.execute_funding_request(
             client,
             FundingRequest {
@@ -2187,7 +2183,7 @@ impl AppState {
         if self.settlement_reserves_assets().await.unwrap_or(true) {
             return;
         }
-        // 归集是收尾优化，失败时只写脱敏告警，不回滚已经完成的下单或结算事实。
+        // 归集失败记录告警，不改变已完成的下单或结算结果。
         match self.sweep_option_idle_usdt(client, purpose).await {
             Ok(
                 SweepExecutionOutcome::Completed(message) | SweepExecutionOutcome::Skipped(message),

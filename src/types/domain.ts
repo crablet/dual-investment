@@ -1,8 +1,4 @@
-// Rust/Tauri IPC 领域类型。
-//
-// 这些接口镜像 `src-tauri/src/domain.rs` 中序列化到前端的 DTO。金额、价格、数量、
-// 权利金和收益率都以字符串承接，前端只在展示层临时格式化，不能把这些字段
-// 当作 JavaScript number 再回传为交易事实。
+// 对应 src-tauri/src/domain.rs 的 IPC 类型。金融数值使用字符串，避免 JavaScript number 丢失精度。
 
 import type { LocalizedMessage } from '@/i18n'
 
@@ -317,7 +313,7 @@ export interface ConnectBinanceRequest {
   apiSecret: string
 }
 
-/** 携带用户冻结并确认的合约输入；字段不能缺失后回退匹配，`confirmLive` 是实盘门禁。 */
+/** 用户确认的合约参数；必填字段缺失时拒绝请求，confirmLive 表示已确认实盘下单。 */
 export interface StrategyRequest {
   clientFlowId: string
   symbol: string

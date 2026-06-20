@@ -5,7 +5,7 @@ const accentColorHover = '#ffcf55'
 const accentColorPressed = '#c58e14'
 const accentFocusShadow = '0 0 0 2px rgba(245, 182, 37, 0.24)'
 
-// 全局 Naive UI 主题覆盖；业务组件只消费主题，不在根组件内堆叠样式常量。
+// Naive UI 全局主题。
 export const themeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: accentColor,

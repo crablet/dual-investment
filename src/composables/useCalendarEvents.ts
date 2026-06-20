@@ -1,6 +1,4 @@
-// 事件日历派生逻辑。
-//
-// 日历从合约净仓派生登记/到期事件，从交割任务派生进度；订单历史不累计为持仓。
+// 从净仓和交割任务生成日历事件，订单历史不计为当前持仓。
 
 import type { MaybeRefOrGetter } from 'vue'
 import type { AppViewId } from '@/stores/app'

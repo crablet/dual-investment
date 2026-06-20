@@ -1,9 +1,4 @@
-<!--
-事件日历看板。
-
-组件只负责月份、类型筛选和详情列表交互；事件本身由 `useCalendarEvents`
-从当前快照派生，不从日志文件或其他旁路数据源推断。
--->
+<!-- 日历筛选与详情。事件由 useCalendarEvents 从业务快照生成。 -->
 <script setup lang="ts">
 import type { CalendarEvent, CalendarEventTone, CalendarEventType } from '@/composables/useCalendarEvents'
 

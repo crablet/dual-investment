@@ -1,7 +1,4 @@
-// 双币赢候选列表的前端交互状态。
-//
-// Rust 策略层已经完成实盘合约过滤和方向硬约束；这个 composable 只负责
-// 页面上的方向切换、到期/年化筛选、稳定排序、默认选中和下单卡片的预览状态。
+// 候选合约的筛选、排序、选择和订单预览。合约交易条件由 Rust 检查。
 
 import type { LocalizedMessage } from '@/i18n'
 import type { StrategyCandidate, StrategyDirection, StrategyPreview } from '@/types/domain'
@@ -74,7 +71,7 @@ export function useDualInvestmentCandidates() {
   )
 
   const filteredCandidates = computed(() => {
-    // 前端筛选只影响展示。候选生成和方向/现货价硬约束已经在 Rust 策略层完成。
+    // 这里筛选已通过 Rust 检查的候选，只改变显示结果。
     return store.candidates
       .filter(candidate => candidate.direction === form.direction)
       .filter(candidate => matchesExpiryFilter(candidate, expiryFilter.value))
@@ -198,7 +195,7 @@ export function useDualInvestmentCandidates() {
   }, { immediate: true, flush: 'sync' })
 
   const canSubmit = computed(() => {
-    // 前端只做基本可用性判断，真实合约精度、保证金和风控仍在 Rust 下单链路校验。
+    // 连接成功、已选合约且预估完成后才可提交；Rust 提交时再校验合约和账户。
     return Boolean(store.settings?.connected)
       && Boolean(selectedCandidate.value)
       && Boolean(strategyPreview.value)
@@ -240,7 +237,7 @@ export function useDualInvestmentCandidates() {
   function selectCandidate(candidate: StrategyCandidate) {
     selectedOptionSymbol.value = candidate.optionSymbol
     form.direction = candidate.direction
-    // 后端候选数量是 Binance 期权“张”口径，前端只承接默认值，真实校验仍在 Rust。
+    // 数量单位为合约张数，默认值来自后端候选。
     form.quantity = candidate.quantity
   }
 
@@ -275,7 +272,7 @@ export function useDualInvestmentCandidates() {
   }
 }
 
-/** 计算展示用剩余天数；真实到期判断以后端 expiryAt 和结算扫描为准。 */
+/** 显示剩余天数；交割仍按后端精确到期时间执行。 */
 export function daysUntil(expiryAt: string) {
   const target = new Date(expiryAt)
   return Math.max(0, Math.ceil((target.getTime() - Date.now()) / dayMs))
@@ -297,7 +294,7 @@ function matchesExpiryFilter(candidate: StrategyCandidate, expiryFilter: ExpiryF
   return true
 }
 
-/** 应用前端轻量筛选；这些筛选不会放宽 Rust 已执行的实盘硬约束。 */
+/** 按年化、行权概率和距现货幅度筛选候选。 */
 function matchesCandidateFilters(
   candidate: StrategyCandidate,
   candidateFilter: CandidateFilterForm,

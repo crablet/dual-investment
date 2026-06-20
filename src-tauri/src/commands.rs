@@ -1,7 +1,4 @@
-//! Tauri IPC command 边界。
-//!
-//! 交易与状态操作转发给 `AppState`，纯计算预览调用策略层。业务错误统一返回
-//! 脱敏摘要与连接重试资格；前端不从提示文案推断控制行为。
+//! Tauri 命令入口。交易与状态操作交给 AppState，预估调用策略层；错误返回脱敏消息和重连标志。
 #![allow(clippy::needless_pass_by_value)]
 
 use crate::messages::Message;

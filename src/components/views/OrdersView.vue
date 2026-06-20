@@ -1,8 +1,4 @@
-<!--
-策略订单视图。
-
-分别展示本机订单历史、按到期前净仓登记的交割任务与恢复记录。
--->
+<!-- 展示本机订单历史、交割任务与恢复记录。 -->
 <script setup lang="ts">
 import type { StrategyOrder } from '@/types/domain'
 

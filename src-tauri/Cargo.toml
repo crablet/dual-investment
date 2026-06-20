@@ -1,7 +1,7 @@
 [package]
 name = "dual-investment"
 version = "0.1.0"
-description = "Binance options and spot desktop strategy runner."
+description = "Desktop app for selling Binance BTC options and handling spot delivery at expiry."
 authors = ["dual-investment contributors"]
 license = "AGPL-3.0-only"
 edition = "2024"

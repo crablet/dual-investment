@@ -1,7 +1,4 @@
-//! Tauri 应用入口库。
-//!
-//! 这里组装插件、IPC command 和应用状态。具体业务逻辑分散在状态、
-//! Binance、策略和持久化模块中，入口只负责 wiring。
+//! 初始化插件、应用状态和 Tauri 命令。
 
 mod app_state;
 mod binance;

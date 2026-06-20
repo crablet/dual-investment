@@ -1,8 +1,4 @@
-<!--
-设置视图。
-
-组合界面偏好、Binance 凭据连接和本地文件日志面板；各面板保持独立状态与操作。
--->
+<!-- 设置页面：语言、Binance 连接和日志。 -->
 <script setup lang="ts">
 import BinanceConnectionPanel from '@/components/settings/BinanceConnectionPanel.vue'
 import GeneralSettingsPanel from '@/components/settings/GeneralSettingsPanel.vue'

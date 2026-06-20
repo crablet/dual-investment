@@ -1,8 +1,4 @@
-<!--
-收益/资产构成环形图。
-
-输入项是展示模型；组件负责稳定排序、稳定取色和交互态，不负责业务归因。
--->
+<!-- 构成环形图，负责排序、配色和悬停交互。 -->
 <script setup lang="ts">
 import type { PnlBreakdownItem } from '@/types/view'
 

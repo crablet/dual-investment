@@ -1,7 +1,4 @@
-// 手动下单进度视图模型构造器。
-//
-// Rust 通过脱敏事件上报当前阶段，Pinia store 用这些纯函数合成右侧下单进度面板。
-// 进度只服务交互反馈，不作为订单事实来源；订单事实仍以后端快照和恢复记录为准。
+// 将 Rust 进度事件整理为下单面板状态；订单结果以快照和恢复记录为准。
 
 import type { LocalizedMessage } from '@/i18n'
 import type {
@@ -70,12 +67,7 @@ export function progressStatusFromSteps(steps: OrderProgressStepView[]): OrderPr
   return 'running'
 }
 
-/**
- * 把当前进行中的步骤标记为错误。
- *
- * 如果还没收到运行中阶段，就落到第一个 pending 步骤；这样网络或 IPC 早期失败也能
- * 在进度条上有明确落点，而不是只显示全局错误。
- */
+/** 标记出错步骤；尚未收到进度时使用首个等待步骤，都已结束时使用最后一步。 */
 export function markCurrentOrderStepError(
   steps: OrderProgressStepView[],
   message: LocalizedMessage,

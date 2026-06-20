@@ -1,8 +1,4 @@
-<!--
-手动下单进度面板。
-
-只展示前端接收到的脱敏阶段事件；真实订单事实仍以策略订单列表和后端快照为准。
--->
+<!-- 展示下单进度事件；确认订单结果时仍需读取后端快照。 -->
 <script setup lang="ts">
 import type { OrderProgressStepView, OrderProgressView } from '@/types/view'
 

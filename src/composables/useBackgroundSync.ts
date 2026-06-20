@@ -1,7 +1,4 @@
-// 应用后台同步调度器。
-//
-// 前端定时读取 Rust 的本地快照并按后端许可重连。交易所周期同步只有 Rust 维护任务执行，
-// 避免隐藏窗口和页面导航重复查询账户、订单。
+// 定时读取 Rust 本地快照，并按后端返回的许可重连。交易所轮询由 Rust 负责。
 
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'

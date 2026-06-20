@@ -1,6 +1,4 @@
-// 账户资产展示标签。
-//
-// Rust 已按资产聚合金额和数量；这里只补充渲染 key 和账户来源文案。
+// 为 Rust 聚合的资产数据补充列表 key 和账户来源名称。
 import type { AssetBalance, BalanceRow } from '@/types/domain'
 import { t } from '@/i18n'
 

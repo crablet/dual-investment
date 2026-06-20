@@ -1,6 +1,4 @@
-// Decimal 字符串展示层工具。
-//
-// 金额计算交给 Rust；这里只判断字符串、比较展示顺序，以及转换图形或格式化的输入。
+// Decimal 字符串的展示、比较与排序工具；金额计算由 Rust 负责。
 import type { DecimalString } from '@/types/domain'
 
 /** 判断 Decimal 字符串是否为 0。 */

@@ -1,7 +1,4 @@
-//! 资金准备与补齐金额计算。
-//!
-//! 本模块只计算缺口、可赎回金额和 Binance 资金动作所需精度。真正的 Simple Earn
-//! 赎回、申购和 Universal Transfer 必须先写恢复记录，再由 `AppState` 串行发送。
+//! 计算资金缺口、可赎回金额和请求精度。资金请求由 `AppState` 先保存恢复记录，再串行发送。
 
 use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;

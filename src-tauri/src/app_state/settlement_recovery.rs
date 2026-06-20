@@ -8,7 +8,7 @@ use super::{
 };
 use crate::domain::{FinishSettlementSweepRequest, SettlementRecoveryView};
 
-/// `spot_sweep` 只在期权划转确认且现货到账后落库，是进入理财收尾的事实边界。
+/// `spot_sweep` 在期权划转确认且现货到账后才保存，用于判断是否已进入理财收尾。
 fn finish_blocker(
     batch: &SettlementBatch,
     orders: &[DeliveryTask],

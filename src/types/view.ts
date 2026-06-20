@@ -1,7 +1,4 @@
-// 前端派生视图模型。
-//
-// 这些类型不跨 IPC，只服务于组件展示。真实业务事实仍以 `types/domain.ts` 中的
-// Rust 快照类型为准。
+// 组件展示类型，不通过 IPC 传输。
 
 import type { LocalizedMessage } from '@/i18n'
 import type {

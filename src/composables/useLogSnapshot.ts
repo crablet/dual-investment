@@ -1,6 +1,4 @@
-// 设置页文件日志状态。
-//
-// 日志读取和文件操作都通过 Tauri command 进入 Rust，不提供浏览器 fallback。
+// 通过 Tauri 管理设置页日志状态和文件操作。
 
 import type { LocalizedMessage } from '@/i18n'
 import type { LogSnapshot } from '@/types/domain'
@@ -18,11 +16,7 @@ export function useLogSnapshot() {
   const recentEntries = computed(() => snapshot.value?.recentEntries ?? [])
   const writeError = computed(() => snapshot.value?.writeError)
 
-  /**
-   * 包装日志相关 Tauri command。
-   *
-   * 日志操作属于设置页局部状态，失败只写入本 composable 的 error，不覆盖全局交易错误。
-   */
+  /** 日志错误只显示在设置页，不覆盖全局交易错误。 */
   async function run<T>(action: LogAction, task: () => Promise<T>) {
     pendingAction.value = action
     error.value = undefined

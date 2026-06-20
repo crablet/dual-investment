@@ -1,8 +1,4 @@
-<!--
-总览指标卡。
-
-接收前端派生好的展示模型，组件只处理图标映射和视觉 tone。
--->
+<!-- 指标卡，按传入模型显示数值、图标和颜色。 -->
 <script setup lang="ts">
 import type { MetricCardModel } from '@/types/view'
 import { Activity, Coins, Shield, Wallet } from '@lucide/vue'

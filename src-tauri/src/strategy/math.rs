@@ -1,6 +1,4 @@
-//! 策略层 Decimal 数学工具。
-//!
-//! 这里提供 tick/step 对齐函数，供候选报价与下单价格计算复用。
+//! Decimal 数值的 tick/step 对齐工具。
 
 use rust_decimal::{Decimal, RoundingStrategy};
 

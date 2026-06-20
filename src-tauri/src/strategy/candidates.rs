@@ -1,7 +1,4 @@
-//! 双币赢候选扫描与排序。
-//!
-//! 输入数据来自 Binance 合约、买一价、mark greeks 和现货价格。
-//! 这里只构造可展示候选，不发送订单。
+//! 根据 Binance 合约、买一价、Greeks 和现货价筛选候选，不发送订单。
 
 use std::collections::HashMap;
 
@@ -134,8 +131,7 @@ pub fn build_candidates(inputs: CandidateBuildInputs<'_>) -> Vec<StrategyCandida
 
 /// 按精确 UTC 到期时间计算剩余天数。
 ///
-/// 候选筛选仍按“天”展示和配置，但不能只看日期。这里向上取整：不足一天仍按 1 天
-/// 处理，既保留现有候选浏览语义，也避免低估临近到期风险。
+/// 按剩余时长向上取整，不足一天计为一天；不按日历日期相减。
 pub(super) fn days_until_expiry(expiry_at: chrono::DateTime<Utc>) -> i64 {
     let seconds = (expiry_at - Utc::now()).num_seconds();
     if seconds <= 0 {
@@ -210,7 +206,7 @@ fn candidate_price_satisfies_exchange_limits(
 /// 根据当前买盘深度计算期权卖出 IOC 的可主动成交限价。
 ///
 /// 真实下单只使用买一价作为卖出限价；买一量不足时返回 `None`，
-/// 调用方必须阻止真实订单，避免在用户确认后悄悄下探到更低买盘价。
+/// 调用方据此停止下单，不改用更低档买价。
 pub fn option_sell_taker_limit_price_for_quantity(
     order_book: &OptionOrderBook,
     quantity: Decimal,

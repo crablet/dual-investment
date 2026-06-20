@@ -1,6 +1,4 @@
-// 总览指标的展示派生。
-//
-// Rust 已完成金额汇总，这里只整理卡片文案；未首次查询的账户不能显示为零余额。
+// 整理 Rust 快照中的总览指标；尚未查询的账户显示未知，不能显示为零余额。
 
 import type { AccountSnapshot, AppSettings, PnlReport } from '@/types/domain'
 import type { MetricCardModel } from '@/types/view'

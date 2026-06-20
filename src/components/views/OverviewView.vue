@@ -1,8 +1,4 @@
-<!--
-总览视图。
-
-组合顶部指标、账户、活跃策略和事件日历；具体数据都来自 Pinia 快照派生。
--->
+<!-- 从 Pinia 快照展示账户、持仓、指标和日历。 -->
 <script setup lang="ts">
 import { computed } from 'vue'
 

@@ -1,8 +1,4 @@
-//! 系统 keyring 凭据存储。
-//!
-//! Binance API Key/Secret 只允许通过这个模块读写系统安全凭据存储。其他模块只接收
-//! 连接状态、脱敏 API Key 或内存中的客户端实例，不能把 Secret 写入 SQLite、审计日志、
-//! 前端 store 或导出文件。
+//! Binance API 凭据的系统 keyring 读写入口。Secret 不写入数据库、日志或前端快照。
 
 use crate::messages::Message;
 

@@ -1,8 +1,4 @@
-<!--
-收益分析视图。
-
-使用订单和收益快照做展示维度拆分，不在前端重算真实 PnL 事实。
--->
+<!-- 按 Put / Call 展示 Rust 汇总的本机卖出权利金。 -->
 <script setup lang="ts">
 import { computed } from 'vue'
 

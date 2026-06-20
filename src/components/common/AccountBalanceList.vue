@@ -1,8 +1,4 @@
-<!--
-账户余额聚合列表。
-
-展示 Rust 已聚合的同名资产，hover 展示真实来源数量，并显示查询错误。
--->
+<!-- 展示按资产汇总的余额；悬停可查看各账户来源的数量。 -->
 <script setup lang="ts">
 import type { AccountSnapshot, DecimalString } from '@/types/domain'
 

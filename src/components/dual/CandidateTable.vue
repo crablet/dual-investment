@@ -1,8 +1,4 @@
-<!--
-候选机会表格。
-
-展示父级传入的候选和卖方净仓标识；排序切换和选中操作通过事件交回父级。
--->
+<!-- 展示候选合约和卖方持仓标记，排序与选择交给父组件处理。 -->
 <script setup lang="ts">
 import type {
   CandidateSortDirection,

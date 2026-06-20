@@ -1,9 +1,4 @@
-/*
- * 全局样式入口。
- *
- * 这里集中放应用级设计 token、布局网格、通用表格/卡片和跨页面组件样式。
- * Vue 单文件组件仍优先在各自 `<style scoped>` 中维护局部样式。
- */
+/* 全局主题、布局和共用组件样式；组件局部样式放在各自的 style scoped 中。 */
 
 :root {
   color-scheme: dark;
@@ -60,7 +55,7 @@ input {
 }
 
 .app-shell {
-  /* 客户端定位为桌面交易工具，左侧导航固定宽度，右侧工作区承载 1180px 级桌面布局。 */
+  /* 窗口最小宽度为 1180px，侧边导航保持固定宽度。 */
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
   width: 100%;
@@ -225,7 +220,7 @@ input {
   color: var(--muted);
 }
 
-/* 通用列表组：保持账户、订单详情和义务仓等信息块的垂直节奏一致。 */
+/* 账户、订单和持仓共用的详情列表。 */
 .account-list,
 .detail-list,
 .calendar-list,
@@ -324,7 +319,7 @@ input {
 }
 
 .account-row {
-  /* 账户列表固定为“短 ticker 左、金额右”的扫描结构，金额列需要更宽。 */
+  /* 金额列比资产代码列宽，容纳大额余额。 */
   display: grid;
   grid-template-columns: minmax(52px, 1fr) minmax(0, 2fr);
   align-items: center;
@@ -835,7 +830,7 @@ input {
 }
 
 .dual-workbench {
-  /* 双币赢主工作台左侧浏览候选、右侧固定下单卡片，符合重复扫描和下单的工作流。 */
+  /* 左侧浏览合约，右侧下单面板保持可见。 */
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(340px, 0.48fr);
   gap: 12px;
@@ -1227,7 +1222,7 @@ input {
   overflow-wrap: anywhere;
 }
 
-/* 轻量条形图样式；展示宽度由调用组件派生，真实收益事实来自 Rust 快照。 */
+/* 条形图宽度由调用组件计算。 */
 .bar-list {
   display: grid;
   gap: 16px;
@@ -1257,7 +1252,7 @@ input {
   background: linear-gradient(90deg, var(--green), #74df8b);
 }
 
-/* 窄桌面优先保持可读性：模块改为 6 栅格，表格继续由横向滚动承接。 */
+/* 窄窗口改用 6 栅格，表格可横向滚动。 */
 @media (max-width: 1200px) {
   .view-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));

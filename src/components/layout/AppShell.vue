@@ -1,8 +1,4 @@
-<!--
-应用外壳布局。
-
-负责侧边导航、前台错误提示和首屏 loading 包裹，页面内容通过 slot 注入。
--->
+<!-- 页面布局：侧边导航、错误提示、加载状态和内容插槽。 -->
 <script setup lang="ts">
 import { NAlert, NSpin, useMessage } from 'naive-ui'
 

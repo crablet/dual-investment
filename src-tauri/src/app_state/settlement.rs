@@ -305,7 +305,7 @@ impl AppState {
                 &crate::msg!("backend.terminalRebalancingFailureOrAbnormalFilledQuantity"),
             );
         }
-        // 即使上轮在保存最后一笔成交后退出，也能从持久化成员事实恢复收尾。
+        // 上轮即使在保存最后一笔成交后退出，也能从已保存的任务恢复收尾。
         if orders
             .iter()
             .all(|order| order.status == DeliveryStatus::Completed)

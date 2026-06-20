@@ -1,7 +1,4 @@
-// 环形图纯派生逻辑。
-//
-// 输入仍是前端展示模型；这里只做稳定排序、稳定取色和 SVG 百分比派生，不参与
-// 真实收益归因或金融事实计算。
+// 环形图的排序、配色与 SVG 占比计算。
 
 import type { PnlBreakdownItem } from '@/types/view'
 import { formatLocale, t } from '@/i18n'
@@ -124,9 +121,8 @@ export function normalizeDonutItems(items: PnlBreakdownItem[]): NormalizedDonutI
     })
 }
 
-/** 计算环形图占比总量；负值按绝对值参与占比，避免抵消其他扇区。 */
+/** 负值按绝对值计算占比，避免抵消其他扇区。 */
 export function absoluteDonutTotal(items: NormalizedDonutItem[]) {
-  // 饼图用绝对值计算占比，负收益仍以颜色/文案标识，不让负数抵消总占比。
   return items.reduce((sum, item) => sum + Math.abs(decimalStringToDisplayNumber(item.value)), 0)
 }
 
@@ -179,7 +175,7 @@ export function centerDisplayForSegment(
   }
 }
 
-/** 格式化环形图数值；非法数字保留原字符串，方便暴露异常输入。 */
+/** 无法解析的数值保留原文，便于排查数据问题。 */
 export function formatDonutValue(value: string) {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? valueFormatter().format(numeric) : value

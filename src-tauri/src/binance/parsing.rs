@@ -1,7 +1,4 @@
-//! Binance JSON 响应解析。
-//!
-//! 本模块把交易所返回的字段转换为领域 DTO，并在缺少关键字段时返回明确错误。解析阶段
-//! 不保留原始响应体，金额字段统一走 `Decimal`。
+//! 将 Binance JSON 转为领域结构，金融数值使用 Decimal；缺少必填字段时报错。
 
 use crate::messages::Message;
 
@@ -390,7 +387,7 @@ fn parse_option_contract(value: &Value) -> AppResult<OptionContract> {
 }
 
 fn exchange_info_filter<'a>(value: &'a Value, filter_type: &str) -> AppResult<&'a Value> {
-    // 价格 tickSize 和数量 stepSize 是下单硬约束，缺失时必须暴露为数据契约错误。
+    // 缺少 tickSize 或 stepSize 就无法校验订单精度，按数据错误处理。
     value
         .get("filters")
         .and_then(Value::as_array)

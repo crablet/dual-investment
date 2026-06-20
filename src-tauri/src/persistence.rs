@@ -1,7 +1,4 @@
-//! 本地 `SQLite` 持久化层。
-//!
-//! 这里只保存账户归属、业务事件、订单快照和恢复记录；API Key/Secret 永远不进入
-//! SQLite。订单和审计以追加/替换业务事实的方式保存，便于应用重启后从真实交易所状态恢复。
+//! 保存账户绑定、订单、净仓、交割任务和恢复记录。API 凭据只存系统 keyring。
 
 use crate::messages::Message;
 
@@ -41,10 +38,7 @@ impl Persistence {
 
     /// 初始化本地表结构。
     ///
-    /// 只创建当前代码需要的表结构；开发期旧数据迁移或清理应使用一次性本地命令处理，
-    /// 不把旧结构兼容或自动删库逻辑留在应用代码里。`order_attempts` 和
-    /// `funding_attempts` 单独拆列，是因为恢复流程需要稳定按状态、订单号、资金动作引用
-    /// 和查询时间推进。
+    /// 只创建当前表结构，不迁移或自动清理旧库。恢复记录单独存列，便于按状态、编号和查询时间检索。
     fn init(&self) -> AppResult<()> {
         self.connection
             .execute_batch(
@@ -169,7 +163,7 @@ impl Persistence {
 
     /// 保存下单恢复记录。
     ///
-    /// 这条记录覆盖“交易所已接单但本地订单保存失败”的高风险窗口。
+    /// 交易所接单后即使订单保存失败，仍可据此查询原订单。
     pub fn save_order_attempt(&self, attempt: &OrderAttempt) -> AppResult<()> {
         self.connection
             .execute(
@@ -644,7 +638,7 @@ fn parse_attempt_status(value: &str) -> AppResult<OrderAttemptStatus> {
 }
 
 fn parse_decimal(value: &str) -> AppResult<Decimal> {
-    // 恢复记录里的金额必须保持 Decimal 可解析；解析失败说明本地事实表已损坏。
+    // 金额无法解析为 Decimal 时视为记录损坏。
     Decimal::from_str(value).map_err(|error| {
         AppError::Storage(crate::msg!("backend.cannotParseRecoveryAmount", p0 = error))
     })

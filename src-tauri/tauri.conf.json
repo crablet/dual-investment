@@ -36,7 +36,7 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
-    "shortDescription": "Options and spot strategy runner",
-    "longDescription": "A desktop app that runs Binance dual-investment-style option and spot strategies."
+    "shortDescription": "Binance options and spot trading",
+    "longDescription": "Desktop app for selling Binance BTC options and handling spot delivery at expiry."
   }
 }

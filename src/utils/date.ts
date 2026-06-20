@@ -1,7 +1,4 @@
-// 前端本地日期工具。
-//
-// 所有函数都按浏览器本地时区处理日期键，避免 `toISOString()` 在跨时区时把日历日期
-// 推到前一天或后一天。
+// 按本地时区生成日期键，避免 toISOString() 的 UTC 转换改变日历日期。
 
 import { dateEo } from 'naive-ui'
 import { formatLocale, i18n } from '@/i18n'

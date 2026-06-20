@@ -1,6 +1,4 @@
-// Tauri 构建脚本。
-//
-// 图标会影响桌面启动和打包产物，因此显式声明变更触发重新构建。
+// 图标变化时重新构建 Tauri 应用。
 fn main() {
     println!("cargo:rerun-if-changed=icons/icon.png");
     tauri_build::build();

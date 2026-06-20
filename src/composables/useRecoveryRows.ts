@@ -1,7 +1,4 @@
-// 订单页恢复中心的展示模型和操作分派。
-//
-// 订单恢复与资金恢复共用一张表只服务扫描效率；真实恢复语义仍由不同 Rust command
-// 决定，前端不会把 blocked 资金记录或订单记录直接改成业务事实。
+// 将订单、资金和结算恢复记录合并展示，操作按记录类型调用对应的 Rust 命令。
 
 import type {
   FundingAttemptManualResolution,
@@ -67,7 +64,7 @@ export function useRecoveryRows() {
   }
 
   function canRecover(row: RecoveryRow) {
-    // 终态记录只展示事实，不再触发恢复；blocked 资金记录仍允许“重查”。
+    // 已完成记录不再恢复；blocked 资金记录仍允许重查。
     return row.source !== 'settlement'
       && !['persisted', 'spot_persisted', 'confirmed', 'failed'].includes(row.status)
   }
@@ -165,7 +162,7 @@ function orderAttemptRecoveryRow(attempt: OrderAttempt): RecoveryRow {
 }
 
 function fundingAttemptRecoveryRow(attempt: FundingAttemptView): RecoveryRow {
-  // 资金恢复行直接展示后端给出的 factSource/nextAction，前端不推断 Binance 历史结果。
+  // 核对依据和下一步由后端提供，前端不推断资金结果。
   return {
     id: attempt.id,
     source: 'funding',

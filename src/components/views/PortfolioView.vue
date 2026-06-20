@@ -1,8 +1,4 @@
-<!--
-持仓与现货视图。
-
-展示期权义务仓和现货资产；金额与数量已在 Rust 汇总，前端组织列表和图表。
--->
+<!-- 展示 Rust 汇总的卖方持仓和账户资产。 -->
 <script setup lang="ts">
 import type { PnlBreakdownItem } from '@/types/view'
 

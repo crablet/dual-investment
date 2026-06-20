@@ -1,8 +1,4 @@
-<!--
-双币赢工作台。
-
-统一承载候选浏览和手动下单；没有 mock 数据路径。
--->
+<!-- 合约筛选与手动下单页面。 -->
 <script setup lang="ts">
 import type { StrategyCandidate } from '@/types/domain'
 

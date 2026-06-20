@@ -1,9 +1,4 @@
-<!--
-账户卖方净仓摘要。
-
-只展示用户在总览中判断当前期权义务所需的关键事实；订单号、合约代码和结算细节
-留在订单页核对。
--->
+<!-- 总览中的卖方持仓摘要；合约和交割详情在策略订单页查看。 -->
 <script setup lang="ts">
 import type { StrategyDirection, TrackedPosition } from '@/types/domain'
 

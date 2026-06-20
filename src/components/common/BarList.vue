@@ -1,8 +1,4 @@
-<!--
-轻量条形图列表。
-
-只复用现有 .bar-list DOM 结构和样式；业务值、格式化文本和宽度都由调用方传入。
--->
+<!-- 条形图列表。数值、格式和宽度由调用方提供。 -->
 <script setup lang="ts">
 import type { BarListItem } from '@/types/view'
 

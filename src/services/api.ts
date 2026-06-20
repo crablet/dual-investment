@@ -1,7 +1,4 @@
-// Tauri IPC API 封装。
-//
-// 前端所有后端调用都集中在这里。普通浏览器环境没有 Tauri runtime 时直接抛出明确错误，
-// 不提供 mock 数据或浏览器 fallback，避免把实盘路径和演示路径混在一起。
+// 封装 Tauri 调用。没有桌面运行环境时返回错误，不提供模拟业务数据。
 
 import type { LocalizedMessage } from '@/i18n'
 import type {
@@ -36,7 +33,7 @@ function isTauriRuntime() {
   return typeof window !== 'undefined' && Reflect.has(window, '__TAURI_INTERNALS__')
 }
 
-/** 校验嵌套的消息参数，避免损坏的 IPC 数据获得业务重试资格。 */
+/** 先校验错误消息结构，再读取自动重连标志。 */
 function isLocalizedMessage(value: unknown, depth = 0): value is LocalizedMessage {
   if (depth > 20 || typeof value !== 'object' || value === null
     || !('code' in value) || typeof value.code !== 'string'
@@ -46,7 +43,7 @@ function isLocalizedMessage(value: unknown, depth = 0): value is LocalizedMessag
   return Object.values(value.params).every(param => typeof param === 'string' || isLocalizedMessage(param, depth + 1))
 }
 
-/** Tauri 自身的传输错误没有业务重试许可，仍须向用户显示错误。 */
+/** 通信错误显示给用户，但不触发自动重连。 */
 export function commandError(caught: unknown): CommandErrorPayload {
   if (caught instanceof ClientCommandError)
     return caught.payload
@@ -100,7 +97,7 @@ export const api = {
   clearLogFiles: () => call<LogSnapshot>('clear_log_files'),
   listenOrderProgress: (handler: (event: OrderProgressEvent) => void) => {
     if (!isTauriRuntime()) {
-      // 普通浏览器只用于布局检查；没有事件源时返回空清理函数，而不是模拟进度事件。
+      // 浏览器没有 Tauri 事件源，返回空清理函数。
       return Promise.resolve(() => undefined)
     }
     return listen<OrderProgressEvent>('order-progress', event => handler(event.payload))

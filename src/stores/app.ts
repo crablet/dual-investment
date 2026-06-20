@@ -1,7 +1,4 @@
-// 应用级 Pinia store。
-//
-// 这里是前端唯一的跨页面状态源：保存 Tauri 快照、请求 loading/error、当前视图，以及
-// 从快照派生出的总览指标。真实业务计算仍以 Rust 返回的快照为准，前端只做展示层派生。
+// 保存后端快照、请求状态和当前页面，为组件提供共享状态。
 
 import type { LocalizedMessage } from '@/i18n'
 import type {

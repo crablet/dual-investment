@@ -18,14 +18,14 @@
 
 Windows 安装包未签名；macOS 为 ad-hoc 签名、未公证，首次打开可能需按 [Apple 说明](https://support.apple.com/en-us/102445)允许运行。平台验收状态见 [README](../README.md#安装与平台状态)；Ubuntu 24.04 的 CI 构建不代表兼容所有 Linux 发行版。
 
-## 代码入口与边界
+## 代码结构
 
 | 入口 | 职责 |
 | --- | --- |
 | [src/components](../src/components/)、[src/stores](../src/stores/) | 页面与 Pinia 共享状态 |
 | [src/services/api.ts](../src/services/api.ts)、[commands.rs](../src-tauri/src/commands.rs) | IPC 与错误契约 |
 | [app_state.rs](../src-tauri/src/app_state.rs)、[app_state/](../src-tauri/src/app_state/) | 连接、交易、恢复与后台维护 |
-| [positions.rs](../src-tauri/src/app_state/positions.rs)、[settlement.rs](../src-tauri/src/app_state/settlement.rs) | 净仓同步与交割编排 |
+| [positions.rs](../src-tauri/src/app_state/positions.rs)、[settlement.rs](../src-tauri/src/app_state/settlement.rs) | 净仓同步与交割流程 |
 | [strategy/](../src-tauri/src/strategy/) | Decimal 金融计算与策略规则 |
 | [persistence.rs](../src-tauri/src/persistence.rs) | SQLite 持久化与账户绑定 |
 | [secrets.rs](../src-tauri/src/secrets.rs) | 系统凭据存储 |
@@ -45,7 +45,7 @@ Windows 安装包未签名；macOS 为 ad-hoc 签名、未公证，首次打开�
 
 业务消息通过 [Message](../src-tauri/src/messages.rs) 的 `{ code, params }` 保存，在前端用 `messageText()` 翻译，金融参数保持 Decimal 字符串。日志沿用结构化消息，级别与事件代码不翻译。
 
-业务错误返回 `{ message, canAutoReconnect }`，由 [errors.rs](../src-tauri/src/errors.rs)决定重试资格。前端只接受经过校验的该标志；Tauri 传输、参数或格式异常不授予自动重连资格。
+业务错误返回 `{ message, canAutoReconnect }`。[errors.rs](../src-tauri/src/errors.rs)判断是否允许自动重连，前端校验该字段后使用。Tauri 通信、参数或格式错误不会触发自动重连。
 
 ## 多语言维护
 
@@ -53,7 +53,7 @@ Windows 安装包未签名；macOS 为 ad-hoc 签名、未公证，首次打开�
 2. 新增语言时更新 `src/i18n.ts` 的 `supportedLocales`、[语言选择器](../src/components/settings/GeneralSettingsPanel.vue)的原生名称及 [App.vue](../src/App.vue) 的 Naive UI / 日期映射。
 3. 数字和日期经 `formatLocale()` 格式化，保持系统时区与公历。部分 WebView 不支持世界语 `Intl`，沿用法语数字格式与[日历工具](../src/utils/date.ts)中的世界语词典。
 
-英语随主包加载，其余词典动态分包。切换成功后才更新语言偏好，旧加载请求不能覆盖新选择，失败时保留当前语言；语言切换不触发连接或交易。新增语言应在浏览器检查，不能只依赖 Node.js 的 ICU。
+英语随主包加载，其余词典按需加载。加载成功后才保存语言选择；旧请求不能覆盖新选择，失败时保留当前语言。切换语言不触发连接或交易。新增语言要在浏览器检查，Node.js 支持的语言不一定受 WebView 支持。
 
 ## 验证与打包
 
@@ -103,7 +103,7 @@ pnpm tauri:build --target universal-apple-darwin -- --locked
 
 ## 文档与截图
 
-README 放介绍与操作，本页维护开发和发布，交易约束集中在[安全文档](trading-safety.md)。详细规则集中维护，其他位置用简述或链接引用。
+README 介绍功能和操作，本页说明开发和发布，交易规则见[安全文档](trading-safety.md)。其他位置用链接引用，避免重复维护。
 
 更新中英文 README 时同步图文；`docs/images/` 中的产品截图使用可公开的真实界面，不注入或改写行情、订单与收益数据。
 

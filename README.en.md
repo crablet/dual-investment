@@ -1,12 +1,12 @@
 <div align="center">
   <img src="src-tauri/icons/128x128.png" width="80" height="80" alt="Dual Investment Assistant icon" />
   <h1>Dual Investment Assistant</h1>
-  <p><strong>Manage BTC/USDT dual-investment-style strategies from your desktop.</strong></p>
-  <p>Connect Binance options and spot: select contracts, confirm orders, track short positions, and automate delivery.</p>
+  <p><strong>Run BTC/USDT Dual Investment strategies by selling options directly on Binance.</strong></p>
+  <p>Choose a contract and confirm your order. The app tracks short positions and trades spot based on exercise results at expiry.</p>
   <p>Binance · BTC/USDT · 13 interface languages · <a href="LICENSE">AGPL-3.0-only</a></p>
   <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
   <p>
-    <a href="#real-quotes-measurable-differences">Compare returns</a> ·
+    <a href="#dual-investment-vs-selling-puts">Compare returns</a> ·
     <a href="#quick-start">Quick start</a> ·
     <a href="#workflow">Workflow</a> ·
     <a href="#documentation">Documentation</a> ·
@@ -14,20 +14,20 @@
   </p>
 </div>
 
-![Strategy workbench: filter Put/Call contracts and review quantity and order estimates](docs/images/workbench-en.webp)
+![Dual Investment screen: filter Put/Call contracts and review quantity and estimated premium](docs/images/workbench-en.webp)
 
-## Real quotes, measurable differences
+## Dual Investment vs. selling puts
 
-A Binance quote capture on **16 November 2026** matched 66 pairs with the same strike and expiry. Selling puts directly showed a **median gross income uplift of 33.44%** and a **median gross annualized gap of 12.41 percentage points**.
+We compared 66 pairs of Binance quotes on **16 November 2026**, each with the same strike and expiry. Selling puts directly offered **33.44% more gross income at the median**, with a **median annualized difference of 12.41 percentage points** before costs.
 
-Comparisons use the same notional principal, **exclude trading costs and capital buffers, and assume no exercise at expiry**. These are quote differences, not executed returns, a trading win rate, or a promise of future income.
+Comparisons use the same notional principal, **exclude trading costs and capital buffers, and assume no exercise at expiry**. The results reflect quotes at that time. Actual fills and later prices may differ; the figures do not establish a win rate or predict future returns.
 
 ![All 66 pairs by expiry: median gross income uplift 33.44%; median gross annualized gap 12.41 percentage points](docs/images/yield-overview-en.svg)
 
 See the [group statistics, sources and calculations](docs/yield-comparison.md), or [all 66 pairs individually](docs/yield-comparison.md#逐笔报价). Detailed notes are in Chinese.
 
 <details>
-<summary>Maximum sample: +84.12 percentage points in gross annualized return</summary>
+<summary>Largest annualized difference before costs: +84.12 percentage points</summary>
 
 ![Maximum sample: 39.19 USDT Dual Investment reward versus 54.00 USDT gross put premium; annualized gap 84.12 percentage points](docs/images/yield-comparison-en.svg)
 
@@ -35,21 +35,21 @@ This is `BTC-261117-64250-P`. See the [calculation](docs/yield-comparison.md#最
 
 </details>
 
-## From contract selection to settlement
+## Features
 
-| Capability | What it does |
+| Feature | What it does |
 | --- | --- |
 | Selection and orders | Sell puts to buy low or calls to sell high. Filter by expiry, annualized estimate, exercise probability and distance from spot, then confirm manually. |
-| Positions and delivery | Synchronize short net positions and execute spot delivery for obligations registered before expiry. Review exceptions in the recovery center. |
+| Positions and delivery | Track short net positions and handle spot delivery for positions tracked before expiry. Check problems in the recovery center. |
 | Premium tracking | View locally recorded and today's sell premiums, with Put/Call fill history. |
 | Local storage | Keep credentials in the system keyring and records in an account-bound SQLite database. |
 
 > [!IMPORTANT]
-> **This is a live-trading client. Use a dedicated account.** Registered positions can trigger real spot orders in the background. Do not manually fulfill the same delivery elsewhere: the app may execute it again. Positions first discovered after expiry are not handled retrospectively. Read the [trading safety guide](docs/trading-safety.md).
+> **The app places live trades. Use a dedicated account.** It sends spot orders in the background to complete delivery tasks. Do not complete the same delivery manually elsewhere, as the app may execute it again. Positions first found after expiry will not trigger delivery. Read the [trading safety guide](docs/trading-safety.md).
 
 ## Quick start
 
-### Install and check platform status
+### Installation and platform support
 
 Download installers from [GitHub Releases](https://github.com/crablet/dual-investment/releases), or build from source if a matching release is unavailable.
 
@@ -83,15 +83,15 @@ If you're signing up for Binance, you're welcome to [use our referral link](http
 3. **Confirm** — Review premium, breakeven and quantity before submitting the order.
 4. **Follow delivery** — Keep the app running and connected. Check delivery tasks in **Strategy orders** and exceptions in the recovery center.
 
-After Binance cash-settles the option, the app executes spot trades to replicate physical delivery. It handles short positions only; registered obligations can resume after an offline period spanning expiry. See the [trading safety guide](docs/trading-safety.md) for processing rules.
+After Binance cash-settles the option, the app trades spot to replicate physical delivery. It handles short positions only. If a tracked position expires while the app is offline, processing resumes after reconnection. See the [trading safety guide](docs/trading-safety.md).
 
 <details>
 <summary>Account and return calculations</summary>
 
 - Local data is bound to one Binance account. You can replace its API Key; deleting credentials does not remove the binding. Startup attempts to connect with saved credentials.
 - Account sync only reads state and retains the previous result on failure. Holdings reflect net positions, not accumulated order history.
-- A completed delivery task may still have a batch awaiting fund cleanup. Clearing the database does not resolve unfinished trades.
-- Premium reporting counts the filled portion of locally recorded sell orders. It excludes external orders and is not total account profit.
+- After delivery, funds may still be reserved while transfers or Earn subscriptions finish. Do not clear the database to resolve unfinished trades.
+- Premium reporting counts fills from locally recorded sell orders. It excludes external orders and other account gains or losses.
 
 | Metric | Calculation |
 | --- | --- |
@@ -104,11 +104,11 @@ Fees are excluded. Today's premium uses the order creation date in the local tim
 
 </details>
 
-## Use your preferred language
+## Interface languages
 
 简体中文 · English · 繁體中文 · Português (Brasil) · Español · Tiếng Việt · Türkçe · Bahasa Indonesia · 日本語 · 한국어 · ไทย · Esperanto · Français
 
-Choose a language in **Settings → General settings**. The app follows system preferences, falls back to English if needed, and ships with all language resources.
+Choose a language in **Settings → General settings**. By default, the app uses your system language, or English if it is not supported. All languages are included in the installer.
 
 ## Documentation
 

@@ -1,8 +1,4 @@
-//! Binance 实盘接口封装。
-//!
-//! 这个模块是唯一允许拼接 Binance 请求、签名参数和解析交易所响应的地方。
-//! 上层策略与 Tauri command 只接收已经归一化的领域结构，避免前端或策略层接触
-//! API Secret、签名 query 或交易所原始响应。
+//! 构造、签名和解析 Binance 请求。上层只接收领域结构，不接触密钥、签名或原始响应。
 
 mod http;
 mod parsing;
@@ -165,7 +161,7 @@ impl BinanceClient {
 
     /// 按交易所订单号或客户端订单号查询期权订单。
     ///
-    /// 恢复流程依赖这个方法重新读取 Binance 事实，不能用本地恢复记录直接造订单。
+    /// 恢复时查询原订单，不根据本地记录重新下单。
     pub async fn query_option_order(
         &self,
         symbol: &str,
@@ -435,7 +431,7 @@ impl BinanceClient {
         .await
     }
 
-    /// 查询现货价格。当前 v1 固定用于 `BTCUSDT`。
+    /// 查询现货价格，目前使用 BTCUSDT。
     pub async fn spot_price(&self, symbol: &str) -> AppResult<Decimal> {
         let response = self
             .public_get(SPOT_BASE, &format!("/api/v3/ticker/price?symbol={symbol}"))
@@ -596,8 +592,7 @@ impl BinanceClient {
         params: Vec<(String, String)>,
         parse: fn(&Value) -> AppResult<T>,
     ) -> AppResult<T> {
-        // 历史接口偶尔会返回 2xx 但缺少 rows；解析必须纳入查询重试闭包，
-        // 否则 transient 的响应结构异常会直接制造恢复记录噪声。
+        // 历史接口可能返回 2xx 却缺少 rows；将解析放入重试闭包，使临时格式错误也能重查。
         self.query_with_retry(|| {
             let params = params.clone();
             async move {
@@ -767,7 +762,7 @@ impl BinanceClient {
         params: &[(String, String)],
     ) -> AppResult<Value> {
         let signed = self.signed_params(params.to_vec())?;
-        // 订单和资金 POST 不能盲目重放；重试策略由 signed_post_value 严格控制。
+        // 订单和资金 POST 的重试条件由 signed_post_value 判断。
         let response = self
             .http
             .post(format!("{base}{path}"))

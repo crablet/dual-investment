@@ -1,7 +1,4 @@
-// Vite 配置。
-//
-// 端口和 host 与 Tauri dev server 配套；`strictPort` 能尽早暴露端口冲突，避免
-// Tauri 连接到意外的前端服务。
+// 开发端口须与 Tauri 配置一致；strictPort 防止端口占用时自动换端口。
 
 import { fileURLToPath, URL } from 'node:url'
 import vue from '@vitejs/plugin-vue'

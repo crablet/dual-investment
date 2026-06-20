@@ -1,7 +1,4 @@
-//! Binance HTTP 辅助函数。
-//!
-//! 这里归类网络错误并编码签名 query；恢复与重试策略集中在 errors.rs。
-//! 错误消息只保留方法、路径和原因，不包含 API Secret、签名原文或原始响应。
+//! 编码签名参数并提取网络错误。错误只保留方法、路径和原因，重试规则见 errors.rs。
 
 use crate::errors::{AppError, BinanceErrorKind};
 

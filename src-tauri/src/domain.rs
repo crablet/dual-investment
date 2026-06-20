@@ -1,9 +1,4 @@
-//! 双币赢客户端的领域模型与 IPC 数据契约。
-//!
-//! 这个模块集中定义 Rust 内部策略模型、Binance 响应归一化后的结构，以及
-//! 通过 Tauri IPC 暴露给前端的 DTO。所有金额、价格、数量、收益率都使用
-//! [`Decimal`]，序列化给前端时统一走字符串，避免 JavaScript `number`
-//! 在金融数据上产生隐式精度损失。
+//! 策略、交易所回报和 IPC 数据类型。金融数值使用 Decimal，传给前端时序列化为字符串。
 
 use crate::messages::Message;
 
@@ -15,7 +10,7 @@ pub use crate::errors::{AppError, AppResult};
 
 /// 双币赢策略方向。
 ///
-/// 当前 v1 只做卖出期权：卖 Put 用 USDT 承接低买 BTC，卖 Call 用 BTC 承接高卖。
+/// 只支持卖方：Put 对应 USDT 低买 BTC，Call 对应高卖 BTC。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StrategyDirection {
@@ -363,7 +358,7 @@ impl OrderAttemptStatus {
 
 /// 本地恢复记录。
 ///
-/// 只包含可展示的恢复事实，不接收前端反序列化，也不复制到另一套同形 DTO。
+/// 返回给前端展示，不接受前端回写。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderAttempt {
@@ -973,7 +968,7 @@ pub struct ConnectBinanceRequest {
 
 /// 手动下单或订单恢复使用的请求。
 ///
-/// `confirm_live` 是真实下单门禁；手动下单必须由前端显式确认后才传 true。
+/// 用户确认订单后，前端才将 `confirm_live` 设为 true。
 /// 手动请求携带冻结的 option symbol、精确到期时间和数量等输入，不能缺失后再模糊匹配。
 /// 请求不携带候选 ID 或预览年化；订单年化必须由 Binance 回报生成。
 #[derive(Clone, Debug, Deserialize)]

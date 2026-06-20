@@ -1,8 +1,4 @@
-<!--
-侧边导航。
-
-点击入口统一调用 `store.openView`，让重复点击也能触发对应页面刷新逻辑。
--->
+<!-- 导航统一调用 store.openView，重复点击也会刷新当前页面。 -->
 <script setup lang="ts">
 import type { Component } from 'vue'
 

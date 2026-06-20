@@ -5,7 +5,7 @@
   "packageManager": "pnpm@12.9.1",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "Tauri desktop app that runs Binance dual-investment-style live option and spot strategies.",
+  "description": "Desktop app for selling Binance BTC options and handling spot delivery at expiry.",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "vue-tsc --noEmit && vite build",

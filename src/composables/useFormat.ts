@@ -1,6 +1,4 @@
-// 展示格式化工具。
-//
-// 这些函数只用于 UI 格式化；金额、数量和收益计算都由 Rust Decimal 完成。
+// 界面数值格式化；金额、数量和收益计算由 Rust Decimal 完成。
 
 import type { StrategyDirection, StrategyStatus } from '@/types/domain'
 import { formatLocale } from '@/i18n'
