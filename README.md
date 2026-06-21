@@ -26,14 +26,11 @@
 
 查看[分组统计、来源与计算口径](docs/yield-comparison.md)，或[66 组逐笔对照](docs/yield-comparison.md#逐笔报价)。
 
-<details>
-<summary>毛年化差最大的一组：+84.12 个百分点</summary>
+### 毛年化差最大的一组：+84.12 个百分点
 
 ![最高样本：双币赢收益 39.19 USDT，卖 Put 毛权利金 54.00 USDT，毛年化差 84.12 个百分点](docs/images/yield-comparison-zh-CN.svg)
 
 该样本为 `BTC-261117-64250-P`，具体金额与公式见[计算过程](docs/yield-comparison.md#最高样本怎样算)。
-
-</details>
 
 ## 功能
 

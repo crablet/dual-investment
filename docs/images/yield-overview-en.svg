@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:xlink="http://www.w3.org/1999/xlink" width="1036.8pt" height="700pt" viewBox="0 0 1036.8 700" version="1.1">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:xlink="http://www.w3.org/1999/xlink" width="1036.8pt" height="668pt" viewBox="0 32 1036.8 668" version="1.1">
  <metadata>
   <rdf:RDF>
    <cc:Work>
@@ -1097,7 +1097,7 @@
   </g>
   <g id="text_40">
    <!-- Dual Investment vs. selling puts -->
-   <g style="fill: #eef2f4" transform="translate(57.024 48.5352) scale(0.27 -0.27)">
+   <g style="fill: #eef2f4" transform="translate(57.024 80.5352) scale(0.27 -0.27)">
     <use xlink:href="#NotoSansCJKjp-Bold-25" />
     <use xlink:href="#NotoSansCJKjp-Bold-56" transform="translate(71.40625 0)" />
     <use xlink:href="#NotoSansCJKjp-Bold-42" transform="translate(135.109375 0)" />
@@ -1130,39 +1130,6 @@
     <use xlink:href="#NotoSansCJKjp-Bold-56" transform="translate(1407.28125 0)" />
     <use xlink:href="#NotoSansCJKjp-Bold-55" transform="translate(1470.984375 0)" />
     <use xlink:href="#NotoSansCJKjp-Bold-54" transform="translate(1511.875 0)" />
-   </g>
-  </g>
-  <g id="text_41">
-   <!-- BTC/USDT · 66 matched quotes -->
-   <g style="fill: #a8b8c3" transform="translate(57.024 79.3512) scale(0.14 -0.14)">
-    <use xlink:href="#NotoSansCJKjp-Regular-23" />
-    <use xlink:href="#NotoSansCJKjp-Regular-35" transform="translate(63 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-24" transform="translate(120.203125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-10" transform="translate(184 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-36" transform="translate(223.203125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-34" transform="translate(294.203125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-25" transform="translate(353.796875 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-35" transform="translate(419.890625 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-1" transform="translate(479.796875 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-75" transform="translate(502.203125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-1" transform="translate(558.296875 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-f6b7" transform="translate(580.703125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-f6b7" transform="translate(636.203125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-1" transform="translate(691.703125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-4e" transform="translate(714.109375 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-42" transform="translate(806.703125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-55" transform="translate(861.5 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-44" transform="translate(897.703125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-49" transform="translate(948.703125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-46" transform="translate(1009.40625 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-45" transform="translate(1064.8125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-1" transform="translate(1126.8125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-52" transform="translate(1149.21875 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-56" transform="translate(1211.21875 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-50" transform="translate(1271.921875 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-55" transform="translate(1330.609375 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-46" transform="translate(1366.8125 0)" />
-    <use xlink:href="#NotoSansCJKjp-Regular-54" transform="translate(1422.21875 0)" />
    </g>
   </g>
   <g id="text_42">

@@ -26,14 +26,11 @@ Comparisons use the same notional principal, **exclude trading costs and capital
 
 See the [group statistics, sources and calculations](docs/yield-comparison.md), or [all 66 pairs individually](docs/yield-comparison.md#逐笔报价). Detailed notes are in Chinese.
 
-<details>
-<summary>Largest annualized difference before costs: +84.12 percentage points</summary>
+### Largest annualized difference before costs: +84.12 percentage points
 
 ![Maximum sample: 39.19 USDT Dual Investment reward versus 54.00 USDT gross put premium; annualized gap 84.12 percentage points](docs/images/yield-comparison-en.svg)
 
 This is `BTC-261117-64250-P`. See the [calculation](docs/yield-comparison.md#最高样本怎样算) for its terms and amounts.
-
-</details>
 
 ## Features
 
